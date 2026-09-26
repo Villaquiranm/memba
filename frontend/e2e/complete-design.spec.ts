@@ -183,7 +183,7 @@ if (process.env.DESIGN_REVIEW_FEATURES !== 'true') {
                     await page.goto(`/mainnet/${route}`)
                     await expect(page.locator('.k-pro-app')).toBeVisible()
                     if (route === 'apps') {
-                        for (const name of ['Adena', 'GnoSwap', 'Boards', 'Akkadia', 'GnoScan', 'Gno Playground']) {
+                        for (const name of ['Adena', 'GnoSwap', 'Boards', 'Akkadia', 'Bubble Rumble', 'Kourt', 'GnoScan', 'Gno Playground']) {
                             await expect(page.getByRole('link', { name: `Visit ${name} (opens in a new tab)` })).toBeVisible()
                         }
                         await expect(page.getByText('Builder preview', { exact: true })).toBeVisible()
@@ -299,7 +299,7 @@ for (const network of ['mainnet', 'test13']) {
 for (const network of ['mainnet', 'test13']) {
     test(`ecosystem discovery interaction ${network}`, async ({ page }) => {
         await page.goto(`/${network}/apps?availability=mainnet`)
-        await expect(page.getByRole('status').filter({ hasText: 'projects found' })).toHaveText('3 projects found')
+        await expect(page.getByRole('status').filter({ hasText: 'projects found' })).toHaveText('5 projects found')
         await page.getByRole('searchbox', { name: 'Search projects' }).fill('boards2/v0')
         await expect(page.getByRole('link', { name: 'Boards source (opens in a new tab)' })).toHaveAttribute('href', 'https://gno.land/r/gnoland/boards2/v0$source')
         await page.reload()

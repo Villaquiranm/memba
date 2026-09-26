@@ -21,6 +21,7 @@ import { useSigner } from "../sign/signerContext"
 import { nameForRealm, realmForName } from "./daoNames"
 import { useDaoConfig, useDaoMembers, useDaoProposals, useMyVote, useProposal } from "./useOsDao"
 import { voteRequest, voteScope } from "./voteRequest"
+import { JoinMembaDao } from "./JoinMembaDao"
 
 const DAO_TINT = ["#5B7CFA", "#3D5BE0"] as const
 
@@ -191,7 +192,11 @@ function DaoFolderBody({ name, realmPath, section, open }: { name: string; realm
                     <button key={t.id} type="button" role="tab" aria-selected={section === t.id} className="os-tab" onClick={() => open(daoSpec(name, t.id))}>{t.label}</button>
                 ))}
             </div>
-            <div className="os-folder-body" role="tabpanel">{body}</div>
+            <div className="os-folder-body" role="tabpanel">
+                {name === "memba_dao" && section === "overview"
+                    ? <div className="os-stack">{body}<JoinMembaDao open={open} /></div>
+                    : body}
+            </div>
         </div>
     )
 }

@@ -38,7 +38,7 @@ function fail(message: string): never {
 }
 
 function parseAmount(raw: string, allowZero = false): bigint {
-    if (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw)) fail("amount must be a canonical decimal string")
+    if (typeof raw !== "string" || raw.length > 19 || !/^(0|[1-9][0-9]*)$/.test(raw)) fail("amount must be a canonical decimal string")
     const amount = BigInt(raw)
     if ((!allowZero && amount === 0n) || amount > MAX_INT64) fail("amount is outside positive int64 range")
     return amount

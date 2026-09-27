@@ -55,6 +55,7 @@ describe("Launchpad airdrop manifest", () => {
         expect(() => prepareAirdropManifest("T7", "40", [{ ...twoEntries[0], beneficiary: `${A.slice(0, -1)}q` }])).toThrow("beneficiary")
         expect(() => prepareAirdropManifest("T7", "40", [{ ...twoEntries[0], beneficiary: sales }])).toThrow("beneficiary")
         expect(() => prepareAirdropManifest("T7", "40", [{ ...twoEntries[0], amount: "015" }])).toThrow("canonical decimal")
+        expect(() => prepareAirdropManifest("T7", "40", [{ ...twoEntries[0], amount: "9".repeat(100_000) }])).toThrow("canonical decimal")
         expect(() => prepareAirdropManifest("T7", "40", [{ ...twoEntries[0], amount: "9223372036854775808" }])).toThrow("int64")
         expect(() => prepareAirdropManifest("T7", "34", twoEntries)).toThrow("exceed funded")
     })

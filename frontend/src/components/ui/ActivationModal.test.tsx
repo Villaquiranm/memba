@@ -12,6 +12,14 @@ vi.mock("../../lib/grc20", () => ({
 import { ActivationModal } from "./ActivationModal"
 
 describe("ActivationModal", () => {
+    it("offers a balance retry after the RPC fails in the forced flow", () => {
+        const retry = vi.fn()
+        render(<ActivationModal address="g1..." balanceError="RPC unavailable" onRetryBalance={retry} faucetUrl="https://faucet.gno.land" onSuccess={() => {}} />)
+        expect(screen.getByText(/Could not check your GNOT balance/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Retry balance check" }))
+        expect(retry).toHaveBeenCalledOnce()
+    })
+
     it("shows the faucet nudge if balance is 0", () => {
         render(
             <ActivationModal

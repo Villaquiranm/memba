@@ -6,7 +6,10 @@ import "./ActivationModal.css"
 
 interface ActivationModalProps {
     address: string
-    rawUgnot: bigint
+    rawUgnot?: bigint
+    balanceLoading?: boolean
+    balanceError?: string | null
+    onRetryBalance?: () => void
     faucetUrl: string
     onSuccess: () => void
     /** When set, renders a "Not now" escape hatch. Passed ONLY from the
@@ -16,7 +19,7 @@ interface ActivationModalProps {
     onDismiss?: () => void
 }
 
-export function ActivationModal({ address, rawUgnot, faucetUrl, onSuccess, onDismiss }: ActivationModalProps) {
+export function ActivationModal({ address, rawUgnot, balanceLoading, balanceError, onRetryBalance, faucetUrl, onSuccess, onDismiss }: ActivationModalProps) {
     const [activating, setActivating] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
@@ -96,7 +99,12 @@ export function ActivationModal({ address, rawUgnot, faucetUrl, onSuccess, onDis
                 </div>
 
                 <div className="activation-modal-footer">
-                    {rawUgnot > 0 ? (
+                    {rawUgnot === undefined ? (
+                        <div role="status">
+                            <p>{balanceError ? "Could not check your GNOT balance. Try again before activating." : balanceLoading ? "Checking your GNOT balance before activation…" : "Your GNOT balance is unavailable. Check it before activating."}</p>
+                            {onRetryBalance && <button type="button" className="k-button k-button-outline" onClick={onRetryBalance} disabled={balanceLoading}>Retry balance check</button>}
+                        </div>
+                    ) : rawUgnot > 0n ? (
                         <button
                             className="k-button k-button-primary activation-btn"
                             onClick={handleActivate}

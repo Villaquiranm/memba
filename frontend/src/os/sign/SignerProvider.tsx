@@ -125,7 +125,7 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
         const id = ++seq
         setPending((p) => [...p, { id, label }])
         setReview(null)
-        // Without a way to read the result back (older DAOs), "sent" is all we can say.
+        // A wallet return alone is submission, not chain confirmation.
         const ok = req.verify ? await verifyWithRetries(() => req.verify!(choice, hash, res.result), req.verifyAttempts) : null
         if (!sameOwner()) return
         setPending((p) => p.filter((x) => x.id !== id))
@@ -133,7 +133,7 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
         notify(ok === true
             ? { kind: "ok", title: `Confirmed · ${label}`, sub: where }
             : ok === null
-                ? { kind: "ok", title: `Sent · ${label}`, sub: where }
+                ? { kind: "ok", title: `Submitted · ${label}`, sub: where }
                 : { kind: "warn", title: `Submitted · ${label}`, sub: "The chain hasn't shown it yet. Don't send it again." })
         if (ok === false) toast(`Submitted: ${label}. Not visible on chain yet.`)
         settle(req, choice, ok === true ? "confirmed" : "submitted")

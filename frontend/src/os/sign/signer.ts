@@ -61,7 +61,7 @@ export type SignResult =
 
 export type SettledOutcome = "confirmed" | "submitted" | "failed" | "cancelled" | "unknown"
 
-const REJECTED_IN_WALLET = /user (rejected|denied)|rejected by (the )?user/i
+const REJECTED_IN_WALLET = /user (rejected|denied|cancelled|canceled)|rejected by (the )?user|^(transaction )?cancelled by (the )?user$/i
 let signingActive = false
 
 /** Review → wallet → result. `onWallet` fires when the rechecks passed and Adena is about to open. */

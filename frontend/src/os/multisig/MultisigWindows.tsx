@@ -131,7 +131,7 @@ export function MultisigWindow({ address, session, open }: { address: string; se
                     <b>{m.name || "Unnamed multisig"}</b>
                     <div className="os-sub">{m.threshold} of {m.membersCount} signatures · <span className="os-mono">{shortAddr(address)}</span></div>
                 </div>
-                <div className="os-right"><div className="os-big">{balance.rawUgnot > 0n || !balance.loading ? formatUgnot(balance.rawUgnot) : "—"}</div></div>
+                <div className="os-right"><div className="os-big">{balance.rawUgnot === undefined ? balance.balance : formatUgnot(balance.rawUgnot)}</div></div>
             </div>
             <div className="os-chipset" aria-label="Members">{m.usersAddresses.map((a) => <span key={a} className="os-pill os-mono" title={a}>{a === me ? "You" : shortAddr(a)}</span>)}</div>
             <div className="os-row">

@@ -141,7 +141,7 @@ function SendForm({ session, close }: { session: OsSession; close: () => void })
 
     const lock = readSendLock(GNO_CHAIN_ID, from)
     if (lock) {
-        const txUrl = GNO_CHAIN_ID === "gnoland-1" ? mainnetSubmissionTxUrl(lock.hash) : null
+        const txUrl = mainnetSubmissionTxUrl(lock.hash, GNO_CHAIN_ID)
         const checkStatus = async () => {
             setCheckingStatus(true)
             try {

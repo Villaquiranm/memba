@@ -80,13 +80,40 @@ func TestLaunchpadHoldingsLatestOwnerAndPagination(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"number":"1"`) {
 		t.Fatalf("token number must remain a decimal string for JS precision: %s", w.Body.String())
 	}
-	q.Set("cursor", page.NextCursor)
+	firstCursor := page.NextCursor
+	// An advancing index must not change the membership of an in-progress page.
+	if _, err := database.Exec(`INSERT INTO launchpad_nft_indexed_blocks (chain_id, height, hash) VALUES ('gnoland-1', 21, 'H21')`); err != nil {
+		t.Fatal(err)
+	}
+	addHoldingEvent(t, database, "gnoland-1", 21, 2, "C9", 1, "minted", "", ownerA)
+	q.Set("cursor", firstCursor)
 	status, page = holdingsRequest(t, h, q)
-	if status != http.StatusOK || len(page.Items) != 1 || page.Items[0].Collection != "C3" || page.NextCursor != "" {
+	if status != http.StatusOK || page.IndexedHeight != 20 || len(page.Items) != 1 || page.Items[0].Collection != "C3" || page.NextCursor != "" {
 		t.Fatalf("second page: status=%d body=%+v", status, page)
+	}
+	q.Del("cursor")
+	q.Set("limit", "50")
+	status, page = holdingsRequest(t, h, q)
+	if status != http.StatusOK || page.IndexedHeight != 21 || len(page.Items) != 3 || page.Items[2].Collection != "C9" {
+		t.Fatalf("refreshed snapshot: status=%d body=%+v", status, page)
+	}
+	q.Set("cursor", firstCursor)
+	q.Set("owner", ownerB)
+	status, _ = holdingsRequest(t, h, q)
+	if status != http.StatusBadRequest {
+		t.Fatalf("cursor must be bound to wallet, got %d", status)
+	}
+	q.Set("owner", ownerA)
+	if _, err := database.Exec(`UPDATE launchpad_nft_indexed_blocks SET hash='REORG20' WHERE chain_id='gnoland-1' AND height=20`); err != nil {
+		t.Fatal(err)
+	}
+	status, _ = holdingsRequest(t, h, q)
+	if status != http.StatusConflict {
+		t.Fatalf("changed snapshot hash must reject later page, got %d", status)
 	}
 	q.Set("owner", ownerB)
 	q.Del("cursor")
+	q.Set("limit", "1")
 	status, page = holdingsRequest(t, h, q)
 	if status != http.StatusOK || len(page.Items) != 1 || page.Items[0].Collection != "C1" || page.Items[0].Number != 2 {
 		t.Fatalf("transferred owner: status=%d body=%+v", status, page)

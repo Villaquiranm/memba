@@ -22,7 +22,7 @@ export async function fetchLaunchpadHoldings(owner: string, chainId: string, cur
     const response = await fetch(`${API_BASE_URL || ""}/api/nft/launchpad-holdings?${query}`, { signal })
     if (!response.ok) {
         if (response.status === 503) throw new Error("The holdings index is not available yet.")
-        if (response.status === 409) throw new Error("The holdings index serves a different chain.")
+        if (response.status === 409) throw new Error("The holdings snapshot or network changed. Refresh to try again.")
         throw new Error("Could not load holdings.")
     }
     const raw: unknown = await response.json()
@@ -30,7 +30,7 @@ export async function fetchLaunchpadHoldings(owner: string, chainId: string, cur
     const page = raw as Record<string, unknown>
     if (page.chainId !== chainId || !Number.isSafeInteger(page.indexedHeight) || (page.indexedHeight as number) < 1 ||
         !Array.isArray(page.items) || page.items.length > 20 ||
-        (page.nextCursor !== undefined && (typeof page.nextCursor !== "string" || page.nextCursor.length > 128))) {
+        (page.nextCursor !== undefined && (typeof page.nextCursor !== "string" || page.nextCursor.length > 1024))) {
         throw new Error("Invalid holdings response.")
     }
     const items = page.items.map((item): LaunchpadHolding => {

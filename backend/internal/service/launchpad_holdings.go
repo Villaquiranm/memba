@@ -27,6 +27,16 @@ type launchpadHoldingsResponse struct {
 	NextCursor    string             `json:"nextCursor,omitempty"`
 }
 
+type launchpadHoldingsCursor struct {
+	Version    int    `json:"v"`
+	ChainID    string `json:"chain"`
+	Owner      string `json:"owner"`
+	Height     int64  `json:"height"`
+	BlockHash  string `json:"hash"`
+	Collection string `json:"collection"`
+	Number     int64  `json:"number"`
+}
+
 // HandleLaunchpadHoldings reads only the new chain-scoped event ledger. It
 // never combines rows from the legacy NFT portfolio. A client must specify
 // the chain it is displaying, and the endpoint is unavailable until indexing
@@ -63,9 +73,13 @@ func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool, i
 			}
 			limit = parsed
 		}
-		afterCollection, afterNumber, err := decodeLaunchpadHoldingsCursor(q.Get("cursor"))
+		cursor, err := decodeLaunchpadHoldingsCursor(q.Get("cursor"))
 		if err != nil {
 			writeHoldingsError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		if cursor != nil && (cursor.ChainID != expectedChainID || cursor.Owner != owner) {
+			writeHoldingsError(w, http.StatusBadRequest, "cursor belongs to another wallet or chain")
 			return
 		}
 
@@ -75,15 +89,38 @@ func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool, i
 			return
 		}
 		defer func() { _ = tx.Rollback() }()
-		var indexedHeight sql.NullInt64
-		if err := tx.QueryRowContext(r.Context(), `SELECT MAX(height) FROM launchpad_nft_indexed_blocks
-			WHERE chain_id=?`, expectedChainID).Scan(&indexedHeight); err != nil {
+		var indexedHeight int64
+		var blockHash string
+		err = tx.QueryRowContext(r.Context(), `SELECT height, hash FROM launchpad_nft_indexed_blocks
+			WHERE chain_id=? ORDER BY height DESC LIMIT 1`, expectedChainID).Scan(&indexedHeight, &blockHash)
+		if err == sql.ErrNoRows {
+			writeHoldingsError(w, http.StatusServiceUnavailable, "holdings index not ready")
+			return
+		}
+		if err != nil {
 			serveHoldingsError(w, err)
 			return
 		}
-		if !indexedHeight.Valid {
-			writeHoldingsError(w, http.StatusServiceUnavailable, "holdings index not ready")
-			return
+		if cursor != nil {
+			if cursor.Height > indexedHeight {
+				writeHoldingsError(w, http.StatusConflict, "holdings snapshot changed")
+				return
+			}
+			indexedHeight = cursor.Height
+			err = tx.QueryRowContext(r.Context(), `SELECT hash FROM launchpad_nft_indexed_blocks
+				WHERE chain_id=? AND height=?`, expectedChainID, indexedHeight).Scan(&blockHash)
+			if err == sql.ErrNoRows || (err == nil && blockHash != cursor.BlockHash) {
+				writeHoldingsError(w, http.StatusConflict, "holdings snapshot changed")
+				return
+			}
+			if err != nil {
+				serveHoldingsError(w, err)
+				return
+			}
+		}
+		afterCollection, afterNumber := "", int64(0)
+		if cursor != nil {
+			afterCollection, afterNumber = cursor.Collection, cursor.Number
 		}
 		rows, err := tx.QueryContext(r.Context(), `SELECT e.collection_id, e.token_number, e.to_owner, e.event_block
 			FROM launchpad_nft_ownership_events AS e
@@ -99,8 +136,8 @@ func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool, i
 			          (e.event_block, e.event_tx_index, e.event_index)
 			  )
 			ORDER BY e.collection_id, e.token_number LIMIT ?`,
-			expectedChainID, owner, indexedHeight.Int64,
-			afterCollection, afterCollection, afterCollection, afterNumber, indexedHeight.Int64, limit+1)
+			expectedChainID, owner, indexedHeight,
+			afterCollection, afterCollection, afterCollection, afterNumber, indexedHeight, limit+1)
 		if err != nil {
 			serveHoldingsError(w, err)
 			return
@@ -124,11 +161,14 @@ func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool, i
 			serveHoldingsError(w, err)
 			return
 		}
-		response := launchpadHoldingsResponse{ChainID: expectedChainID, IndexedHeight: indexedHeight.Int64, Items: items}
+		response := launchpadHoldingsResponse{ChainID: expectedChainID, IndexedHeight: indexedHeight, Items: items}
 		if len(items) > limit {
 			response.Items = items[:limit]
 			last := response.Items[len(response.Items)-1]
-			response.NextCursor = encodeLaunchpadHoldingsCursor(last.Collection, last.Number)
+			response.NextCursor = encodeLaunchpadHoldingsCursor(launchpadHoldingsCursor{
+				Version: 1, ChainID: expectedChainID, Owner: owner, Height: indexedHeight,
+				BlockHash: blockHash, Collection: last.Collection, Number: last.Number,
+			})
 		}
 		if err := tx.Commit(); err != nil {
 			serveHoldingsError(w, err)
@@ -148,32 +188,34 @@ func writeHoldingsError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-func encodeLaunchpadHoldingsCursor(collection string, number int64) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(collection + ":" + strconv.FormatInt(number, 10)))
+func encodeLaunchpadHoldingsCursor(cursor launchpadHoldingsCursor) string {
+	encoded, _ := json.Marshal(cursor)
+	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
-func decodeLaunchpadHoldingsCursor(raw string) (string, int64, error) {
+func decodeLaunchpadHoldingsCursor(raw string) (*launchpadHoldingsCursor, error) {
 	if raw == "" {
-		return "", 0, nil
+		return nil, nil
 	}
-	if len(raw) > 128 {
-		return "", 0, fmt.Errorf("cursor too long")
+	if len(raw) > 1024 {
+		return nil, fmt.Errorf("cursor too long")
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
-	collection, numberRaw, ok := strings.Cut(string(decoded), ":")
-	if !ok || len(collection) < 2 || len(collection) > 32 || collection[0] != 'C' {
-		return "", 0, fmt.Errorf("invalid collection cursor")
+	var cursor launchpadHoldingsCursor
+	if err := json.Unmarshal(decoded, &cursor); err != nil {
+		return nil, err
 	}
-	collectionNumber, err := strconv.ParseInt(collection[1:], 10, 64)
-	if err != nil || collectionNumber <= 0 || "C"+strconv.FormatInt(collectionNumber, 10) != collection {
-		return "", 0, fmt.Errorf("invalid collection cursor")
+	if cursor.Version != 1 || cursor.ChainID == "" || cursor.Owner == "" ||
+		cursor.Height < 1 || cursor.BlockHash == "" || len(cursor.BlockHash) > 128 ||
+		len(cursor.Collection) < 2 || len(cursor.Collection) > 32 || cursor.Collection[0] != 'C' {
+		return nil, fmt.Errorf("invalid holdings cursor")
 	}
-	number, err := strconv.ParseInt(numberRaw, 10, 64)
-	if err != nil || number <= 0 || strconv.FormatInt(number, 10) != numberRaw {
-		return "", 0, fmt.Errorf("invalid token cursor")
+	collectionNumber, err := strconv.ParseInt(cursor.Collection[1:], 10, 64)
+	if err != nil || collectionNumber <= 0 || "C"+strconv.FormatInt(collectionNumber, 10) != cursor.Collection || cursor.Number <= 0 {
+		return nil, fmt.Errorf("invalid holdings cursor")
 	}
-	return collection, number, nil
+	return &cursor, nil
 }

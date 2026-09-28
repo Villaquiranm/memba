@@ -13,6 +13,7 @@ vi.mock("../../../lib/launchpadNftCapabilities", () => ({ getLaunchpadNftCapabil
 vi.mock("./create", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native creator ready" : "native creator gated"}</p> }))
 vi.mock("./studio", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native studio ready" : "native studio gated"}</p> }))
 vi.mock("./mint", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native mint ready" : "native mint gated"}</p> }))
+vi.mock("./manage", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native token management ready" : "native token management gated"}</p> }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
@@ -147,6 +148,13 @@ describe("NFT window", () => {
         availability.drops = true; availability.config = true; availability.fees = true
         view.rerender(<NftWindow {...base} section="mint" session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
         expect(screen.getByText("native mint ready")).toBeInTheDocument()
+    })
+
+    it("routes holder actions with the NFT ledger even if the drop realms are absent", () => {
+        availability.enabled = true
+        availability.ledger = true
+        render(<NftWindow {...base} section="manage" session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
+        expect(screen.getByText("native token management ready")).toBeInTheDocument()
     })
 
     it("renders the fallback for every section other than the home, on any network", () => {

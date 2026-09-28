@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: direct NFT holder and issuer controls (2026-09-28)
+
+- Add a gated native token-management view that reads the actual owner and status. Open holders can review a direct transfer, every active holder can review a permanent burn, and a Soulbound creator can review revocation only when the collection fixed that right at creation. Every action rechecks authority and token state, verifies the result, and locks uncertain outcomes for chain review.
+
 ### Memba OS: committed NFT metadata reveal and freeze (2026-09-28)
 
 - Add separate creator wallet reviews for a one-time IPFS base URI reveal and a permanent metadata freeze. Studio hashes the entered URI and checks it against the on-chain commitment, rechecks creator authority and metadata state before signing, verifies the resulting collection, and holds uncertain outcomes for chain review.

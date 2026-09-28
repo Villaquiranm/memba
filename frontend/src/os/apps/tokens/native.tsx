@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { GNO_CHAIN_ID, GRC20_FACTORY_PATH, NETWORKS, isRealmValidOn } from "../../../lib/config"
 import { TokenLaunchpadClient, TOKEN_LAUNCHPAD_PATH } from "../../../lib/tokenLaunchpadClient"
 import { TokenLaunchpadSalesClient, TOKEN_LAUNCHPAD_SALES_PATH } from "../../../lib/tokenLaunchpadSalesClient"
+import { TokenLaunchpadPoolClient, TOKEN_LAUNCHPAD_POOL_PATH } from "../../../lib/tokenLaunchpadPoolClient"
 import { Pill } from "../../kit"
 import type { NativeViewProps } from "../../native/types"
 import "./native.css"
@@ -21,7 +22,7 @@ export default function TokensWindow({ section, session, fallback }: NativeViewP
     const factoryAvailable = isRealmValidOn(network, GRC20_FACTORY_PATH)
     if (section !== null && factoryAvailable) return <>{fallback}</>
     if (isRealmValidOn(network, TOKEN_LAUNCHPAD_PATH)) {
-        return <LaunchpadTokens network={network} address={session.status === "member" ? session.address : null} salesAvailable={isRealmValidOn(network, TOKEN_LAUNCHPAD_SALES_PATH)} legacyFallback={factoryAvailable ? fallback : null} />
+        return <LaunchpadTokens network={network} address={session.status === "member" ? session.address : null} salesAvailable={isRealmValidOn(network, TOKEN_LAUNCHPAD_SALES_PATH)} poolAvailable={isRealmValidOn(network, TOKEN_LAUNCHPAD_POOL_PATH)} legacyFallback={factoryAvailable ? fallback : null} />
     }
     if (factoryAvailable) return <>{fallback}</>
     const chainId = NETWORKS[network]?.chainId ?? GNO_CHAIN_ID
@@ -36,13 +37,14 @@ export default function TokensWindow({ section, session, fallback }: NativeViewP
     )
 }
 
-function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: { network: string; address: string | null; salesAvailable: boolean; legacyFallback: ReactNode }) {
+function LaunchpadTokens({ network, address, salesAvailable, poolAvailable, legacyFallback }: { network: string; address: string | null; salesAvailable: boolean; poolAvailable: boolean; legacyFallback: ReactNode }) {
     const [page, setPage] = useState(0)
     const [selected, setSelected] = useState<string | null>(null)
     const [vestingIndex, setVestingIndex] = useState(0)
     const [showLegacy, setShowLegacy] = useState(false)
     const tokenClient = new TokenLaunchpadClient(network)
     const salesClient = new TokenLaunchpadSalesClient(network)
+    const poolClient = new TokenLaunchpadPoolClient(network)
     const tokens = useQuery({
         queryKey: ["token-launchpad", network, "page", page],
         queryFn: () => tokenClient.listPage(page, 20),
@@ -60,6 +62,12 @@ function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: {
         enabled: salesAvailable && !!selected && !!address && !!launch.data?.fairSale,
         retry: false,
     })
+    const pool = useQuery({
+        queryKey: ["token-launchpad", network, "pool", selected],
+        queryFn: () => poolClient.pool(selected!),
+        enabled: poolAvailable && !!selected && launch.data?.curve?.status === "graduated",
+        retry: false,
+    })
     const balance = useQuery({
         queryKey: ["token-launchpad", network, "balance", selected, address],
         queryFn: () => tokenClient.balanceOf(selected!, address!),
@@ -73,6 +81,22 @@ function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: {
         retry: false,
     })
     const selectedToken = tokens.data?.find(token => token.id === selected)
+    const salesToken = launch.data?.token
+    const poolMatches = !!pool.data && !!selectedToken && !!salesToken && !!launch.data?.curve &&
+        selectedToken.mode === "curve" && selectedToken.id === salesToken.id &&
+        selectedToken.registryKey === salesToken.registryKey &&
+        selectedToken.grc20Id === salesToken.grc20Id &&
+        selectedToken.creator === salesToken.creator &&
+        selectedToken.ticker === salesToken.ticker &&
+        selectedToken.decimals === salesToken.decimals &&
+        selectedToken.currencyKey === salesToken.currencyKey &&
+        selectedToken.configVersion === salesToken.configVersion &&
+        pool.data.id === selectedToken.id && pool.data.creator === selectedToken.creator &&
+        pool.data.creator === launch.data.curve.creator &&
+        pool.data.quoteCurrency === selectedToken.currencyKey &&
+        pool.data.quoteCurrency === launch.data.curve.quoteCurrency &&
+        pool.data.configVersion === selectedToken.configVersion &&
+        pool.data.configVersion === launch.data.curve.configVersion
     const choose = (id: string) => { setSelected(id); setVestingIndex(0) }
 
     return <div className="os-stack os-token-launchpad">
@@ -119,6 +143,14 @@ function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: {
                 {launch.data.curve && <div>
                     <h4>Bonding curve</h4>
                     <p>Status: {launch.data.curve.status}. Raised {launch.data.curve.raised.toString()} of {launch.data.curve.graduationTarget.toString()} base units of {launch.data.curve.quoteCurrency}; {tokenAmount(launch.data.curve.sold, selectedToken.decimals)} {selectedToken.ticker} sold.</p>
+                    {launch.data.curve.status === "graduated" && <div>
+                        <h4>Locked pool</h4>
+                        {!poolAvailable && <p className="os-sub">Pool details are unavailable on this network.</p>}
+                        {poolAvailable && pool.isPending && <p role="status">Loading pool reserves…</p>}
+                        {poolAvailable && pool.isError && <p className="os-note os-err" role="alert">Pool reserves could not be loaded. <button type="button" className="os-btn os-quiet" onClick={() => void pool.refetch()}>Retry pool</button></p>}
+                        {pool.data && !poolMatches && <p className="os-note os-err" role="alert">Pool identity does not match this launch.</p>}
+                        {poolMatches && pool.data && <p>Recorded reserves: {tokenAmount(pool.data.tokenReserve, selectedToken.decimals)} {selectedToken.ticker} and {pool.data.quoteReserve.toString()} base units of {pool.data.quoteCurrency}. These assets have no withdrawal claim.</p>}
+                    </div>}
                 </div>}
                 {launch.data.fairSale && <div>
                     <h4>Fair sale</h4>

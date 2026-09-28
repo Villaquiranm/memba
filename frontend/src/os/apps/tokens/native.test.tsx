@@ -3,12 +3,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import TokensWindow from "./native"
 
-const availability = vi.hoisted(() => ({ factory: false, launchpad: false, sales: false }))
+const availability = vi.hoisted(() => ({ factory: false, launchpad: false, sales: false, pool: false }))
 const listPage = vi.hoisted(() => vi.fn())
 const balanceOf = vi.hoisted(() => vi.fn())
 const launch = vi.hoisted(() => vi.fn())
 const fairBuyer = vi.hoisted(() => vi.fn())
 const vesting = vi.hoisted(() => vi.fn())
+const pool = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/tokenLaunchpadClient", () => ({
     TOKEN_LAUNCHPAD_PATH: "gno.land/r/samcrew/launchpad/tokens/v1",
     TokenLaunchpadClient: class { listPage = listPage; balanceOf = balanceOf },
@@ -17,25 +18,33 @@ vi.mock("../../../lib/tokenLaunchpadSalesClient", () => ({
     TOKEN_LAUNCHPAD_SALES_PATH: "gno.land/r/samcrew/launchpad/sales/v1",
     TokenLaunchpadSalesClient: class { launch = launch; fairBuyer = fairBuyer; vesting = vesting },
 }))
+vi.mock("../../../lib/tokenLaunchpadPoolClient", () => ({
+    TOKEN_LAUNCHPAD_POOL_PATH: "gno.land/r/samcrew/launchpad/pool/v1",
+    TokenLaunchpadPoolClient: class { pool = pool },
+}))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
-    isRealmValidOn: (_network: string, path: string) => path === "gno.land/r/samcrew/launchpad/tokens/v1" ? availability.launchpad : path === "gno.land/r/samcrew/launchpad/sales/v1" ? availability.sales : path === "gno.land/r/samcrew/tokenfactory_v2" ? availability.factory : false,
+    isRealmValidOn: (_network: string, path: string) => path === "gno.land/r/samcrew/launchpad/tokens/v1" ? availability.launchpad : path === "gno.land/r/samcrew/launchpad/sales/v1" ? availability.sales : path === "gno.land/r/samcrew/launchpad/pool/v1" ? availability.pool : path === "gno.land/r/samcrew/tokenfactory_v2" ? availability.factory : false,
 }))
 
 const session = (key: string, address?: string) => ({ network: { key }, status: address ? "member" : "guest", address }) as never
 const fallback = <p>classic token page</p>
 const props = (key: string, address?: string) => ({ session: session(key, address), fallback, section: null }) as never
+const curveToken = () => ({ id: "T1", name: "Example", ticker: "EX", mode: "curve", creator: "g1creator", totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot", configVersion: 3n, registryKey: "gno.land/r/samcrew/launchpad/tokens/v1.T1", grc20Id: "gno.land/r/samcrew/launchpad/tokens/v1.T1.0000001" })
+const graduated = () => ({ token: curveToken(), curve: { status: "graduated", creator: "g1creator", quoteCurrency: "ugnot", configVersion: 3n, raised: 1000n, graduationTarget: 1000n, sold: 500000n }, fairSale: null, airdrop: null, vestingCount: 0 })
 
 describe("Tokens window", () => {
     beforeEach(() => {
         availability.factory = false
         availability.launchpad = false
         availability.sales = false
+        availability.pool = false
         listPage.mockReset()
         balanceOf.mockReset()
         launch.mockReset()
         fairBuyer.mockReset()
         vesting.mockReset()
+        pool.mockReset()
     })
 
     it("explains the missing mainnet factory without exposing the classic token actions", () => {
@@ -80,6 +89,63 @@ describe("Tokens window", () => {
         render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
         expect(await screen.findByText("No tokens on this page.")).toBeInTheDocument()
         expect(launch).not.toHaveBeenCalled()
+    })
+
+    it("shows exact locked-pool reserves only when its realm and launch identity match", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        availability.pool = true
+        listPage.mockResolvedValue([curveToken()])
+        launch.mockResolvedValue(graduated())
+        pool.mockResolvedValue({ id: "T1", creator: "g1creator", quoteCurrency: "ugnot", configVersion: 3n, tokenReserve: 250000n, quoteReserve: 1002n })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByText(/Recorded reserves: 0.25 EX and 1002 base units of ugnot/)).toBeInTheDocument()
+        expect(screen.getByText(/These assets have no withdrawal claim/)).toBeInTheDocument()
+        expect(pool).toHaveBeenCalledWith("T1")
+    })
+
+    it("does not present reserves from a mismatched pool identity", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        availability.pool = true
+        listPage.mockResolvedValue([curveToken()])
+        launch.mockResolvedValue(graduated())
+        pool.mockResolvedValue({ id: "T1", creator: "g1other", quoteCurrency: "ugnot", configVersion: 3n, tokenReserve: 250000n, quoteReserve: 1002n })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByRole("alert")).toHaveTextContent("Pool identity does not match")
+        expect(screen.queryByText(/Recorded reserves:/)).toBeNull()
+    })
+
+    it("rejects pool reserves when the token list disagrees with the sale and pool", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        availability.pool = true
+        listPage.mockResolvedValue([{ ...curveToken(), currencyKey: "other", configVersion: 4n }])
+        launch.mockResolvedValue(graduated())
+        pool.mockResolvedValue({ id: "T1", creator: "g1creator", quoteCurrency: "ugnot", configVersion: 3n, tokenReserve: 250000n, quoteReserve: 1002n })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByRole("alert")).toHaveTextContent("Pool identity does not match")
+        expect(screen.queryByText(/Recorded reserves:/)).toBeNull()
+    })
+
+    it("refuses to format pool reserves with stale token decimals", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        availability.pool = true
+        listPage.mockResolvedValue([{ ...curveToken(), decimals: 12 }])
+        launch.mockResolvedValue(graduated())
+        pool.mockResolvedValue({ id: "T1", creator: "g1creator", quoteCurrency: "ugnot", configVersion: 3n, tokenReserve: 250000n, quoteReserve: 1002n })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByRole("alert")).toHaveTextContent("Pool identity does not match")
+        expect(screen.queryByText(/Recorded reserves:/)).toBeNull()
     })
 
     it("retains the existing factory when both token paths are enabled", async () => {

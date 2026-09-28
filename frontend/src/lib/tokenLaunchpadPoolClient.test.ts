@@ -101,6 +101,10 @@ describe("Token Launchpad pool reader", () => {
         await expect(client.quoteAddition("T1", 1n)).rejects.toMatchObject({ code: "invalid_response" })
         await expect(client.quoteAddition("T1", 0n)).rejects.toMatchObject({ code: "invalid_response" })
         await expect(client.quoteAddition("T1", 9223372036854775808n)).rejects.toMatchObject({ code: "invalid_response" })
+        for (const bad of [NaN, 1.5, { valueOf: () => 1n, toString: () => '1);panic("bad")//' }]) {
+            await expect(client.quoteAddition("T1", bad as unknown as bigint)).rejects.toMatchObject({ code: "invalid_response" })
+        }
+        await expect(client.quoteAddition({ toString: () => "T1" } as unknown as string, 1n)).rejects.toMatchObject({ code: "invalid_response" })
         expect(queryEval).toHaveBeenCalledTimes(3)
     })
 

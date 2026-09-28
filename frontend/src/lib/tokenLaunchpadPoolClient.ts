@@ -98,7 +98,7 @@ export class TokenLaunchpadPoolClient {
     }
 
     async pool(id: string): Promise<LaunchpadPoolView> {
-        if (!/^T[1-9][0-9]{0,9}$/.test(id)) invalid("invalid token id")
+        if (typeof id !== "string" || !/^T[1-9][0-9]{0,9}$/.test(id)) invalid("invalid token id")
         this.assertNetwork()
         let raw: string | null
         try {
@@ -118,7 +118,8 @@ export class TokenLaunchpadPoolClient {
     }
 
     async quoteAddition(id: string, tokenIn: bigint): Promise<LaunchpadPoolAdditionQuote> {
-        if (!/^T[1-9][0-9]{0,9}$/.test(id) || tokenIn <= 0n || tokenIn > MAX_INT64) invalid("invalid addition request")
+        if (typeof id !== "string" || !/^T[1-9][0-9]{0,9}$/.test(id) ||
+            typeof tokenIn !== "bigint" || tokenIn <= 0n || tokenIn > MAX_INT64) invalid("invalid addition request")
         this.assertNetwork()
         let raw: string | null
         try {

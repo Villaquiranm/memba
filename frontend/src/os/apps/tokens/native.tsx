@@ -28,8 +28,9 @@ function saleIdentityMatches(token: LaunchpadToken | undefined, sale: LaunchpadS
         token.currencyKey === embedded.currencyKey && token.configVersion === embedded.configVersion &&
         (!sale.curve || (token.mode === "curve" && sale.curve.creator === token.creator &&
             sale.curve.quoteCurrency === token.currencyKey && sale.curve.configVersion === token.configVersion)) &&
-        (!sale.fairSale || (sale.fairSale.creator === token.creator &&
-            sale.fairSale.quoteCurrency === token.currencyKey && sale.fairSale.configVersion === token.configVersion))
+        (!sale.fairSale || (sale.fairSale.creator === token.creator && sale.fairSale.configVersion > 0n &&
+            (token.mode !== "fairsale" || (sale.fairSale.quoteCurrency === token.currencyKey &&
+                sale.fairSale.configVersion === token.configVersion))))
 }
 
 export default function TokensWindow({ section, session, fallback }: NativeViewProps) {

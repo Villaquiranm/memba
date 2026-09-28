@@ -85,6 +85,23 @@ describe("Tokens window", () => {
         expect(launch).toHaveBeenCalledWith("T1")
     })
 
+    it("keeps a later fair sale on an existing direct token visible across currency and version changes", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        listPage.mockResolvedValue([directToken()])
+        launch.mockResolvedValue({ ...fairLaunch(), fairSale: {
+            ...fairLaunch().fairSale, quoteCurrency: "gno.land/r/gnoland/wugnot.wugnot", configVersion: 4n,
+        } })
+        fairBuyer.mockResolvedValue({ claimableTokens: 1000000n, claimableRefund: 2n, claimed: false })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet", "first")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByText(/Your claim: 1 EX/)).toBeInTheDocument()
+        expect(screen.getByText(/base units of gno.land\/r\/gnoland\/wugnot.wugnot per lot/)).toBeInTheDocument()
+        expect(screen.queryByText("Sale identity does not match this token.")).toBeNull()
+        expect(fairBuyer).toHaveBeenCalledWith("T1", "first")
+    })
+
     it("shows tokens without claiming sale availability when only the token realm is enabled", async () => {
         availability.launchpad = true
         listPage.mockResolvedValue([])

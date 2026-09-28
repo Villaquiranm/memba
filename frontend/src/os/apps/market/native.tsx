@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import type { NativeViewProps } from "../../native/types"
 import { GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
 import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
-import { LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
 import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
 import { Empty, ErrorState, Loading, Pill } from "../../kit"
 import { specForTarget } from "../../shell/windows"
@@ -25,7 +25,7 @@ export default function MarketWindow({ section, session, open, fallback }: Nativ
 
     if (section === "operations") {
         return curationAvailable
-            ? <MarketOperations key={network} rpcUrl={rpcUrl} />
+            ? <MarketOperations key={network} rpcUrl={rpcUrl} daoAvailable={isRealmValidOn(network, LAUNCHPAD_CURATION_DAO_PATH)} />
             : <div className="os-stack"><div className="os-note os-warn" role="note">Market Operations is awaiting the governed curation realm on this network.</div><button type="button" className="os-btn os-quiet" onClick={openServices}>Open services</button></div>
     }
 

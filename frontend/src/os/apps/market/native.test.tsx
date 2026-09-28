@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { LAUNCHPAD_CURATION_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
 import MarketWindow from "./native"
 
-const availability = vi.hoisted(() => ({ enabled: false, ledger: false, market: false, curation: false }))
+const availability = vi.hoisted(() => ({ enabled: false, ledger: false, market: false, curation: false, curationDao: false }))
 const list = vi.hoisted(() => vi.fn())
 const getQuote = vi.hoisted(() => vi.fn())
 const listOffers = vi.hoisted(() => vi.fn())
@@ -12,14 +12,16 @@ const getCurationState = vi.hoisted(() => vi.fn())
 const listCurationManagers = vi.hoisted(() => vi.fn())
 const listCurationApplications = vi.hoisted(() => vi.fn())
 const getCollectionCuration = vi.hoisted(() => vi.fn())
+const readCurationDaoSnapshot = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
-    isRealmValidOn: (_network: string, path: string) => path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === LAUNCHPAD_MARKET_PATH ? availability.market : path === LAUNCHPAD_CURATION_PATH ? availability.curation : false,
+    isRealmValidOn: (_network: string, path: string) => path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === LAUNCHPAD_MARKET_PATH ? availability.market : path === LAUNCHPAD_CURATION_PATH ? availability.curation : path === LAUNCHPAD_CURATION_DAO_PATH ? availability.curationDao : false,
 }))
 vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: list, getLaunchpadMarketQuote: getQuote,
     listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
+vi.mock("../../../lib/launchpadCurationDao", () => ({ readCurationDaoSnapshot }))
 
 const item = { id: "L1", collection: "C4", number: 1n, seller: "g1seller", price: 10000n, currency: "ugnot",
     expiresAt: 1000n, createdAt: 500n, configVersion: 2n, protocolFeeBPS: 50n, royaltyBPS: 500n, status: "active" }
@@ -41,6 +43,7 @@ describe("native Market window", () => {
         availability.ledger = false
         availability.market = false
         availability.curation = false
+        availability.curationDao = false
         list.mockReset()
         getQuote.mockReset()
         listOffers.mockReset()
@@ -49,6 +52,7 @@ describe("native Market window", () => {
         listCurationManagers.mockReset()
         listCurationApplications.mockReset()
         getCollectionCuration.mockReset()
+        readCurationDaoSnapshot.mockReset()
     })
 
     it("keeps existing Market sections in their current lane", () => {
@@ -126,6 +130,7 @@ describe("native Market window", () => {
         render(<MarketWindow {...base} section="operations" open={vi.fn()} />)
         expect(screen.getByRole("note")).toHaveTextContent("awaiting the governed curation realm")
         expect(getCurationState).not.toHaveBeenCalled()
+        expect(readCurationDaoSnapshot).not.toHaveBeenCalled()
     })
 
     it("shows DAO seats, applications and a public curation receipt", async () => {
@@ -145,6 +150,24 @@ describe("native Market window", () => {
         await waitFor(() => expect(screen.getByText(/DAO verification:/)).toBeInTheDocument())
         expect(screen.getByText(/Verified/)).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: /Approve|Reject|Verify/ })).toBeNull()
+        expect(readCurationDaoSnapshot).not.toHaveBeenCalled()
+    })
+
+    it("shows versioned DAO decisions only when its realm is allowlisted", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.curation = true
+        availability.curationDao = true
+        getCurationState.mockResolvedValue({ admin: "g1dao", pendingAdmin: "", governed: true, activeManagers: 0 })
+        listCurationManagers.mockResolvedValue([])
+        listCurationApplications.mockResolvedValue([])
+        readCurationDaoSnapshot.mockResolvedValue({ successor: "g1successor", total: "1", nextBefore: null, proposals: [{ id: "1", proposer: "g1proposer", status: "EXECUTED", votingDeadline: "2026-09-28T00:00:00Z", action: { operation: "appoint-manager", collection: "", manager: "g1manager", reasonHash: "", verified: false } }] })
+        render(<MarketWindow {...base} section="operations" open={vi.fn()} />)
+        expect(await screen.findByRole("heading", { name: "DAO curation proposals" })).toBeInTheDocument()
+        expect(await screen.findByText("Proposal 1")).toBeInTheDocument()
+        expect(screen.getByText("Appoint manager")).toBeInTheDocument()
+        expect(readCurationDaoSnapshot).toHaveBeenCalledWith(expect.any(String), "0")
+        expect(screen.queryByRole("button", { name: /Vote|Execute|Appoint manager/ })).toBeNull()
     })
 
     it("reports Operations read failures without inventing an empty review queue", async () => {

@@ -33,6 +33,9 @@ export const LAUNCHPAD_MARKET_PATH = "gno.land/r/samcrew/launchpad/market/v1"
 /** Governed editorial receipts and manager seats. Unpublished until DAO handoff. */
 export const LAUNCHPAD_CURATION_PATH = "gno.land/r/samcrew/launchpad/curation/v1"
 
+/** Separate weighted curation candidate. The published ten-policy DAO remains at memba_dao. */
+export const LAUNCHPAD_CURATION_DAO_PATH = "gno.land/r/samcrew/memba_dao/v2"
+
 /**
  * Bech32 address of the marketplace realm.
  * Used as `operator` in SetApprovalForAll / Approve calls on the collection.

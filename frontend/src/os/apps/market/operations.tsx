@@ -1,11 +1,12 @@
 /** Public Market Operations trail. Manager actions need the DAO adapter and wallet review. */
 import { useEffect, useState } from "react"
 import { getCollectionCuration, getCurationState, listCurationApplications, listCurationManagers, type CurationApplication, type CurationReceipt, type CurationSeat, type CurationState } from "../../../lib/launchpadCuration"
+import { readCurationDaoSnapshot, type CurationDaoProposal } from "../../../lib/launchpadCurationDao"
 import { Empty, ErrorState, Loading, Pill } from "../../kit"
 
 const PAGE_SIZE = 20
 
-export default function MarketOperations({ rpcUrl }: { rpcUrl: string }) {
+export default function MarketOperations({ rpcUrl, daoAvailable }: { rpcUrl: string; daoAvailable: boolean }) {
     const [page, setPage] = useState(0)
     const [revision, setRevision] = useState(0)
     const [team, setTeam] = useState<{ state: CurationState; seats: CurationSeat[] } | null>(null)
@@ -52,6 +53,7 @@ export default function MarketOperations({ rpcUrl }: { rpcUrl: string }) {
             <div className="os-ops-section-head"><h2 id="os-ops-team-title">Community review team</h2><span>{team.state.activeManagers} of 5 active seats</span></div>
             {team.seats.length === 0 ? <p className="os-sub">The DAO has not appointed any active managers.</p> : <div className="os-ops-seats">{team.seats.map((seat) => <div className="os-ops-seat" key={seat.account}><Pill tone={seat.lead ? "ok" : "neutral"}>{seat.lead ? "Lead" : "Manager"}</Pill><code>{seat.account}</code><span>Term ends {formatTime(seat.until)}</span></div>)}</div>}
         </section>}
+        {daoAvailable && <CurationGovernance rpcUrl={rpcUrl} />}
         <section className="os-stack" aria-labelledby="os-ops-applications-title">
             <div className="os-ops-section-head"><h2 id="os-ops-applications-title">Founder applications</h2><span>On-chain status and public evidence hashes</span></div>
             {!loading && !error && applications.length === 0 && <Empty title="No founder applications yet." />}
@@ -70,6 +72,48 @@ export default function MarketOperations({ rpcUrl }: { rpcUrl: string }) {
             {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more applications</button>}
         </section>
     </div>
+}
+
+function CurationGovernance({ rpcUrl }: { rpcUrl: string }) {
+    const [before, setBefore] = useState("0")
+    const [revision, setRevision] = useState(0)
+    const [entries, setEntries] = useState<CurationDaoProposal[]>([])
+    const [state, setState] = useState<{ loading: boolean; error: boolean; next: string | null; total: string; successor: string }>({ loading: true, error: false, next: null, total: "0", successor: "" })
+
+    useEffect(() => {
+        let cancelled = false
+        void readCurationDaoSnapshot(rpcUrl, before).then((result) => {
+            if (cancelled) return
+            setEntries((previous) => before === "0" ? result.proposals : [...previous, ...result.proposals])
+            setState({ loading: false, error: false, next: result.nextBefore, total: result.total, successor: result.successor })
+        }).catch(() => { if (!cancelled) setState((previous) => ({ ...previous, loading: false, error: true })) })
+        return () => { cancelled = true }
+    }, [rpcUrl, before, revision])
+
+    return <section className="os-stack" aria-labelledby="os-ops-governance-title">
+        <div className="os-ops-section-head"><h2 id="os-ops-governance-title">DAO curation proposals</h2><span>{state.total} total DAO proposals</span></div>
+        <p className="os-sub">Read-only decisions from the separate weighted curation DAO. Existing Memba DAO policies remain in their published realm.</p>
+        {state.successor && <p className="os-sub">Authority return destination: <code>{state.successor}</code></p>}
+        {state.loading && <Loading label="Loading DAO decisions…" />}
+        {state.error && <ErrorState message="Could not verify curation DAO decisions from this network." onRetry={() => { setState((previous) => ({ ...previous, loading: true, error: false })); setRevision((value) => value + 1) }} />}
+        {!state.error && !state.loading && entries.length === 0 && <Empty title="No curation proposals yet." />}
+        {!state.error && entries.length > 0 && <div className="os-market-list" role="list">{entries.map((item) => <article className="os-market-record os-ops-record" role="listitem" key={item.id}>
+            <div className="os-market-record-core"><span className="os-market-token">Proposal {item.id}</span><Pill tone={item.status === "EXECUTED" ? "ok" : "neutral"}>{item.status.toLowerCase()}</Pill><strong>{curationActionLabel(item)}</strong></div>
+            <div className="os-market-record-meta"><span>Proposed by <code>{item.proposer}</code></span><span>Voting ends {new Date(item.votingDeadline).toLocaleString()}</span>{item.action.collection && <span>Collection <code>{item.action.collection}</code></span>}{item.action.manager && <span>Manager <code>{item.action.manager}</code></span>}</div>
+            {item.action.reasonHash && <span className="os-sub">Reason hash <code>{item.action.reasonHash}</code></span>}
+            {item.status === "INVALIDATED" && <span className="os-sub">Invalidated before execution.</span>}
+        </article>)}</div>}
+        {!state.error && !state.loading && state.next && <button type="button" className="os-btn os-quiet" onClick={() => { setBefore(state.next!); setState((previous) => ({ ...previous, loading: true })) }}>Load older decisions</button>}
+    </section>
+}
+
+function curationActionLabel(item: CurationDaoProposal): string {
+    const labels: Record<CurationDaoProposal["action"]["operation"], string> = {
+        "accept-admin": "Accept curation administration", "return-admin": "Stage authority return", "abort-return": "Cancel authority return",
+        "appoint-manager": "Appoint manager", "remove-manager": "Remove manager", "mark-conflict": "Mark conflict",
+        "set-verification": item.action.verified ? "Verify collection" : "Remove verification", "clear-feature": "Clear featured placement", "clear-hide": "Clear discovery hold",
+    }
+    return labels[item.action.operation]
 }
 
 function ReceiptView({ value }: { value: CurationReceipt }) {

@@ -114,9 +114,12 @@ function LaunchpadCollections({ rpcUrl }: { rpcUrl: string }) {
                 <Pill tone={item.mode === "soulbound" ? "neutral" : "ok"}>{item.mode === "soulbound" ? "SoulBound" : item.mode === "royalty_protected" ? "Royalty protected" : "Open"}</Pill>
                 {item.mode === "soulbound" && item.revocable && <span className="os-sub os-block">Creator revocable</span>}
                 <span className="os-sub os-block">Metadata: {item.revealed ? "revealed" : "hidden behind a placeholder"} · {item.metadataFrozen ? "frozen" : "not frozen"}</span>
+                <span className="os-sub os-block">Royalty terms: {item.royaltyBPS.toString()} bps{item.royaltyBPS > 0n ? " · recorded for future market settlement" : " · none recorded"}</span>
                 <details>
-                    <summary>Metadata record</summary>
+                    <summary>Collection terms</summary>
                     <span className="os-sub os-block">URI commitment is recorded on chain. File contents and provenance have not been verified by Memba.</span>
+                    {item.royalties.length > 0 && <span className="os-sub os-block">Royalty payments cannot be assumed for transfers outside a marketplace.</span>}
+                    {item.royalties.map((receiver) => <span key={receiver.account} className="os-sub os-block">Royalty {receiver.bps.toString()} bps → <code style={{ overflowWrap: "anywhere" }}>{receiver.account}</code></span>)}
                     <span className="os-sub os-block">Base URI SHA-256: <code style={{ overflowWrap: "anywhere" }}>{item.baseURICommitment}</code></span>
                     {item.provenanceHash && <span className="os-sub os-block">Creator provenance hash: <code style={{ overflowWrap: "anywhere" }}>{item.provenanceHash}</code></span>}
                     {!item.revealed && <span className="os-sub os-block">Placeholder: <code style={{ overflowWrap: "anywhere" }}>{item.placeholderURI}</code></span>}

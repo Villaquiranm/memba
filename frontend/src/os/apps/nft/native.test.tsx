@@ -67,7 +67,7 @@ describe("NFT window", () => {
         availability.enabled = true
         availability.ledger = true
         listCollections.mockResolvedValue([{ id: "C1", name: "Founders", symbol: "FND", creator: "g1creator", mode: "soulbound", revocable: true, totalSupply: 1n, minted: 2n, maxSupply: 100n,
-            metadataMode: "reveal_base", revealed: false, metadataFrozen: false, placeholderURI: "ipfs://placeholder/placeholder.json", baseURICommitment: "a".repeat(64), provenanceHash: "b".repeat(64) }])
+            metadataMode: "reveal_base", revealed: false, metadataFrozen: false, placeholderURI: "ipfs://placeholder/placeholder.json", baseURICommitment: "a".repeat(64), provenanceHash: "b".repeat(64), royaltyBPS: 0n, royalties: [] }])
         render(<NftWindow {...base} section={null} session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
         expect(screen.queryByRole("button", { name: /Create a collection/ })).toBeNull()
         expect(screen.getByText(/Trading for these collections is not available yet/)).toBeInTheDocument()
@@ -75,7 +75,8 @@ describe("NFT window", () => {
         expect(screen.getByText("SoulBound")).toBeInTheDocument()
         expect(screen.getByText("Creator revocable")).toBeInTheDocument()
         expect(screen.getByText(/Metadata: hidden behind a placeholder · not frozen/)).toBeInTheDocument()
-        fireEvent.click(screen.getByText("Metadata record"))
+        expect(screen.getByText(/Royalty terms: 0 bps · none recorded/)).toBeInTheDocument()
+        fireEvent.click(screen.getByText("Collection terms"))
         expect(screen.getByText(/File contents and provenance have not been verified by Memba/)).toBeInTheDocument()
         expect(screen.getByText("b".repeat(64))).toBeInTheDocument()
         expect(listCollections).toHaveBeenCalledWith(expect.any(String), 0, 20)

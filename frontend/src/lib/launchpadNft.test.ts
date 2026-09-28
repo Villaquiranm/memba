@@ -9,7 +9,8 @@ const row = {
     revocable: true, tradable: false, maxSupply: "100", minted: "2", totalSupply: "1",
     configVersion: "1", profileFrozen: false, metadataMode: "static_base",
     revealed: true, metadataFrozen: true, placeholderURI: "",
-    baseURICommitment: "a".repeat(64), provenanceHash: "", baseURI: "ipfs://metadata/",
+    baseURICommitment: "a".repeat(64), provenanceHash: "",
+    royaltyBPS: "0", royalties: [], baseURI: "ipfs://metadata/",
 }
 
 const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
@@ -50,5 +51,14 @@ describe("Launchpad NFT reads", () => {
         expect(() => parseLaunchpadNftCollection({ ...hidden, baseURI: "ipfs://unrevealed/" })).toThrow("Inconsistent collection metadata")
         expect(() => parseLaunchpadNftCollection({ ...hidden, provenanceHash: "not-a-hash" })).toThrow("Inconsistent collection metadata")
         expect(parseLaunchpadNftCollection({ ...hidden, revealed: true, baseURI: "ipfs://revealed/" }).baseURI).toBe("ipfs://revealed/")
+    })
+
+    it("rejects royalty totals or receiver records inconsistent with the ledger", () => {
+        const open = { ...row, mode: "open", revocable: false, tradable: true, royaltyBPS: "500",
+            royalties: [{ account: "g1receiver", bps: "500" }] }
+        expect(parseLaunchpadNftCollection(open).royalties[0].bps).toBe(500n)
+        expect(() => parseLaunchpadNftCollection({ ...open, royaltyBPS: "501" })).toThrow("Inconsistent royalty terms")
+        expect(() => parseLaunchpadNftCollection({ ...open, royalties: [{ account: "g1receiver", bps: "0" }] })).toThrow("Inconsistent royalty terms")
+        expect(() => parseLaunchpadNftCollection({ ...open, mode: "soulbound", revocable: true, tradable: false })).toThrow("Inconsistent royalty terms")
     })
 })

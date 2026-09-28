@@ -5,6 +5,11 @@ import { LAUNCHPAD_NFT_PATH } from "./nftConfig"
 export type LaunchpadNftMode = "open" | "soulbound" | "royalty_protected"
 export type LaunchpadNftMetadataMode = "static_base" | "reveal_base"
 
+export interface LaunchpadNftRoyaltyReceiver {
+    account: string
+    bps: bigint
+}
+
 export interface LaunchpadNftCollection {
     id: string
     grc721Id: string
@@ -29,10 +34,12 @@ export interface LaunchpadNftCollection {
     placeholderURI: string
     baseURICommitment: string
     provenanceHash: string
+    royaltyBPS: bigint
+    royalties: LaunchpadNftRoyaltyReceiver[]
     baseURI: string
 }
 
-const COLLECTION_KEYS = ["id", "grc721Id", "creator", "name", "symbol", "description", "image", "banner", "website", "mode", "revocable", "tradable", "maxSupply", "minted", "totalSupply", "configVersion", "profileFrozen", "metadataMode", "revealed", "metadataFrozen", "placeholderURI", "baseURICommitment", "provenanceHash", "baseURI"] as const
+const COLLECTION_KEYS = ["id", "grc721Id", "creator", "name", "symbol", "description", "image", "banner", "website", "mode", "revocable", "tradable", "maxSupply", "minted", "totalSupply", "configVersion", "profileFrozen", "metadataMode", "revealed", "metadataFrozen", "placeholderURI", "baseURICommitment", "provenanceHash", "royaltyBPS", "royalties", "baseURI"] as const
 
 function record(value: unknown, what: string): Record<string, unknown> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid ${what} response`)
@@ -83,6 +90,18 @@ export function parseLaunchpadNftCollection(value: unknown): LaunchpadNftCollect
         (metadataMode !== "static_base" && metadataMode !== "reveal_base")) {
         throw new Error("Inconsistent collection metadata")
     }
+    const royaltyBPS = decimal(row.royaltyBPS, "royalty bps")
+    if (!Array.isArray(row.royalties) || row.royalties.length > 10 || royaltyBPS > 1000n) throw new Error("Invalid royalty terms")
+    const royalties = row.royalties.map((value: unknown) => {
+        const receiver = record(value, "royalty receiver")
+        if (Object.keys(receiver).sort().join("|") !== "account|bps") throw new Error("Invalid royalty receiver fields")
+        return { account: string(receiver.account, "royalty account"), bps: decimal(receiver.bps, "receiver bps") }
+    })
+    if ((mode === "soulbound" && royalties.length > 0) ||
+        royalties.some((receiver, index) => receiver.bps === 0n || !receiver.account || (index > 0 && receiver.account <= royalties[index - 1].account)) ||
+        royalties.reduce((sum, receiver) => sum + receiver.bps, 0n) !== royaltyBPS) {
+        throw new Error("Inconsistent royalty terms")
+    }
     return {
         id,
         grc721Id: string(row.grc721Id, "GRC721 ID"),
@@ -107,6 +126,8 @@ export function parseLaunchpadNftCollection(value: unknown): LaunchpadNftCollect
         placeholderURI,
         baseURICommitment,
         provenanceHash,
+        royaltyBPS,
+        royalties,
         baseURI,
     }
 }

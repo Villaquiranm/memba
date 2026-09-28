@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: Token Launchpad portfolio identity (2026-09-28)
+
+- Show a connected member's exact balance with token decimals, plus the chain, registry key and registered GRC20 ID, on a Launchpad token's details. Refresh personal balance reads when the wallet account changes.
+
 ### Memba OS: Token Launchpad sale reads (2026-09-28)
 
 - Browse registered tokens and inspect on-chain fair-sale, curve, airdrop, vesting and personal fair-sale claim state when the respective source realms are available. Keep unpublished source realms off mainnet.

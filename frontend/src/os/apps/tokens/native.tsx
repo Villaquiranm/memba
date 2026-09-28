@@ -60,6 +60,12 @@ function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: {
         enabled: salesAvailable && !!selected && !!address && !!launch.data?.fairSale,
         retry: false,
     })
+    const balance = useQuery({
+        queryKey: ["token-launchpad", network, "balance", selected, address],
+        queryFn: () => tokenClient.balanceOf(selected!, address!),
+        enabled: !!selected && !!address,
+        retry: false,
+    })
     const vesting = useQuery({
         queryKey: ["token-launchpad", network, "vesting", selected, vestingIndex],
         queryFn: () => salesClient.vesting(selected!, vestingIndex),
@@ -96,10 +102,16 @@ function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: {
             <h3>{selectedToken.name} ({selectedToken.ticker})</h3>
             <dl className="os-token-launchpad__facts">
                 <div><dt>Token ID</dt><dd>{selectedToken.id}</dd></div>
+                <div><dt>Network</dt><dd>{NETWORKS[network]?.chainId ?? GNO_CHAIN_ID}</dd></div>
+                <div><dt>Registry key</dt><dd>{selectedToken.registryKey}</dd></div>
+                <div><dt>Registered GRC20 ID</dt><dd>{selectedToken.grc20Id}</dd></div>
                 <div><dt>Creator</dt><dd>{selectedToken.creator}</dd></div>
                 <div><dt>Supply</dt><dd>{tokenAmount(selectedToken.totalSupply, selectedToken.decimals)} {selectedToken.ticker}</dd></div>
                 <div><dt>Currency</dt><dd>{selectedToken.currencyKey}</dd></div>
             </dl>
+            {address && balance.isPending && <p role="status">Loading your token balance…</p>}
+            {address && balance.isError && <p className="os-note os-err" role="alert">Your token balance could not be loaded. <button type="button" className="os-btn os-quiet" onClick={() => void balance.refetch()}>Retry balance</button></p>}
+            {address && balance.data !== undefined && <p>Your balance: {tokenAmount(balance.data, selectedToken.decimals)} {selectedToken.ticker}.</p>}
             {!salesAvailable && <p className="os-note" role="status">Sales details are unavailable on this network.</p>}
             {salesAvailable && launch.isPending && <p role="status">Loading sale details…</p>}
             {salesAvailable && launch.isError && <p className="os-note os-err" role="alert">Sale details could not be loaded. <button type="button" className="os-btn os-quiet" onClick={() => void launch.refetch()}>Retry</button></p>}

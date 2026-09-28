@@ -5,12 +5,13 @@ import TokensWindow from "./native"
 
 const availability = vi.hoisted(() => ({ factory: false, launchpad: false, sales: false }))
 const listPage = vi.hoisted(() => vi.fn())
+const balanceOf = vi.hoisted(() => vi.fn())
 const launch = vi.hoisted(() => vi.fn())
 const fairBuyer = vi.hoisted(() => vi.fn())
 const vesting = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/tokenLaunchpadClient", () => ({
     TOKEN_LAUNCHPAD_PATH: "gno.land/r/samcrew/launchpad/tokens/v1",
-    TokenLaunchpadClient: class { listPage = listPage },
+    TokenLaunchpadClient: class { listPage = listPage; balanceOf = balanceOf },
 }))
 vi.mock("../../../lib/tokenLaunchpadSalesClient", () => ({
     TOKEN_LAUNCHPAD_SALES_PATH: "gno.land/r/samcrew/launchpad/sales/v1",
@@ -31,6 +32,7 @@ describe("Tokens window", () => {
         availability.launchpad = false
         availability.sales = false
         listPage.mockReset()
+        balanceOf.mockReset()
         launch.mockReset()
         fairBuyer.mockReset()
         vesting.mockReset()
@@ -93,17 +95,23 @@ describe("Tokens window", () => {
     it("separates each member's personal fair claim after an address switch", async () => {
         availability.launchpad = true
         availability.sales = true
-        listPage.mockResolvedValue([{ id: "T1", name: "Example", ticker: "EX", mode: "direct_fixed", creator: "g1creator", totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot" }])
+        listPage.mockResolvedValue([{ id: "T1", name: "Example", ticker: "EX", mode: "direct_fixed", creator: "g1creator", totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot", registryKey: "gno.land/r/samcrew/launchpad/tokens/v1.T1", grc20Id: "gno.land/r/samcrew/launchpad/tokens/v1.T1.0000001" }])
         launch.mockResolvedValue({ fairSale: { cancelled: false, settled: true, succeeded: true, totalLots: 5n, hardCapLots: 10n, closePrice: 8n, quoteCurrency: "ugnot", proceedsReleased: false }, curve: null, airdrop: null, vestingCount: 0 })
         fairBuyer.mockImplementation(async (_id: string, address: string) => ({ claimableTokens: address === "first" ? 1000000n : 2000000n, claimableRefund: 3n, claimed: false }))
+        balanceOf.mockImplementation(async (_id: string, address: string) => address === "first" ? 2000000n : 3000000n)
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const view = render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet", "first")} /></QueryClientProvider>)
         fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
         expect(await screen.findByText(/Your claim: 1 EX/)).toBeInTheDocument()
+        expect(await screen.findByText("Your balance: 2 EX.")).toBeInTheDocument()
+        expect(screen.getByText("gno.land/r/samcrew/launchpad/tokens/v1.T1")).toBeInTheDocument()
         view.rerender(<QueryClientProvider client={client}><TokensWindow {...props("mainnet", "second")} /></QueryClientProvider>)
         expect(await screen.findByText(/Your claim: 2 EX/)).toBeInTheDocument()
+        expect(await screen.findByText("Your balance: 3 EX.")).toBeInTheDocument()
         expect(screen.queryByText(/Your claim: 1 EX/)).toBeNull()
+        expect(screen.queryByText("Your balance: 2 EX.")).toBeNull()
         expect(fairBuyer).toHaveBeenCalledWith("T1", "second")
+        expect(balanceOf).toHaveBeenCalledWith("T1", "second")
     })
 
     it("offers retry when the token read fails", async () => {
@@ -113,5 +121,17 @@ describe("Tokens window", () => {
         render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
         fireEvent.click(await screen.findByRole("button", { name: "Retry" }))
         expect(await screen.findByText("No tokens on this page.")).toBeInTheDocument()
+    })
+
+    it("keeps a failed personal balance distinct from public token details", async () => {
+        availability.launchpad = true
+        listPage.mockResolvedValue([{ id: "T1", name: "Example", ticker: "EX", mode: "direct_fixed", creator: "g1creator", totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot", registryKey: "gno.land/r/samcrew/launchpad/tokens/v1.T1", grc20Id: "gno.land/r/samcrew/launchpad/tokens/v1.T1.0000001" }])
+        balanceOf.mockRejectedValueOnce(new Error("RPC unavailable")).mockResolvedValueOnce(1000000n)
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet", "first")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        fireEvent.click(await screen.findByRole("button", { name: "Retry balance" }))
+        expect(await screen.findByText("Your balance: 1 EX.")).toBeInTheDocument()
+        expect(screen.getByRole("region", { name: "Example details" })).toBeInTheDocument()
     })
 })

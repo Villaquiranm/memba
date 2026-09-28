@@ -1,11 +1,22 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import TokensWindow from "./native"
 
-const availability = vi.hoisted(() => ({ factory: false }))
+const availability = vi.hoisted(() => ({ factory: false, launchpad: false, sales: false }))
+const listPage = vi.hoisted(() => vi.fn())
+const launch = vi.hoisted(() => vi.fn())
+vi.mock("../../../lib/tokenLaunchpadClient", () => ({
+    TOKEN_LAUNCHPAD_PATH: "gno.land/r/samcrew/launchpad/tokens/v1",
+    TokenLaunchpadClient: class { listPage = listPage },
+}))
+vi.mock("../../../lib/tokenLaunchpadSalesClient", () => ({
+    TOKEN_LAUNCHPAD_SALES_PATH: "gno.land/r/samcrew/launchpad/sales/v1",
+    TokenLaunchpadSalesClient: class { launch = launch; fairBuyer = vi.fn(); vesting = vi.fn() },
+}))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
-    isRealmValidOn: () => availability.factory,
+    isRealmValidOn: (_network: string, path: string) => path === "gno.land/r/samcrew/launchpad/tokens/v1" ? availability.launchpad : path === "gno.land/r/samcrew/launchpad/sales/v1" ? availability.sales : path === "gno.land/r/samcrew/tokenfactory_v2" ? availability.factory : false,
 }))
 
 const session = (key: string) => ({ network: { key } }) as never
@@ -13,7 +24,13 @@ const fallback = <p>classic token page</p>
 const props = (key: string) => ({ session: session(key), fallback }) as never
 
 describe("Tokens window", () => {
-    beforeEach(() => { availability.factory = false })
+    beforeEach(() => {
+        availability.factory = false
+        availability.launchpad = false
+        availability.sales = false
+        listPage.mockReset()
+        launch.mockReset()
+    })
 
     it("explains the missing mainnet factory without exposing the classic token actions", () => {
         render(<TokensWindow {...props("mainnet")} />)
@@ -32,5 +49,28 @@ describe("Tokens window", () => {
         render(<TokensWindow {...props("test13")} />)
         expect(screen.getByText("classic token page")).toBeInTheDocument()
         expect(screen.queryByRole("note")).toBeNull()
+    })
+
+    it("shows registered launch state only when both source realms are available", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        listPage.mockResolvedValue([{ id: "T1", name: "Example", ticker: "EX", mode: "fairsale", creator: "g1creator", totalSupply: 1000n, currencyKey: "ugnot" }])
+        launch.mockResolvedValue({ fairSale: { cancelled: false, settled: true, succeeded: true, totalLots: 5n, hardCapLots: 10n, closePrice: 8n, quoteCurrency: "ugnot", proceedsReleased: true }, curve: null, airdrop: null, vestingCount: 0 })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByText(/5 of 10 lots filled/)).toBeInTheDocument()
+        expect(screen.queryByText("classic token page")).toBeNull()
+        expect(listPage).toHaveBeenCalledWith(0, 20)
+        expect(launch).toHaveBeenCalledWith("T1")
+    })
+
+    it("shows tokens without claiming sale availability when only the token realm is enabled", async () => {
+        availability.launchpad = true
+        listPage.mockResolvedValue([])
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        expect(await screen.findByText("No tokens on this page.")).toBeInTheDocument()
+        expect(launch).not.toHaveBeenCalled()
     })
 })

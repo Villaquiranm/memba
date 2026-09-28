@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: Token Launchpad sale reads (2026-09-28)
+
+- Browse registered tokens and inspect on-chain fair-sale, curve, airdrop, vesting and personal fair-sale claim state when the respective source realms are available. Keep unpublished source realms off mainnet.
+
 ### Memba OS: native Settings
 
 - Give Settings a native OS window with desktop appearance, wallpaper and icon size controls, honest notification availability, read-only network details, local gas defaults, account status and About access. Reset only disposable local UI data after confirmation, preserving unsent drafts, saved recipients and send locks.

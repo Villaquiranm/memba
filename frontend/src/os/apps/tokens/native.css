@@ -1,0 +1,8 @@
+.memba-os .os-token-launchpad__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.memba-os .os-token-launchpad__token { width: 100%; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; text-align: left; padding: 12px; color: var(--os-ink); background: var(--os-card); border: 1px solid var(--os-line); border-radius: 10px; cursor: pointer; }
+.memba-os .os-token-launchpad__token[aria-pressed="true"] { border-color: var(--os-acc); }
+.memba-os .os-token-launchpad__facts { display: grid; gap: 8px; margin: 0; }
+.memba-os .os-token-launchpad__facts > div { display: grid; grid-template-columns: minmax(6rem, 1fr) minmax(0, 2fr); gap: 8px; }
+.memba-os .os-token-launchpad__facts dd { margin: 0; overflow-wrap: anywhere; }
+.memba-os .os-token-launchpad__sections { display: grid; gap: 14px; margin-top: 16px; }
+.memba-os .os-token-launchpad__sections h4 { margin: 0 0 6px; }

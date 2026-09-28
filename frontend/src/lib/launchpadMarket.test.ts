@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
 import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "./nftConfig"
-import { getLaunchpadMarketListing, getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, parseLaunchpadMarketListing, parseLaunchpadMarketOffer, parseLaunchpadMarketQuote, parseLaunchpadOfferQuote } from "./launchpadMarket"
+import { getLaunchpadMarketListing, getLaunchpadMarketOffer, getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, parseLaunchpadMarketListing, parseLaunchpadMarketOffer, parseLaunchpadMarketQuote, parseLaunchpadOfferQuote } from "./launchpadMarket"
 
 const listing = {
     id: "L1", collection: "C4", number: "1", seller: "g1seller",
@@ -94,6 +94,13 @@ describe("Launchpad market reads", () => {
         expect(split.protocolAmount).toBe(200n)
         expect(read).toHaveBeenNthCalledWith(1, "rpc", LAUNCHPAD_MARKET_PATH, "ListOffersJSON(0, 20)", true)
         expect(read).toHaveBeenNthCalledWith(2, "rpc", LAUNCHPAD_MARKET_PATH, 'OfferQuoteJSON("O1")', true)
+    })
+
+    it("reads one exact offer before a refund and rejects an identity change", async () => {
+        const read = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(offer)).mockResolvedValueOnce(qeval({ ...offer, id: "O2" }))
+        await expect(getLaunchpadMarketOffer("rpc", "O1")).resolves.toMatchObject({ id: "O1", price: 10000n })
+        expect(read).toHaveBeenCalledWith("rpc", LAUNCHPAD_MARKET_PATH, 'OfferJSON("O1")', true)
+        await expect(getLaunchpadMarketOffer("rpc", "O1")).rejects.toThrow("identity changed")
     })
 
     it("rejects malformed or unfunded-looking offer responses", async () => {

@@ -268,6 +268,52 @@ describe("native Market window", () => {
         expect(getOfferQuote).toHaveBeenCalledWith(expect.any(String), offer)
     })
 
+    it("offers a buyer refund while trading policy is unavailable", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        list.mockResolvedValue([])
+        const buyer = `g1${"p".repeat(38)}`
+        const funded = { ...offer, buyer, expiresAt: 4102444800n }
+        listOffers.mockResolvedValue([funded])
+        getOfferQuote.mockRejectedValue(new Error("quote unavailable"))
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: buyer, openConnect: vi.fn() } as never
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(screen.getByRole("button", { name: "Review offer cancellation" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: { caller: buyer, send: "", func: "CancelOffer", args: ["O1"] } })
+        expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["Refund recipient", buyer])
+    })
+
+    it("lets another member return expired escrow to the buyer and locks uncertainty", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        list.mockResolvedValue([])
+        const buyer = `g1${"p".repeat(38)}`
+        const helper = `g1${"q".repeat(38)}`
+        const expired = { ...offer, buyer, expiresAt: 1000n }
+        listOffers.mockResolvedValue([expired])
+        getOfferQuote.mockResolvedValue({ ...offerQuote, offer: "O1" })
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: helper, openConnect: vi.fn() } as never
+        const view = render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(screen.getByRole("button", { name: "Return expired escrow" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: { caller: helper, send: "", func: "ExpireOffer", args: ["O1"] } })
+        view.unmount()
+        saveGovernanceReceipt({ chainId: "test12", realmPath: LAUNCHPAD_MARKET_PATH, caller: helper, operation: "expire-offer:O1" },
+            { phase: "submitted", hash: "ab".repeat(32), label: "Refund expired offer O1" })
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        expect(await screen.findByText("Previous offer refund outcome needs review")).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: "Return expired escrow" })).toBeNull()
+    })
+
     it("gates direct Operations links until the curation realm is allowlisted", () => {
         availability.enabled = true
         availability.ledger = true

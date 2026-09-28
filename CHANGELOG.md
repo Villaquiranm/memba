@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: funded NFT offer refunds (2026-09-28)
+
+- Let buyers review cancellation of their funded Launchpad offers, including during a trading pause. Any connected member can review an expired-offer refund to its original buyer. Both actions recheck the offer, show the refund recipient and gas payer, and hold uncertain outcomes for chain review.
+
 ### Memba OS: create native NFT listings (2026-09-28)
 
 - Let owners inspect an Open Launchpad NFT, approve that exact token for the market, and review a native-price listing with pinned DAO and creator payouts. Both wallet actions recheck ownership and policy; a previous uncertain outcome must be reconciled before another attempt.

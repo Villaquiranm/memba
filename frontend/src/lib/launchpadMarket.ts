@@ -244,3 +244,12 @@ export async function getLaunchpadOfferQuote(rpcUrl: string, offer: LaunchpadMar
     if (raw === null) throw new Error("Could not read Launchpad offer quote")
     return parseLaunchpadOfferQuote(parseQevalJSON(raw), offer)
 }
+
+export async function getLaunchpadMarketOffer(rpcUrl: string, id: string): Promise<LaunchpadMarketOffer> {
+    const checkedId = offerId(id)
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_MARKET_PATH, `OfferJSON(${JSON.stringify(checkedId)})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad offer")
+    const offer = parseLaunchpadMarketOffer(parseQevalJSON(raw))
+    if (offer.id !== checkedId) throw new Error("Offer identity changed")
+    return offer
+}

@@ -29,6 +29,13 @@ describe("native NFT token management", () => {
         expect(readState).not.toHaveBeenCalled()
     })
 
+    it("prefills the selected holding but waits for a fresh chain check", () => {
+        render(<ManageLaunchpadToken rpcUrl="rpc" session={session} query="collection=C1&number=2" available toast={vi.fn()} />)
+        expect(screen.getByLabelText("Collection ID")).toHaveValue("C1")
+        expect(screen.getByLabelText("Token number")).toHaveValue("2")
+        expect(readState).not.toHaveBeenCalled()
+    })
+
     it("reads owner and reviews one Open direct transfer", async () => {
         readState.mockResolvedValue(open)
         render(<ManageLaunchpadToken rpcUrl="rpc" session={session} available toast={vi.fn()} />)

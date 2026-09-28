@@ -22,8 +22,9 @@ import CreateLaunchpadCollection from "./create"
 import LaunchpadCreatorStudio from "./studio"
 import MintLaunchpadNFT from "./mint"
 import ManageLaunchpadToken from "./manage"
+import LaunchpadHoldings from "./holdings"
 
-export default function NftWindow({ section, session, open, openApp, fallback, toast }: NativeViewProps) {
+export default function NftWindow({ section, query, session, open, openApp, fallback, toast }: NativeViewProps) {
     if (section === "create" && isNftEnabled() && isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)) {
         return <CreateLaunchpadCollection key={session.network.key} rpcUrl={NETWORKS[session.network.key]?.rpcUrl ?? GNO_RPC_URL}
             session={session} available={[LAUNCHPAD_NFT_PATH, LAUNCHPAD_DROPS_PATH, LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_FEES_PATH]
@@ -40,8 +41,11 @@ export default function NftWindow({ section, session, open, openApp, fallback, t
                 .every((path) => isRealmValidOn(session.network.key, path))} toast={toast} />
     }
     if (section === "manage" && isNftEnabled() && isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)) {
-        return <ManageLaunchpadToken key={session.network.key} rpcUrl={NETWORKS[session.network.key]?.rpcUrl ?? GNO_RPC_URL}
-            session={session} available={isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)} toast={toast} />
+        return <ManageLaunchpadToken key={`${session.network.key}:${query ?? ""}`} rpcUrl={NETWORKS[session.network.key]?.rpcUrl ?? GNO_RPC_URL}
+            session={session} query={query} available={isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)} toast={toast} />
+    }
+    if (section === "holdings" && isNftEnabled() && isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)) {
+        return <LaunchpadHoldings key={`${session.network.chainId}:${session.status === "member" ? session.address : "guest"}`} session={session} open={open} />
     }
     if (section !== null) return <>{fallback}</>
 
@@ -102,6 +106,10 @@ export default function NftWindow({ section, session, open, openApp, fallback, t
                 {ledgerAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "manage" })!)}>
                     <Icon name="nft" />
                     <span className="os-grow"><b>Manage an NFT</b><span className="os-sub os-block">Check ownership, transfer or retire a token</span></span>
+                </Card>}
+                {ledgerAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "holdings" })!)}>
+                    <Icon name="nft" />
+                    <span className="os-grow"><b>Your collectibles</b><span className="os-sub os-block">See confirmed holdings for your wallet</span></span>
                 </Card>}
                 {legacyAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "create" })!)}>
                     <Icon name="nft" />

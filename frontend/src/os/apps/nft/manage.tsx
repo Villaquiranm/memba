@@ -31,12 +31,15 @@ function PendingTokenAction({ scope, chainId, onClear }: { scope: GovernanceScop
     </div>
 }
 
-export default function ManageLaunchpadToken({ rpcUrl, session, available, toast }: {
-    rpcUrl: string; session: NativeViewProps["session"]; available: boolean; toast: (message: string) => void
+export default function ManageLaunchpadToken({ rpcUrl, session, query, available, toast }: {
+    rpcUrl: string; session: NativeViewProps["session"]; query?: string; available: boolean; toast: (message: string) => void
 }) {
     const signer = useSigner()
-    const [collectionID, setCollectionID] = useState("")
-    const [number, setNumber] = useState("")
+    const initialQuery = new URLSearchParams(query ?? "")
+    const initialCollection = initialQuery.get("collection") ?? ""
+    const initialNumber = initialQuery.get("number") ?? ""
+    const [collectionID, setCollectionID] = useState(/^C[1-9]\d*$/.test(initialCollection) ? initialCollection : "")
+    const [number, setNumber] = useState(/^[1-9]\d{0,18}$/.test(initialNumber) ? initialNumber : "")
     const [selected, setSelected] = useState<{ collection: string; number: bigint } | null>(null)
     const [revision, setRevision] = useState(0)
     const [state, setState] = useState<NftControlState | null>(null)

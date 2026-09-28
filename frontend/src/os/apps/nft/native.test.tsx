@@ -14,6 +14,7 @@ vi.mock("./create", () => ({ default: ({ available }: { available: boolean }) =>
 vi.mock("./studio", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native studio ready" : "native studio gated"}</p> }))
 vi.mock("./mint", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native mint ready" : "native mint gated"}</p> }))
 vi.mock("./manage", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native token management ready" : "native token management gated"}</p> }))
+vi.mock("./holdings", () => ({ default: () => <p>native holdings ready</p> }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
@@ -155,6 +156,21 @@ describe("NFT window", () => {
         availability.ledger = true
         render(<NftWindow {...base} section="manage" session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
         expect(screen.getByText("native token management ready")).toBeInTheDocument()
+    })
+
+    it("opens and gates the native holdings view from the NFT home", () => {
+        availability.enabled = true
+        availability.ledger = true
+        listCollections.mockResolvedValue([])
+        const open = vi.fn()
+        const view = render(<NftWindow {...base} section={null} session={session(true)} open={open} openApp={vi.fn()} />)
+        fireEvent.click(screen.getByRole("button", { name: /Your collectibles/ }))
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: "app", app: "nft", section: "holdings" } }))
+        view.rerender(<NftWindow {...base} section="holdings" session={session(true)} open={open} openApp={vi.fn()} />)
+        expect(screen.getByText("native holdings ready")).toBeInTheDocument()
+        availability.enabled = false
+        view.rerender(<NftWindow {...base} section="holdings" session={session(true)} open={open} openApp={vi.fn()} />)
+        expect(screen.getByText("classic page")).toBeInTheDocument()
     })
 
     it("renders the fallback for every section other than the home, on any network", () => {

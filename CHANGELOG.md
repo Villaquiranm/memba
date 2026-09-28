@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: confirmed Launchpad NFT collectibles (2026-09-28)
+
+- Show a connected wallet's confirmed Launchpad NFTs in a native, paged collectibles view. The backend keeps the query on one chain and excludes transferred or retired tokens; each card opens token management for a fresh chain check before any action.
+
 ### Memba OS: chain-scoped Launchpad NFT ownership index (2026-09-28)
 
 - Add a dormant indexer for the new NFT ledger that follows confirmed mint, transfer, burn and revocation events from the exact deployment block. It verifies the RPC chain, keeps ownership separate from older market data, applies each block atomically and rolls back recent chain reorganizations before serving portfolio data.

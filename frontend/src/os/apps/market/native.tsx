@@ -6,6 +6,7 @@ import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUN
 import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
 import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
 import { BUY_GAS_WANTED, CANCEL_GAS_WANTED, buyLaunchpadNativeRequest, buyScope, cancelLaunchpadListingRequest, cancelListingScope } from "../../../lib/launchpadTrade"
+import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveListingScope, createListingRequest, createListingScope, parseGnotPrice, readListingReadiness, type ListingReadiness } from "../../../lib/launchpadListing"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
@@ -72,19 +73,113 @@ export default function MarketWindow({ section, session, open, toast, fallback }
 }
 
 function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toast }: { rpcUrl: string; openServices: () => void; session: NativeViewProps["session"]; tradingAvailable: boolean; toast: (message: string) => void }) {
-    const [tab, setTab] = useState<"listings" | "offers">("listings")
+    const [tab, setTab] = useState<"listings" | "offers" | "sell">("listings")
     return <div className="os-stack os-market-records">
         <header className="os-market-records-head">
             <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
             <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
         </header>
-        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying is available for active listings after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel their active listings, including during a market pause. Listing creation, token payments and offers remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
+        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying and listing are available after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings, including during a market pause. Token payments and offers remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
         <div className="os-market-tabs" role="tablist" aria-label="Collectible market records">
             <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
             <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
+            <button type="button" role="tab" aria-selected={tab === "sell"} onClick={() => setTab("sell")}>Sell</button>
         </div>
-        {tab === "listings" ? <LaunchpadListings rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> : <LaunchpadOffers rpcUrl={rpcUrl} />}
+        {tab === "listings" ? <LaunchpadListings rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> :
+            tab === "offers" ? <LaunchpadOffers rpcUrl={rpcUrl} /> :
+                <ListingComposer key={session.status === "member" ? session.address : "visitor"} rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} />}
     </div>
+}
+
+function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
+    rpcUrl: string; session: NativeViewProps["session"]; tradingAvailable: boolean; toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [collectionID, setCollectionID] = useState("")
+    const [numberText, setNumberText] = useState("")
+    const [priceText, setPriceText] = useState("")
+    const [days, setDays] = useState(7)
+    const [readiness, setReadiness] = useState<ListingReadiness | null>(null)
+    const [checking, setChecking] = useState(false)
+    const [preparing, setPreparing] = useState(false)
+    const [error, setError] = useState("")
+    const [checkedOutcome, setCheckedOutcome] = useState(false)
+    const [, refreshReceipt] = useState(0)
+    if (!tradingAvailable) return <div className="os-note os-warn" role="note">Listing needs the reviewed market, policy and proceeds realms on this network.</div>
+    if (session.status !== "member") return <div className="os-stack"><p>Connect a wallet to list a Launchpad NFT you own.</p><button type="button" className="os-btn" onClick={session.openConnect}>Connect wallet</button></div>
+
+    const refresh = () => {
+        if (!readiness) return
+        setChecking(true)
+        void readListingReadiness(rpcUrl, readiness.collection.id, readiness.number, session.address).then((fresh) => {
+            setReadiness(fresh); setError("")
+        }).catch((cause) => { setReadiness(null); setError(cause instanceof Error ? cause.message : "Could not verify this NFT.") })
+            .finally(() => setChecking(false))
+    }
+    const scope = readiness && createListingScope(session.network.chainId, session.address, readiness.collection.id, readiness.number)
+    const approvalScope = readiness && approveListingScope(session.network.chainId, session.address, readiness.collection.id, readiness.number)
+    const receipt = scope && readGovernanceReceipt(scope)
+    const approvalReceipt = approvalScope && readGovernanceReceipt(approvalScope)
+    const locked = receipt || approvalReceipt
+    const lockedScope = receipt ? scope : approvalReceipt ? approvalScope : null
+
+    const review = (kind: "approve" | "list") => {
+        if (!readiness) return
+        setPreparing(true)
+        void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => {
+            if (kind === "approve") {
+                const estimatedGasFeeUgnot = feeForGasWanted(APPROVE_GAS_WANTED, gasPrice)
+                signer.sign(approveListingRequest({ readiness, rpcUrl, chainId: session.network.chainId,
+                    estimatedGasFeeUgnot, onSettled: refresh }))
+            } else {
+                const price = parseGnotPrice(priceText)
+                const expiresAt = BigInt(Math.floor(Date.now() / 1000) + days * 86400)
+                const estimatedGasFeeUgnot = feeForGasWanted(LIST_GAS_WANTED, gasPrice)
+                signer.sign(createListingRequest({ readiness, price, expiresAt, rpcUrl,
+                    chainId: session.network.chainId, estimatedGasFeeUgnot, onSettled: refresh }))
+            }
+        }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare this listing."))
+            .finally(() => setPreparing(false))
+    }
+    return <section className="os-stack" aria-label="List a Launchpad NFT">
+        <div><h2>Sell a collectible</h2><p className="os-sub">Approve one Open NFT for Market, then set a fixed native price. SoulBound assets cannot be listed.</p></div>
+        <label>Collection ID <input value={collectionID} placeholder="C1" disabled={checking || preparing} onChange={(event) => { setCollectionID(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
+        <label>Token number <input value={numberText} inputMode="numeric" placeholder="1" disabled={checking || preparing} onChange={(event) => { setNumberText(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
+        <button type="button" className="os-btn os-quiet" disabled={checking} onClick={() => {
+            if (!/^C[1-9]\d*$/.test(collectionID) || !/^[1-9]\d*$/.test(numberText)) { setError("Enter a collection ID and positive token number."); return }
+            setChecking(true); setError("")
+            void readListingReadiness(rpcUrl, collectionID, BigInt(numberText), session.address).then(setReadiness)
+                .catch((cause) => { setReadiness(null); setError(cause instanceof Error ? cause.message : "Could not verify this NFT.") })
+                .finally(() => setChecking(false))
+        }}>{checking ? "Checking chain…" : "Check token"}</button>
+        {error && <p role="alert">{error}</p>}
+        {readiness && <div className="os-stack os-note">
+            <strong>{readiness.collection.name} · {readiness.collection.id} #{readiness.number.toString()}</strong>
+            <span>Owner <code>{readiness.owner}</code></span>
+            <span>Approval: {readiness.approvalScope === "collection" ? "Collection-wide approval already exists" : readiness.approved ? "This token is approved" : "This token needs approval"}</span>
+            <span>DAO trading fee: {formatBPS(readiness.feeBPS)} · Creator royalties: {formatBPS(readiness.collection.royaltyBPS)}</span>
+            <span>Market policy: {readiness.policyReady ? "ready" : "paused or unavailable"}</span>
+            {readiness.currentListingID && <span>Listing {readiness.currentListingID} exists for this token. A new listing will replace it; review both terms carefully.</span>}
+            {locked && lockedScope ? <div className="os-stack os-tight os-note os-warn" role="status">
+                <strong>Previous {receipt ? "listing" : "approval"} outcome needs review</strong>
+                <span>Check the transaction and current chain state before another attempt.</span>
+                {locked.hash && (txExplorerUrl(locked.hash, session.network.chainId)
+                    ? <a href={txExplorerUrl(locked.hash, session.network.chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{locked.hash}</code>)}
+                <button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh token</button>
+                <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and know whether this action executed.</label>
+                <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
+                    try { clearGovernanceReceipt(lockedScope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
+                    catch { /* an in-flight wallet request keeps the receipt locked */ }
+                }}>Review a new attempt</button>
+            </div> : !readiness.approved ? <button type="button" className="os-btn" disabled={preparing || !readiness.policyReady} onClick={() => review("approve")}>{preparing ? "Preparing review…" : "Review token approval"}</button> : <>
+                <label>Price (GNOT) <input value={priceText} inputMode="decimal" placeholder="1.25" onChange={(event) => setPriceText(event.target.value.trim())} /></label>
+                <label>Listing duration <select value={days} onChange={(event) => setDays(Number(event.target.value))}>
+                    <option value={1}>1 day</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
+                </select></label>
+                <button type="button" className="os-btn" disabled={preparing || !readiness.policyReady} onClick={() => review("list")}>{preparing ? "Preparing review…" : "Review listing"}</button>
+            </>}
+        </div>}
+    </section>
 }
 
 function LaunchpadListings({ rpcUrl, session, tradingAvailable, toast }: { rpcUrl: string; session: NativeViewProps["session"]; tradingAvailable: boolean; toast: (message: string) => void }) {

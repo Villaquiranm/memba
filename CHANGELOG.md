@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: create native NFT listings (2026-09-28)
+
+- Let owners inspect an Open Launchpad NFT, approve that exact token for the market, and review a native-price listing with pinned DAO and creator payouts. Both wallet actions recheck ownership and policy; a previous uncertain outcome must be reconciled before another attempt.
+
 ### Memba OS: seller exit for Launchpad listings (2026-09-28)
 
 - Let the listing seller review and sign cancellation from Market, including while trading is paused or the sale quote is unavailable. Recheck the listing immediately before signing and hold uncertain wallet outcomes for manual chain review.

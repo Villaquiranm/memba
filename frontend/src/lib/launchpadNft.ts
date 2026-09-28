@@ -143,3 +143,12 @@ export async function listLaunchpadNftCollections(rpcUrl: string, page = 0, size
     if (new Set(collections.map((item) => item.id)).size !== collections.length) throw new Error("Duplicate collection ID")
     return collections
 }
+
+export async function getLaunchpadNftCollection(rpcUrl: string, id: string): Promise<LaunchpadNftCollection> {
+    if (!/^C[1-9]\d*$/.test(id)) throw new Error("Invalid collection ID")
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_NFT_PATH, `CollectionJSON(${JSON.stringify(id)})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad collection")
+    const collection = parseLaunchpadNftCollection(parseQevalJSON(raw))
+    if (collection.id !== id) throw new Error("Collection identity changed")
+    return collection
+}

@@ -17,6 +17,7 @@ const getCollectionCuration = vi.hoisted(() => vi.fn())
 const readCurationDaoSnapshot = vi.hoisted(() => vi.fn())
 const sign = vi.hoisted(() => vi.fn())
 const gasPrice = vi.hoisted(() => vi.fn(async () => ({ gas: 1000, ugnot: 1 })))
+const readListingReadiness = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/grc20", async (original) => ({ ...(await original<typeof import("../../../lib/grc20")>()), networkGasPrice: gasPrice }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
@@ -25,6 +26,7 @@ vi.mock("../../../lib/config", async (original) => ({
 }))
 vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: list, getLaunchpadMarketQuote: getQuote,
     listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote, isLaunchpadMarketPolicyReady: policyReady }))
+vi.mock("../../../lib/launchpadListing", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadListing")>()), readListingReadiness }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
 vi.mock("../../../lib/launchpadCurationDao", () => ({ readCurationDaoSnapshot }))
 vi.mock("../../sign/signerContext", () => ({ useSigner: () => ({ sign, version: 0 }) }))
@@ -65,6 +67,7 @@ describe("native Market window", () => {
         readCurationDaoSnapshot.mockReset()
         sign.mockReset()
         gasPrice.mockClear()
+        readListingReadiness.mockReset()
         localStorage.clear()
         clearGovernanceMemory()
     })
@@ -188,6 +191,61 @@ describe("native Market window", () => {
         fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
         expect(await screen.findByText("Previous cancellation outcome needs review")).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: "Review cancellation" })).toBeNull()
+    })
+
+    it("checks owned Open token terms before offering exact approval and listing review", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        const seller = `g1${"p".repeat(38)}`
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
+        const terms = { collection: { id: "C7", name: "Art", mode: "open", tradable: true, royaltyBPS: 500n,
+            royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] }, number: 3n, owner: seller,
+            approved: false, approvalScope: "none", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true }
+        readListingReadiness.mockResolvedValueOnce(terms)
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Sell" }))
+        fireEvent.change(screen.getByLabelText("Collection ID"), { target: { value: "C7" } })
+        fireEvent.change(screen.getByLabelText("Token number"), { target: { value: "3" } })
+        fireEvent.click(screen.getByRole("button", { name: "Check token" }))
+        expect(await screen.findByText(/This token needs approval/)).toBeInTheDocument()
+        expect(readListingReadiness).toHaveBeenCalledWith(expect.any(String), "C7", 3n, seller)
+        fireEvent.click(screen.getByRole("button", { name: "Review token approval" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: { caller: seller, func: "Approve", args: ["C7", expect.stringMatching(/^g1/), "3"] } })
+    })
+
+    it("reviews an exact native listing and discloses replacement of an existing sale", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        const seller = `g1${"p".repeat(38)}`
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
+        const terms = { collection: { id: "C7", name: "Art", mode: "open", tradable: true, royaltyBPS: 500n,
+            royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] }, number: 3n, owner: seller,
+            approved: true, approvalScope: "token", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true }
+        readListingReadiness.mockResolvedValueOnce(terms).mockResolvedValueOnce({ ...terms, currentListingID: "L8" })
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Sell" }))
+        fireEvent.change(screen.getByLabelText("Collection ID"), { target: { value: "C7" } })
+        fireEvent.change(screen.getByLabelText("Token number"), { target: { value: "3" } })
+        fireEvent.click(screen.getByRole("button", { name: "Check token" }))
+        expect(await screen.findByText(/This token is approved/)).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText("Price (GNOT)"), { target: { value: "1.25" } })
+        fireEvent.click(screen.getByRole("button", { name: "Review listing" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: seller, send: "", func: "List", args: ["C7", "3", "1250000", expect.any(String), "ugnot", "4"],
+        } })
+        fireEvent.click(screen.getByRole("button", { name: "Check token" }))
+        expect(await screen.findByText(/Listing L8 exists for this token/)).toBeInTheDocument()
+        expect(screen.getByRole("button", { name: "Review listing" })).toBeEnabled()
     })
 
     it("shows funded offers and a fresh split in a separate read-only tab", async () => {

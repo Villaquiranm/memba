@@ -28,6 +28,10 @@ Full changelogs are split by version range for easier navigation:
 
 - Keep the flag-off bundle check strict while allowing the exact classic page CSS selectors used when Arcade and Explorer are embedded in OS. Continue rejecting additional OS styles, chunks, fonts and brand assets.
 
+### Token Launchpad: creation event identity validation (2026-09-28)
+
+- Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
+
 ### Memba OS: native Settings
 
 - Give Settings a native OS window with desktop appearance, wallpaper and icon size controls, honest notification availability, read-only network details, local gas defaults, account status and About access. Reset only disposable local UI data after confirmation, preserving unsent drafts, saved recipients and send locks.

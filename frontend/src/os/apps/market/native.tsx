@@ -8,7 +8,8 @@ import { getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, getLaunchpadOffe
 import { BUY_GAS_WANTED, CANCEL_GAS_WANTED, buyLaunchpadNativeRequest, buyScope, cancelLaunchpadListingRequest, cancelListingScope } from "../../../lib/launchpadTrade"
 import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveListingScope, createListingRequest, createListingScope, parseGnotPrice, parseWugnotPrice, readListingReadiness, type ListingCurrency, type ListingReadiness } from "../../../lib/launchpadListing"
 import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferExit } from "../../../lib/launchpadOfferExit"
-import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
+import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferCurrency, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
+import { approveWugnotOfferRequest, makeWugnotOfferRequest } from "../../../lib/launchpadTokenOffer"
 import { ACCEPT_OFFER_GAS_WANTED, acceptOfferRequest, acceptOfferScope } from "../../../lib/launchpadOfferAccept"
 import { PROCEEDS_CLAIM_GAS_WANTED, claimProceedsRequest, proceedsClaimScope, readCurrencyProceeds, type NativeProceeds, type ProceedsCurrency } from "../../../lib/launchpadProceeds"
 import { APPROVE_WUGNOT_GAS_WANTED, BUY_WUGNOT_GAS_WANTED, WUGNOT_KEY, approveWugnotRequest, approveWugnotScope, buyWugnotRequest, readWugnotSpend, type WugnotSpend } from "../../../lib/launchpadTokenTrade"
@@ -570,21 +571,43 @@ function MakeOfferComposer({ session, rpcUrl, refresh, toast }: {
     const [collectionID, setCollectionID] = useState("")
     const [numberText, setNumberText] = useState("")
     const [priceText, setPriceText] = useState("")
+    const [currency, setCurrency] = useState<OfferCurrency>("ugnot")
     const [days, setDays] = useState(7)
     const [readiness, setReadiness] = useState<OfferReadiness | null>(null)
     const [checking, setChecking] = useState(false)
     const [preparing, setPreparing] = useState(false)
+    const [spendRevision, setSpendRevision] = useState(0)
+    const [spendState, setSpendState] = useState<{ loading: boolean; error: boolean; spend: WugnotSpend | null }>({ loading: false, error: false, spend: null })
     const [checkedOutcome, setCheckedOutcome] = useState(false)
     const [error, setError] = useState("")
     const [, refreshReceipt] = useState(0)
+    useEffect(() => {
+        if (!readiness || readiness.currency !== WUGNOT_KEY) return
+        let cancelled = false
+        void readWugnotSpend(rpcUrl, readiness.buyer).then((spend) => {
+            if (!cancelled) setSpendState({ loading: false, error: false, spend })
+        }).catch(() => { if (!cancelled) setSpendState({ loading: false, error: true, spend: null }) })
+        return () => { cancelled = true }
+    }, [rpcUrl, readiness, spendRevision])
     if (session.status !== "member") return <div className="os-note">Connect a wallet to make a funded offer on an Open NFT. <button type="button" className="os-btn os-quiet" onClick={session.openConnect}>Connect wallet</button></div>
 
-    const scope = readiness && makeOfferScope(session.network.chainId, session.address, readiness.collection.id, readiness.number)
+    const refreshSpend = () => { setSpendState((previous) => ({ ...previous, loading: true })); setSpendRevision((value) => value + 1); refresh() }
+    const scope = readiness && makeOfferScope(session.network.chainId, session.address, readiness.collection.id, readiness.number, currency)
+    const approvalScope = readiness && currency === WUGNOT_KEY && approveWugnotScope(session.network.chainId, session.address,
+        `offer:${readiness.collection.id}#${readiness.number.toString()}`)
     const receipt = scope && readGovernanceReceipt(scope)
+    const approvalReceipt = approvalScope && readGovernanceReceipt(approvalScope)
+    const locked = receipt || approvalReceipt
+    const lockedScope = receipt ? scope : approvalReceipt ? approvalScope : null
+    let tokenPrice: bigint | null = null
+    if (currency === WUGNOT_KEY) { try { tokenPrice = parseWugnotPrice(priceText) } catch { /* input not ready */ } }
     const check = () => {
         if (!/^C[1-9]\d*$/.test(collectionID) || !/^[1-9]\d*$/.test(numberText)) { setError("Enter a collection ID and positive token number."); return }
         setChecking(true); setError("")
-        void readOfferReadiness(rpcUrl, collectionID, BigInt(numberText), session.address).then(setReadiness)
+        void readOfferReadiness(rpcUrl, collectionID, BigInt(numberText), session.address, currency).then((value) => {
+            setReadiness(value)
+            if (currency === WUGNOT_KEY) setSpendState({ loading: true, error: false, spend: null })
+        })
             .catch((cause) => { setReadiness(null); setError(cause instanceof Error ? cause.message : "Could not verify this NFT.") })
             .finally(() => setChecking(false))
     }
@@ -592,40 +615,64 @@ function MakeOfferComposer({ session, rpcUrl, refresh, toast }: {
         <div><h2>Make a funded offer</h2><p className="os-sub">Your full price moves into market escrow now. The NFT owner can accept it while the offer is active.</p></div>
         <label>Offer collection ID <input value={collectionID} placeholder="C1" disabled={checking || preparing} onChange={(event) => { setCollectionID(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
         <label>Offer token number <input value={numberText} inputMode="numeric" placeholder="1" disabled={checking || preparing} onChange={(event) => { setNumberText(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
+        <label>Offer currency <select value={currency} disabled={checking || preparing} onChange={(event) => {
+            setCurrency(event.target.value as OfferCurrency); setPriceText(""); setReadiness(null); setError("")
+        }}><option value="ugnot">GNOT</option><option value={WUGNOT_KEY}>WUGNOT</option></select></label>
         <button type="button" className="os-btn os-quiet" disabled={checking} onClick={check}>{checking ? "Checking chain…" : "Check NFT"}</button>
         {error && <p role="alert">{error}</p>}
         {readiness && <div className="os-stack os-tight">
             <strong>{readiness.collection.name} · {readiness.collection.id} #{readiness.number.toString()}</strong>
             <span>Current owner <code>{readiness.owner}</code></span>
+            <span>Escrow currency <code>{currency}</code></span>
             <span>DAO trading fee: {formatBPS(readiness.feeBPS)} · Creator royalties: {formatBPS(readiness.collection.royaltyBPS)}</span>
             <span>Market policy: {readiness.policyReady ? "ready" : "paused or unavailable"}</span>
-            {receipt && scope ? <div className="os-stack os-tight os-note os-warn" role="status">
-                <strong>Previous funded-offer outcome needs review</strong>
+            {locked && lockedScope ? <div className="os-stack os-tight os-note os-warn" role="status">
+                <strong>Previous {approvalReceipt ? "approval" : "funded-offer"} outcome needs review</strong>
                 <span>Check the transaction and offer records before funding another offer for this NFT.</span>
-                {receipt.hash && (txExplorerUrl(receipt.hash, session.network.chainId)
-                    ? <a href={txExplorerUrl(receipt.hash, session.network.chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
+                {locked.hash && (txExplorerUrl(locked.hash, session.network.chainId)
+                    ? <a href={txExplorerUrl(locked.hash, session.network.chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{locked.hash}</code>)}
                 <button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh offers</button>
                 <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and know whether this offer was funded.</label>
                 <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
-                    try { clearGovernanceReceipt(scope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
+                    try { clearGovernanceReceipt(lockedScope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refreshSpend() }
                     catch { /* an in-flight wallet request keeps the receipt locked */ }
                 }}>Review a new offer</button>
             </div> : <>
-                <label>Offer price (GNOT) <input value={priceText} inputMode="decimal" placeholder="1.25" onChange={(event) => setPriceText(event.target.value.trim())} /></label>
+                <label>Offer price ({currency === "ugnot" ? "GNOT" : "WUGNOT"}) <input value={priceText}
+                    inputMode={currency === "ugnot" ? "decimal" : "numeric"} placeholder={currency === "ugnot" ? "1.25" : "1000000"}
+                    onChange={(event) => setPriceText(event.target.value.trim())} /></label>
                 <label>Offer duration <select value={days} onChange={(event) => setDays(Number(event.target.value))}>
                     <option value={1}>1 day</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
                 </select></label>
-                <button type="button" className="os-btn" disabled={preparing || !readiness.policyReady} onClick={() => {
+                {currency === WUGNOT_KEY && (spendState.loading ? <Loading label="Reading WUGNOT balance and allowance…" /> :
+                    spendState.error || !spendState.spend ? <ErrorState message="Could not verify WUGNOT balance and allowance." onRetry={refreshSpend} /> :
+                        <span>Balance {spendState.spend.balance.toLocaleString()} · Market allowance {spendState.spend.allowance.toLocaleString()} wugnot · Spender <code>{spendState.spend.spender}</code></span>)}
+                {currency === WUGNOT_KEY && tokenPrice !== null && spendState.spend && spendState.spend.balance < tokenPrice &&
+                    <span role="alert">Your WUGNOT balance is below the offer price.</span>}
+                <button type="button" className="os-btn" disabled={preparing || !readiness.policyReady ||
+                    (currency === WUGNOT_KEY && (tokenPrice === null || spendState.loading || spendState.error || !spendState.spend || spendState.spend.balance < tokenPrice))} onClick={() => {
                     setPreparing(true)
                     void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => {
-                        const price = parseGnotPrice(priceText)
+                        const price = currency === "ugnot" ? parseGnotPrice(priceText) : parseWugnotPrice(priceText)
                         const expiresAt = BigInt(Math.floor(Date.now() / 1000) + days * 86400)
-                        const estimatedGasFeeUgnot = feeForGasWanted(MAKE_OFFER_GAS_WANTED, gasPrice)
-                        signer.sign(makeNativeOfferRequest({ readiness, price, expiresAt, rpcUrl, chainId: session.network.chainId,
-                            estimatedGasFeeUgnot, onSettled: refresh }))
+                        if (currency === WUGNOT_KEY) {
+                            const spend = spendState.spend
+                            if (!spend) throw new Error("Refresh WUGNOT balance and allowance.")
+                            const needsApproval = spend.allowance < price
+                            const estimatedGasFeeUgnot = feeForGasWanted(needsApproval ? APPROVE_WUGNOT_GAS_WANTED : MAKE_OFFER_GAS_WANTED, gasPrice)
+                            signer.sign(needsApproval ? approveWugnotOfferRequest({ readiness, price, expiresAt, spend, rpcUrl,
+                                chainId: session.network.chainId, estimatedGasFeeUgnot, onSettled: refreshSpend }) :
+                                makeWugnotOfferRequest({ readiness, spend, price, expiresAt, rpcUrl,
+                                    chainId: session.network.chainId, estimatedGasFeeUgnot, onSettled: refreshSpend }))
+                        } else {
+                            const estimatedGasFeeUgnot = feeForGasWanted(MAKE_OFFER_GAS_WANTED, gasPrice)
+                            signer.sign(makeNativeOfferRequest({ readiness, price, expiresAt, rpcUrl, chainId: session.network.chainId,
+                                estimatedGasFeeUgnot, onSettled: refresh }))
+                        }
                     }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare this offer."))
                         .finally(() => setPreparing(false))
-                }}>{preparing ? "Preparing review…" : "Review funded offer"}</button>
+                }}>{preparing ? "Preparing review…" : currency === WUGNOT_KEY && tokenPrice !== null && spendState.spend && spendState.spend.allowance < tokenPrice ?
+                        "Review exact WUGNOT approval" : "Review funded offer"}</button>
             </>}
         </div>}
     </section>

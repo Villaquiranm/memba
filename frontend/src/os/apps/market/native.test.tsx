@@ -431,7 +431,7 @@ describe("native Market window", () => {
         const owner = `g1${"q".repeat(38)}`
         readOfferReadiness.mockResolvedValue({ collection: { id: "C7", name: "Art", mode: "open", tradable: true,
             royaltyBPS: 500n, royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] },
-            number: 3n, buyer, owner, configVersion: 4n, feeBPS: 50n, policyReady: true })
+            number: 3n, buyer, owner, configVersion: 4n, feeBPS: 50n, policyReady: true, currency: "ugnot" })
         const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: buyer, openConnect: vi.fn() } as never
         render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
         fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
@@ -446,6 +446,52 @@ describe("native Market window", () => {
         expect(request.prepare(undefined).msgs[0]).toMatchObject({ value: { caller: buyer, send: "1250000ugnot",
             func: "MakeOffer", args: ["C7", "3", "1250000", expect.any(String), "ugnot", "4"] } })
         expect(request.lines(undefined)).toContainEqual(["Escrow deposit", "1.25 GNOT (1,250,000 ugnot)"])
+    })
+
+    it("reviews WUGNOT offer approval and funding as separate wallet actions", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        listOffers.mockResolvedValue([])
+        const buyer = `g1${"p".repeat(38)}`
+        const owner = `g1${"q".repeat(38)}`
+        readOfferReadiness.mockResolvedValue({ collection: { id: "C7", name: "Art", mode: "open", tradable: true,
+            royaltyBPS: 500n, royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] },
+            number: 3n, buyer, owner, configVersion: 4n, feeBPS: 50n, policyReady: true, currency: WUGNOT_KEY })
+        const baseSpend = { currency: WUGNOT_KEY, owner: buyer, spender: MARKET_SPENDER, name: "wrapped GNOT",
+            symbol: "wugnot", decimals: 0, balance: 1000n, allowance: 0n }
+        readWugnotSpend.mockResolvedValue(baseSpend)
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: buyer, openConnect: vi.fn() } as never
+        const view = render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        fireEvent.change(screen.getByLabelText("Offer currency"), { target: { value: WUGNOT_KEY } })
+        fireEvent.change(screen.getByLabelText("Offer collection ID"), { target: { value: "C7" } })
+        fireEvent.change(screen.getByLabelText("Offer token number"), { target: { value: "3" } })
+        fireEvent.click(screen.getByRole("button", { name: "Check NFT" }))
+        expect(await screen.findByText(/Current owner/)).toBeInTheDocument()
+        expect(readOfferReadiness).toHaveBeenCalledWith(expect.any(String), "C7", 3n, buyer, WUGNOT_KEY)
+        fireEvent.change(screen.getByLabelText("Offer price (WUGNOT)"), { target: { value: "1000" } })
+        fireEvent.click(await screen.findByRole("button", { name: "Review exact WUGNOT approval" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: buyer, send: "", func: "Approve", args: [MARKET_SPENDER, "1000"] } })
+        view.unmount(); sign.mockClear()
+        readWugnotSpend.mockResolvedValue({ ...baseSpend, allowance: 1000n })
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        fireEvent.change(screen.getByLabelText("Offer currency"), { target: { value: WUGNOT_KEY } })
+        fireEvent.change(screen.getByLabelText("Offer collection ID"), { target: { value: "C7" } })
+        fireEvent.change(screen.getByLabelText("Offer token number"), { target: { value: "3" } })
+        fireEvent.click(screen.getByRole("button", { name: "Check NFT" }))
+        await screen.findByText(/Current owner/)
+        fireEvent.change(screen.getByLabelText("Offer price (WUGNOT)"), { target: { value: "1000" } })
+        fireEvent.click(await screen.findByRole("button", { name: "Review funded offer" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: buyer, send: "", func: "MakeOffer", args: ["C7", "3", "1000", expect.any(String), WUGNOT_KEY, "4"] } })
     })
 
     it("shows DAO proceeds and reviews only a personal receiver's claim", async () => {

@@ -14,7 +14,7 @@ const owner = `g1${"q".repeat(38)}`
 const artist = `g1${"a".repeat(38)}`
 const collection = { id: "C7", mode: "open", tradable: true, royaltyBPS: 500n,
     royalties: [{ account: artist, bps: 500n }] } as never
-const readiness: OfferReadiness = { collection, number: 3n, buyer, owner, configVersion: 4n, feeBPS: 50n, policyReady: true }
+const readiness: OfferReadiness = { collection, number: 3n, buyer, owner, configVersion: 4n, feeBPS: 50n, policyReady: true, currency: "ugnot" }
 
 function mockRead(count = 4) {
     vi.mocked(getLaunchpadNftCollection).mockResolvedValue(collection)

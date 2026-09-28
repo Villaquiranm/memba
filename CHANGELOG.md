@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: WUGNOT funded NFT offers (2026-09-28)
+
+- Let buyers choose WUGNOT for token-specific funded offers. Market reads the exact balance and allowance, separates a price-bounded approval from the offer escrow transaction, rechecks owner, policy and token spend before signing, and confirms the exact funded offer record afterward.
+
 ### Memba OS: WUGNOT marketplace proceeds (2026-09-28)
 
 - Show separate chain-backed native and WUGNOT credits for the DAO reserve and connected receiver. A personal receiver can review a direct WUGNOT claim with a fresh exact-amount check and its own uncertain-outcome lock; DAO reserve credits continue to require threshold multisig signing.

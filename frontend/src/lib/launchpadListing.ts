@@ -1,10 +1,11 @@
-/** Reviewed native-currency listing and exact-token approval for Launchpad NFTs. */
+/** Reviewed native or WUGNOT listing and exact-token approval for Launchpad NFTs. */
 import { parseQevalJSON, queryEval } from "./dao/shared"
 import { clearGovernanceReceipt, type GovernanceScope } from "./dao/governanceRecovery"
 import { packageAddress } from "./dao/weightedApplications"
 import { doContractBroadcast, type AminoMsg } from "./grc20"
 import { getLaunchpadNftCollection, type LaunchpadNftCollection } from "./launchpadNft"
 import { getLaunchpadMarketListing, getLaunchpadMarketTokenOwner, isLaunchpadMarketPolicyReady } from "./launchpadMarket"
+import { WUGNOT_KEY } from "./launchpadTokenTrade"
 import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "./nftConfig"
 import type { SignRequest } from "../os/sign/signer"
 
@@ -49,6 +50,19 @@ export function formatGnotPrice(ugnot: bigint): string {
     return `${whole.toLocaleString()}${fraction ? `.${fraction}` : ""} GNOT`
 }
 
+export type ListingCurrency = "ugnot" | typeof WUGNOT_KEY
+
+export function parseWugnotPrice(text: string): bigint {
+    if (!/^[1-9]\d*$/.test(text)) throw new Error("Enter a whole-number WUGNOT price.")
+    const amount = BigInt(text)
+    if (amount > MAX_INT64) throw new Error("Price is outside the supported range.")
+    return amount
+}
+
+function displayPrice(price: bigint, currency: ListingCurrency): string {
+    return currency === "ugnot" ? formatGnotPrice(price) : `${price.toLocaleString()} WUGNOT`
+}
+
 export interface ListingReadiness {
     collection: LaunchpadNftCollection
     number: bigint
@@ -59,10 +73,12 @@ export interface ListingReadiness {
     configVersion: bigint
     feeBPS: bigint
     policyReady: boolean
+    currency: ListingCurrency
 }
 
 /** Reads every prerequisite from chain. A stale config read is rejected. */
-export async function readListingReadiness(rpcUrl: string, collectionID: string, number: bigint, owner: string): Promise<ListingReadiness> {
+export async function readListingReadiness(rpcUrl: string, collectionID: string, number: bigint, owner: string,
+    currency: ListingCurrency = "ugnot"): Promise<ListingReadiness> {
     tokenIdentity(collectionID, number)
     if (!ADDRESS.test(owner)) throw new Error("Connect a valid seller wallet.")
     const version = qInt(await queryEval(rpcUrl, LAUNCHPAD_CONFIG_PATH, "GetCurrentVersion()", true))
@@ -73,7 +89,7 @@ export async function readListingReadiness(rpcUrl: string, collectionID: string,
         queryEval(rpcUrl, LAUNCHPAD_NFT_PATH, `MarketApprovalJSON(${JSON.stringify(collectionID)}, ${number.toString()})`, true),
         queryEval(rpcUrl, LAUNCHPAD_MARKET_PATH, `CurrentListingID(${JSON.stringify(collectionID)}, ${number.toString()})`, true).then(qString),
         queryEval(rpcUrl, LAUNCHPAD_CONFIG_PATH, `GetVersion(${version.toString()}).NFTSecondaryFeeBPS`, true).then(qInt),
-        isLaunchpadMarketPolicyReady(rpcUrl, "ugnot"),
+        isLaunchpadMarketPolicyReady(rpcUrl, currency),
     ])
     if (qInt(await queryEval(rpcUrl, LAUNCHPAD_CONFIG_PATH, "GetCurrentVersion()", true)) !== version) throw new Error("Market policy changed. Refresh before listing.")
     if (collection.mode !== "open" || !collection.tradable || tokenOwner !== owner) throw new Error("This Open NFT is not owned by the connected wallet.")
@@ -90,7 +106,7 @@ export async function readListingReadiness(rpcUrl: string, collectionID: string,
     if (feeBPS > 200n) throw new Error("Invalid market fee")
     const approvalScope = record.collectionApproved ? "collection" : record.tokenApproved ? "token" : "none"
     return { collection, number, owner, approved: approvalScope !== "none", approvalScope,
-        currentListingID, configVersion: version, feeBPS, policyReady }
+        currentListingID, configVersion: version, feeBPS, policyReady, currency }
 }
 
 function listingScope(chainId: string, caller: string, collection: string, number: bigint, operation: string): GovernanceScope {
@@ -117,7 +133,7 @@ function sameReadiness(a: ListingReadiness, b: ListingReadiness): boolean {
         a.collection.royaltyBPS === b.collection.royaltyBPS && a.number === b.number &&
         a.collection.royalties.length === b.collection.royalties.length &&
         a.collection.royalties.every((receiver, index) => receiver.account === b.collection.royalties[index].account && receiver.bps === b.collection.royalties[index].bps) &&
-        a.owner === b.owner && a.configVersion === b.configVersion && a.feeBPS === b.feeBPS &&
+        a.owner === b.owner && a.configVersion === b.configVersion && a.feeBPS === b.feeBPS && a.currency === b.currency &&
         a.currentListingID === b.currentListingID && a.policyReady === b.policyReady
 }
 
@@ -140,11 +156,11 @@ export function approveListingRequest(input: {
         acks: ["I checked the token, operator and chain before opening Adena."], label: () => label, receipt: scope,
         prepare: () => ({ msgs: [msg] }),
         recheck: async () => {
-            const fresh = await readListingReadiness(rpcUrl, id, readiness.number, readiness.owner)
+            const fresh = await readListingReadiness(rpcUrl, id, readiness.number, readiness.owner, readiness.currency)
             if (!sameReadiness(readiness, fresh) || fresh.approved) throw new Error("Token or market terms changed. Refresh before signing.")
         },
         send: (_choice, beforeSign) => doContractBroadcast([msg], label, { gasWanted: APPROVE_GAS_WANTED, retry: false, beforeSign }),
-        verify: async () => (await readListingReadiness(rpcUrl, id, readiness.number, readiness.owner)).approved,
+        verify: async () => (await readListingReadiness(rpcUrl, id, readiness.number, readiness.owner, readiness.currency)).approved,
         onSettled: (outcome) => {
             if (outcome === "confirmed") { try { clearGovernanceReceipt(scope) } catch { /* retain the conservative lock */ } }
             input.onSettled?.()
@@ -153,12 +169,12 @@ export function approveListingRequest(input: {
 }
 
 export function buildCreateListingMsg(readiness: ListingReadiness, price: bigint, expiresAt: bigint, now: bigint): AminoMsg {
-    if (!readiness.approved || !readiness.policyReady ||
+    if (!readiness.approved || !readiness.policyReady || (readiness.currency !== "ugnot" && readiness.currency !== WUGNOT_KEY) ||
         price < 1n || price > MAX_INT64 || expiresAt <= now || expiresAt > now + MAX_LISTING_AGE ||
         readiness.feeBPS > 200n || readiness.configVersion < 1n) throw new Error("This token is not ready to list. Refresh its terms.")
     return { type: "vm/MsgCall", value: { caller: readiness.owner, send: "", pkg_path: LAUNCHPAD_MARKET_PATH,
         func: "List", args: [readiness.collection.id, readiness.number.toString(), price.toString(),
-            expiresAt.toString(), "ugnot", readiness.configVersion.toString()],
+            expiresAt.toString(), readiness.currency, readiness.configVersion.toString()],
         max_deposit: `${LIST_STORAGE_CAP}ugnot` } }
 }
 
@@ -177,12 +193,12 @@ export function createListingRequest(input: {
     const royalties = readiness.collection.royalties.map((receiver) => ({ account: receiver.account, amount: price * receiver.bps / 10_000n }))
     const royaltyTotal = royalties.reduce((sum, receiver) => sum + receiver.amount, 0n)
     return {
-        title: "List collectible", summary: `${label} for ${formatGnotPrice(price)}`,
-        lines: () => [["Token", `${id} #${number.toString()}`], ["Buyer price", `${formatGnotPrice(price)} (${price.toLocaleString()} ugnot)`],
-            ["Seller receives", `${(price - protocolAmount - royaltyTotal).toLocaleString()} ugnot`],
-            ["DAO fee", `${protocolAmount.toLocaleString()} ugnot (${readiness.feeBPS.toString()} bps)`],
-            ["Creator royalties", `${royaltyTotal.toLocaleString()} ugnot`],
-            ...royalties.map((r, i): [string, string] => [`Royalty ${i + 1}`, `${r.amount.toLocaleString()} ugnot → ${r.account}`]),
+        title: "List collectible", summary: `${label} for ${displayPrice(price, readiness.currency)}`,
+        lines: () => [["Token", `${id} #${number.toString()}`], ["Buyer price", `${displayPrice(price, readiness.currency)} (${price.toLocaleString()} ${readiness.currency === "ugnot" ? "ugnot" : "wugnot"})`],
+            ["Seller receives", `${(price - protocolAmount - royaltyTotal).toLocaleString()} ${readiness.currency === "ugnot" ? "ugnot" : "wugnot"}`],
+            ["DAO fee", `${protocolAmount.toLocaleString()} ${readiness.currency === "ugnot" ? "ugnot" : "wugnot"} (${readiness.feeBPS.toString()} bps)`],
+            ["Creator royalties", `${royaltyTotal.toLocaleString()} ${readiness.currency === "ugnot" ? "ugnot" : "wugnot"}`],
+            ...royalties.map((r, i): [string, string] => [`Royalty ${i + 1}`, `${r.amount.toLocaleString()} ${readiness.currency === "ugnot" ? "ugnot" : "wugnot"} → ${r.account}`]),
             ["Expiry", new Date(Number(expiresAt) * 1000).toISOString()], ["Realm", LAUNCHPAD_MARKET_PATH],
             ["Network", chainId], ["Gas limit", LIST_GAS_WANTED.toLocaleString()],
             ["Estimated gas fee", `${estimatedGasFeeUgnot.toLocaleString()} ugnot`],
@@ -194,7 +210,7 @@ export function createListingRequest(input: {
         label: () => label, receipt: scope,
         prepare: () => ({ msgs: [msg] }),
         recheck: async () => {
-            const fresh = await readListingReadiness(rpcUrl, id, number, readiness.owner)
+            const fresh = await readListingReadiness(rpcUrl, id, number, readiness.owner, readiness.currency)
             if (!sameReadiness(readiness, fresh) || !fresh.approved) throw new Error("Token or market terms changed. Refresh before signing.")
             buildCreateListingMsg(fresh, price, expiresAt, BigInt(Math.floor(Date.now() / 1000)))
         },
@@ -205,7 +221,7 @@ export function createListingRequest(input: {
             if (!/^L[1-9]\d*$/.test(listingID)) return false
             const listing = await getLaunchpadMarketListing(rpcUrl, listingID)
             return listing.status === "active" && listing.collection === id && listing.number === number &&
-                listing.seller === readiness.owner && listing.price === price && listing.currency === "ugnot" &&
+                listing.seller === readiness.owner && listing.price === price && listing.currency === readiness.currency &&
                 listing.expiresAt === expiresAt && listing.configVersion === readiness.configVersion &&
                 listing.protocolFeeBPS === readiness.feeBPS && listing.royaltyBPS === readiness.collection.royaltyBPS
         },

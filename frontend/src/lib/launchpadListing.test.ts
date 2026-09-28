@@ -4,7 +4,8 @@ import { queryEval } from "./dao/shared"
 import { getLaunchpadNftCollection } from "./launchpadNft"
 import { getLaunchpadMarketListing, getLaunchpadMarketTokenOwner, isLaunchpadMarketPolicyReady } from "./launchpadMarket"
 import { APPROVE_GAS_WANTED, MARKET_OPERATOR, approveListingRequest, buildApproveListingMsg, buildCreateListingMsg,
-    createListingRequest, formatGnotPrice, parseGnotPrice, readListingReadiness, type ListingReadiness } from "./launchpadListing"
+    createListingRequest, formatGnotPrice, parseGnotPrice, parseWugnotPrice, readListingReadiness, type ListingReadiness } from "./launchpadListing"
+import { WUGNOT_KEY } from "./launchpadTokenTrade"
 
 vi.mock("./dao/shared", async (original) => ({ ...(await original<typeof import("./dao/shared")>()), queryEval: vi.fn() }))
 vi.mock("./launchpadNft", () => ({ getLaunchpadNftCollection: vi.fn() }))
@@ -16,7 +17,7 @@ const collection = { id: "C7", name: "Art", mode: "open", tradable: true, royalt
     royalties: [{ account: artist, bps: 500n }] } as never
 const readiness: ListingReadiness = {
     collection, number: 3n, owner: seller, approved: true, approvalScope: "token", currentListingID: "",
-    configVersion: 4n, feeBPS: 50n, policyReady: true,
+    configVersion: 4n, feeBPS: 50n, policyReady: true, currency: "ugnot",
 }
 
 function mockRead(approved = true) {
@@ -49,6 +50,31 @@ describe("Launchpad seller listing", () => {
         expect(formatGnotPrice(1_250_000n)).toBe("1.25 GNOT")
         expect(formatGnotPrice(9_007_199_254_740_993n)).toBe("9,007,199,254.740993 GNOT")
         for (const value of ["0", "1.0000001", "1e3", "01", "-1", "9223372036855"]) expect(() => parseGnotPrice(value)).toThrow()
+    })
+
+    it("requires whole-number WUGNOT prices and reads its separate trading policy", async () => {
+        expect(parseWugnotPrice("9007199254740993")).toBe(9007199254740993n)
+        for (const value of ["0", "1.5", "1e3", "01", "-1", "9223372036854775808"]) expect(() => parseWugnotPrice(value)).toThrow()
+        mockRead()
+        const actual = await readListingReadiness("rpc", "C7", 3n, seller, WUGNOT_KEY)
+        expect(actual.currency).toBe(WUGNOT_KEY)
+        expect(isLaunchpadMarketPolicyReady).toHaveBeenCalledWith("rpc", WUGNOT_KEY)
+        const now = 1_000_000n
+        expect(buildCreateListingMsg(actual, 1000n, now + 86400n, now)).toMatchObject({ value: {
+            send: "", func: "List", args: ["C7", "3", "1000", (now + 86400n).toString(), WUGNOT_KEY, "4"],
+        } })
+        const expiresAt = BigInt(Math.floor(Date.now() / 1000) + 86400)
+        const request = createListingRequest({ readiness: actual, price: 1000n,
+            expiresAt, rpcUrl: "rpc", chainId: "gnoland1", estimatedGasFeeUgnot: 60000 })
+        expect(request.lines(undefined)).toContainEqual(["DAO fee", "5 wugnot (50 bps)"])
+        await expect(request.recheck?.(undefined)).resolves.toBeUndefined()
+        vi.mocked(queryEval).mockResolvedValueOnce('("L9" string)')
+        vi.mocked(getLaunchpadMarketListing).mockResolvedValueOnce({ id: "L9", collection: "C7", number: 3n, seller,
+            price: 1000n, currency: WUGNOT_KEY, expiresAt,
+            configVersion: 4n, protocolFeeBPS: 50n, royaltyBPS: 500n, status: "active" } as never)
+        await expect(request.verify?.(undefined, "hash", undefined)).resolves.toBe(true)
+        vi.mocked(isLaunchpadMarketPolicyReady).mockResolvedValueOnce(false)
+        await expect(request.recheck?.(undefined)).rejects.toThrow("changed")
     })
 
     it("reads ownership, exact approval, policy version and fee from chain", async () => {

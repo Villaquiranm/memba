@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: WUGNOT NFT seller listings (2026-09-28)
+
+- Let sellers choose GNOT or WUGNOT for fixed-price Open NFT listings. WUGNOT prices use exact whole-token units, and the selected currency's market policy, seller and DAO fee, and creator royalties are reviewed and rechecked before signing.
+
 ### Memba OS: reviewed WUGNOT NFT purchases (2026-09-28)
 
 - Let collectors inspect a registered WUGNOT listing, approve only its exact price for the verified market spender, then review a separate token-funded Buy. Both actions recheck listing and policy; Buy rechecks balance, allowance and the full seller, DAO and creator split before signing and confirms the buyer owns the NFT afterward.

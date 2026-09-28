@@ -6,7 +6,7 @@ import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUN
 import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
 import { getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
 import { BUY_GAS_WANTED, CANCEL_GAS_WANTED, buyLaunchpadNativeRequest, buyScope, cancelLaunchpadListingRequest, cancelListingScope } from "../../../lib/launchpadTrade"
-import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveListingScope, createListingRequest, createListingScope, parseGnotPrice, readListingReadiness, type ListingReadiness } from "../../../lib/launchpadListing"
+import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveListingScope, createListingRequest, createListingScope, parseGnotPrice, parseWugnotPrice, readListingReadiness, type ListingCurrency, type ListingReadiness } from "../../../lib/launchpadListing"
 import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferExit } from "../../../lib/launchpadOfferExit"
 import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
 import { ACCEPT_OFFER_GAS_WANTED, acceptOfferRequest, acceptOfferScope } from "../../../lib/launchpadOfferAccept"
@@ -167,6 +167,7 @@ function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
     const [collectionID, setCollectionID] = useState("")
     const [numberText, setNumberText] = useState("")
     const [priceText, setPriceText] = useState("")
+    const [currency, setCurrency] = useState<ListingCurrency>("ugnot")
     const [days, setDays] = useState(7)
     const [readiness, setReadiness] = useState<ListingReadiness | null>(null)
     const [checking, setChecking] = useState(false)
@@ -180,7 +181,7 @@ function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
     const refresh = () => {
         if (!readiness) return
         setChecking(true)
-        void readListingReadiness(rpcUrl, readiness.collection.id, readiness.number, session.address).then((fresh) => {
+        void readListingReadiness(rpcUrl, readiness.collection.id, readiness.number, session.address, currency).then((fresh) => {
             setReadiness(fresh); setError("")
         }).catch((cause) => { setReadiness(null); setError(cause instanceof Error ? cause.message : "Could not verify this NFT.") })
             .finally(() => setChecking(false))
@@ -201,7 +202,7 @@ function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
                 signer.sign(approveListingRequest({ readiness, rpcUrl, chainId: session.network.chainId,
                     estimatedGasFeeUgnot, onSettled: refresh }))
             } else {
-                const price = parseGnotPrice(priceText)
+                const price = currency === "ugnot" ? parseGnotPrice(priceText) : parseWugnotPrice(priceText)
                 const expiresAt = BigInt(Math.floor(Date.now() / 1000) + days * 86400)
                 const estimatedGasFeeUgnot = feeForGasWanted(LIST_GAS_WANTED, gasPrice)
                 signer.sign(createListingRequest({ readiness, price, expiresAt, rpcUrl,
@@ -211,13 +212,16 @@ function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
             .finally(() => setPreparing(false))
     }
     return <section className="os-stack" aria-label="List a Launchpad NFT">
-        <div><h2>Sell a collectible</h2><p className="os-sub">Approve one Open NFT for Market, then set a fixed native price. SoulBound assets cannot be listed.</p></div>
+        <div><h2>Sell a collectible</h2><p className="os-sub">Approve one Open NFT for Market, then set a fixed GNOT or WUGNOT price. SoulBound assets cannot be listed.</p></div>
         <label>Collection ID <input value={collectionID} placeholder="C1" disabled={checking || preparing} onChange={(event) => { setCollectionID(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
         <label>Token number <input value={numberText} inputMode="numeric" placeholder="1" disabled={checking || preparing} onChange={(event) => { setNumberText(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
+        <label>Payment currency <select value={currency} disabled={checking || preparing} onChange={(event) => {
+            setCurrency(event.target.value as ListingCurrency); setPriceText(""); setReadiness(null); setError("")
+        }}><option value="ugnot">GNOT</option><option value={WUGNOT_KEY}>WUGNOT</option></select></label>
         <button type="button" className="os-btn os-quiet" disabled={checking} onClick={() => {
             if (!/^C[1-9]\d*$/.test(collectionID) || !/^[1-9]\d*$/.test(numberText)) { setError("Enter a collection ID and positive token number."); return }
             setChecking(true); setError("")
-            void readListingReadiness(rpcUrl, collectionID, BigInt(numberText), session.address).then(setReadiness)
+            void readListingReadiness(rpcUrl, collectionID, BigInt(numberText), session.address, currency).then(setReadiness)
                 .catch((cause) => { setReadiness(null); setError(cause instanceof Error ? cause.message : "Could not verify this NFT.") })
                 .finally(() => setChecking(false))
         }}>{checking ? "Checking chain…" : "Check token"}</button>
@@ -225,6 +229,7 @@ function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
         {readiness && <div className="os-stack os-note">
             <strong>{readiness.collection.name} · {readiness.collection.id} #{readiness.number.toString()}</strong>
             <span>Owner <code>{readiness.owner}</code></span>
+            <span>Buyer pays {currency === "ugnot" ? "GNOT" : "WUGNOT"} · Registered key <code>{currency}</code></span>
             <span>Approval: {readiness.approvalScope === "collection" ? "Collection-wide approval already exists" : readiness.approved ? "This token is approved" : "This token needs approval"}</span>
             <span>DAO trading fee: {formatBPS(readiness.feeBPS)} · Creator royalties: {formatBPS(readiness.collection.royaltyBPS)}</span>
             <span>Market policy: {readiness.policyReady ? "ready" : "paused or unavailable"}</span>
@@ -241,7 +246,8 @@ function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {
                     catch { /* an in-flight wallet request keeps the receipt locked */ }
                 }}>Review a new attempt</button>
             </div> : !readiness.approved ? <button type="button" className="os-btn" disabled={preparing || !readiness.policyReady} onClick={() => review("approve")}>{preparing ? "Preparing review…" : "Review token approval"}</button> : <>
-                <label>Price (GNOT) <input value={priceText} inputMode="decimal" placeholder="1.25" onChange={(event) => setPriceText(event.target.value.trim())} /></label>
+                <label>Price ({currency === "ugnot" ? "GNOT" : "WUGNOT"}) <input value={priceText} inputMode={currency === "ugnot" ? "decimal" : "numeric"}
+                    placeholder={currency === "ugnot" ? "1.25" : "1000000"} onChange={(event) => setPriceText(event.target.value.trim())} /></label>
                 <label>Listing duration <select value={days} onChange={(event) => setDays(Number(event.target.value))}>
                     <option value={1}>1 day</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
                 </select></label>

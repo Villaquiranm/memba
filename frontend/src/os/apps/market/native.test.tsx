@@ -254,7 +254,7 @@ describe("native Market window", () => {
         const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
         const terms = { collection: { id: "C7", name: "Art", mode: "open", tradable: true, royaltyBPS: 500n,
             royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] }, number: 3n, owner: seller,
-            approved: false, approvalScope: "none", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true }
+            approved: false, approvalScope: "none", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true, currency: "ugnot" }
         readListingReadiness.mockResolvedValueOnce(terms)
         render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
         fireEvent.click(screen.getByRole("tab", { name: "Sell" }))
@@ -262,7 +262,7 @@ describe("native Market window", () => {
         fireEvent.change(screen.getByLabelText("Token number"), { target: { value: "3" } })
         fireEvent.click(screen.getByRole("button", { name: "Check token" }))
         expect(await screen.findByText(/This token needs approval/)).toBeInTheDocument()
-        expect(readListingReadiness).toHaveBeenCalledWith(expect.any(String), "C7", 3n, seller)
+        expect(readListingReadiness).toHaveBeenCalledWith(expect.any(String), "C7", 3n, seller, "ugnot")
         fireEvent.click(screen.getByRole("button", { name: "Review token approval" }))
         await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
         expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: { caller: seller, func: "Approve", args: ["C7", expect.stringMatching(/^g1/), "3"] } })
@@ -279,7 +279,7 @@ describe("native Market window", () => {
         const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
         const terms = { collection: { id: "C7", name: "Art", mode: "open", tradable: true, royaltyBPS: 500n,
             royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] }, number: 3n, owner: seller,
-            approved: true, approvalScope: "token", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true }
+            approved: true, approvalScope: "token", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true, currency: "ugnot" }
         readListingReadiness.mockResolvedValueOnce(terms).mockResolvedValueOnce({ ...terms, currentListingID: "L8" })
         render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
         fireEvent.click(screen.getByRole("tab", { name: "Sell" }))
@@ -296,6 +296,35 @@ describe("native Market window", () => {
         fireEvent.click(screen.getByRole("button", { name: "Check token" }))
         expect(await screen.findByText(/Listing L8 exists for this token/)).toBeInTheDocument()
         expect(screen.getByRole("button", { name: "Review listing" })).toBeEnabled()
+    })
+
+    it("reviews a WUGNOT listing with its registered key and whole-number price", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        const seller = `g1${"p".repeat(38)}`
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
+        const terms = { collection: { id: "C7", name: "Art", mode: "open", tradable: true, royaltyBPS: 500n,
+            royalties: [{ account: `g1${"a".repeat(38)}`, bps: 500n }] }, number: 3n, owner: seller,
+            approved: true, approvalScope: "token", currentListingID: "", configVersion: 4n, feeBPS: 50n, policyReady: true, currency: WUGNOT_KEY }
+        readListingReadiness.mockResolvedValue(terms)
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Sell" }))
+        fireEvent.change(screen.getByLabelText("Payment currency"), { target: { value: WUGNOT_KEY } })
+        fireEvent.change(screen.getByLabelText("Collection ID"), { target: { value: "C7" } })
+        fireEvent.change(screen.getByLabelText("Token number"), { target: { value: "3" } })
+        fireEvent.click(screen.getByRole("button", { name: "Check token" }))
+        expect(await screen.findByText(/This token is approved/)).toBeInTheDocument()
+        expect(readListingReadiness).toHaveBeenCalledWith(expect.any(String), "C7", 3n, seller, WUGNOT_KEY)
+        fireEvent.change(screen.getByLabelText("Price (WUGNOT)"), { target: { value: "1000" } })
+        fireEvent.click(screen.getByRole("button", { name: "Review listing" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: seller, send: "", func: "List", args: ["C7", "3", "1000", expect.any(String), WUGNOT_KEY, "4"],
+        } })
     })
 
     it("shows funded offers and a fresh split in a separate read-only tab", async () => {

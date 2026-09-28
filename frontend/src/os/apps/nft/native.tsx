@@ -4,22 +4,28 @@
  * classic /nft page used to redirect there, leaving this window empty. On
  * networks without an enabled collection registry, the home explains the
  * separate build flag and realm gates; elsewhere it offers its own sections
- * plus a shortcut into Market's NFT listings. Every other section is still the
- * classic page, handed through as `fallback`.
+ * plus a shortcut into Market's NFT listings. The Launchpad creation section
+ * handles reviewed static collections; other sections still use `fallback`.
  *
  * @module os/apps/nft/native
  */
 import { useEffect, useState } from "react"
 import type { NativeViewProps } from "../../native/types"
 import { GNO_CHAIN_ID, GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
-import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_DROPS_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
 import { listLaunchpadNftCollections, type LaunchpadNftCollection } from "../../../lib/launchpadNft"
 import { getLaunchpadNftCapabilities, type LaunchpadNftCapabilities } from "../../../lib/launchpadNftCapabilities"
 import { Card, CardGrid, Empty, ErrorState, Loading, Pill } from "../../kit"
 import { Icon } from "../../shell/icons"
 import { specForTarget } from "../../shell/windows"
+import CreateLaunchpadCollection from "./create"
 
-export default function NftWindow({ section, session, open, openApp, fallback }: NativeViewProps) {
+export default function NftWindow({ section, session, open, openApp, fallback, toast }: NativeViewProps) {
+    if (section === "create" && isNftEnabled() && isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)) {
+        return <CreateLaunchpadCollection key={session.network.key} rpcUrl={NETWORKS[session.network.key]?.rpcUrl ?? GNO_RPC_URL}
+            session={session} available={[LAUNCHPAD_NFT_PATH, LAUNCHPAD_DROPS_PATH, LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_FEES_PATH]
+                .every((path) => isRealmValidOn(session.network.key, path))} toast={toast} />
+    }
     if (section !== null) return <>{fallback}</>
 
     const enabled = isNftEnabled()
@@ -63,6 +69,10 @@ export default function NftWindow({ section, session, open, openApp, fallback }:
                 {ledgerAvailable && launchpadMarketAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "market", section: "launchpad" })!)}>
                     <Icon name="tag" />
                     <span className="os-grow"><b>Launchpad sale records</b><span className="os-sub os-block">Inspect listings and on-chain fee splits in Market</span></span>
+                </Card>}
+                {ledgerAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "create" })!)}>
+                    <Icon name="nft" />
+                    <span className="os-grow"><b>Create a Launchpad collection</b><span className="os-sub os-block">Review permanent rights and the DAO fee</span></span>
                 </Card>}
                 {legacyAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "create" })!)}>
                     <Icon name="nft" />

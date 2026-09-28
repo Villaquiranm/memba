@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: native static NFT collection creation (2026-09-28)
+
+- Add a gated native NFT creator form for Open and Soulbound static collections. It reads the versioned DAO creation fee and treasury, reviews permanent supply, transfer, revocation and metadata terms, rechecks policy before signing, and confirms the exact new collection record. Reveal, royalties, uploads and drop stages remain separate creator work.
+
 ### Memba OS: WUGNOT funded NFT offers (2026-09-28)
 
 - Let buyers choose WUGNOT for token-specific funded offers. Market reads the exact balance and allowance, separates a price-bounded approval from the offer escrow transaction, rechecks owner, policy and token spend before signing, and confirms the exact funded offer record afterward.

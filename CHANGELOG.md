@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: funded NFT offer records (2026-09-28)
+
+- Add a guarded, read-only Offers tab to native Market. Show chain-backed buyer, escrow status, expiry and the seller/DAO/royalty split without enabling offer signing before the contract and wallet release gates pass.
+
 ### Memba OS: native Market desk and guarded Launchpad sale records (2026-09-28)
 
 - Open a native Market home for services and collectibles. After the Launchpad ledger and market are deployed and allowlisted, read exact sale records and seller, DAO and royalty quotes from chain; keep buying disabled until the trading review and wallet flow are complete.

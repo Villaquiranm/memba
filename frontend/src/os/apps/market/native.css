@@ -20,6 +20,11 @@
 .memba-os .os-market-records-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--os-line); padding-bottom: 12px; }
 .memba-os .os-market-records-head h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -.04em; }
 .memba-os .os-market-records-head p { margin: 0; max-width: 66ch; }
+.memba-os .os-market-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--os-line); }
+.memba-os .os-market-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--os-mut); padding: 9px 16px 8px; font: inherit; font-weight: 700; cursor: pointer; }
+.memba-os .os-market-tabs button[aria-selected="true"] { border-bottom-color: var(--os-acc); color: var(--os-ink); }
+.memba-os .os-market-tabs button:hover { color: var(--os-ink); }
+.memba-os .os-market-tab-description { max-width: 72ch; margin: 0; }
 .memba-os .os-market-list { display: grid; border-top: 1px solid var(--os-line); }
 .memba-os .os-market-record { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px 22px; align-items: center; padding: 16px 4px; border-bottom: 1px solid var(--os-line); }
 .memba-os .os-market-record-core { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; min-width: 0; }

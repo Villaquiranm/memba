@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import type { NativeViewProps } from "../../native/types"
 import { GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
 import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
-import { getLaunchpadMarketQuote, listLaunchpadMarketListings, type LaunchpadMarketListing, type LaunchpadMarketQuote } from "../../../lib/launchpadMarket"
+import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
 import { Empty, ErrorState, Loading, Pill } from "../../kit"
 import { specForTarget } from "../../shell/windows"
 import "./native.css"
@@ -49,6 +49,22 @@ export default function MarketWindow({ section, session, open, fallback }: Nativ
 }
 
 function LaunchpadMarket({ rpcUrl, openServices }: { rpcUrl: string; openServices: () => void }) {
+    const [tab, setTab] = useState<"listings" | "offers">("listings")
+    return <div className="os-stack os-market-records">
+        <header className="os-market-records-head">
+            <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
+            <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
+        </header>
+        <div className="os-note" role="note">This view is read only while trading and wallet review are being completed. Ownership, approval and policy are checked again before settlement.</div>
+        <div className="os-market-tabs" role="tablist" aria-label="Collectible market records">
+            <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
+            <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
+        </div>
+        {tab === "listings" ? <LaunchpadListings rpcUrl={rpcUrl} /> : <LaunchpadOffers rpcUrl={rpcUrl} />}
+    </div>
+}
+
+function LaunchpadListings({ rpcUrl }: { rpcUrl: string }) {
     const [items, setItems] = useState<LaunchpadMarketListing[]>([])
     const [page, setPage] = useState(0)
     const [revision, setRevision] = useState(0)
@@ -87,12 +103,7 @@ function LaunchpadMarket({ rpcUrl, openServices }: { rpcUrl: string; openService
     }, [rpcUrl, selected, items])
 
     const retry = () => setRevision((value) => value + 1)
-    return <div className="os-stack os-market-records">
-        <header className="os-market-records-head">
-            <div><h1>Collectibles</h1><p className="os-sub">Sale records from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
-            <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
-        </header>
-        <div className="os-note" role="note">This view is read only while trading and wallet review are being completed. A listing marked active can still become unavailable if ownership, approval or policy changes.</div>
+    return <div className="os-stack">
         {loading && items.length === 0 && <Loading label="Loading Launchpad sale records…" />}
         {error && <ErrorState message="Could not read sale records from this network." onRetry={retry} />}
         {!loading && !error && items.length === 0 && <Empty title="No Launchpad sale records have been created yet." />}
@@ -101,7 +112,7 @@ function LaunchpadMarket({ rpcUrl, openServices }: { rpcUrl: string; openService
                 <span className="os-market-token">{item.collection} <span aria-hidden="true">/</span> #{item.number.toString()}</span>
                 <strong>{item.price.toLocaleString()} <small>{currencyLabel(item.currency)}</small></strong>
             </div>
-            <div className="os-market-record-meta"><Pill tone={item.status === "active" ? "ok" : "neutral"}>{item.status}</Pill><span>DAO {formatBPS(item.protocolFeeBPS)} · Creator {formatBPS(item.royaltyBPS)}</span></div>
+            <div className="os-market-record-meta"><Pill tone={item.status === "active" ? "ok" : "neutral"}>{item.status}</Pill><span>DAO {formatBPS(item.protocolFeeBPS)} · Creator {formatBPS(item.royaltyBPS)}</span><span>Seller {item.seller.slice(0, 10)}{item.seller.length > 10 ? "…" : ""}</span></div>
             <button type="button" className="os-btn os-quiet" aria-expanded={selected === item.id} onClick={() => { setSelected((id) => id === item.id ? null : item.id); setQuote(null) }}>{selected === item.id ? "Hide terms" : "Inspect terms"}</button>
             {selected === item.id && <div className="os-market-terms">
                 <span>Seller <code>{item.seller}</code></span>
@@ -120,5 +131,79 @@ function LaunchpadMarket({ rpcUrl, openServices }: { rpcUrl: string; openService
     </div>
 }
 
+function LaunchpadOffers({ rpcUrl }: { rpcUrl: string }) {
+    const [items, setItems] = useState<LaunchpadMarketOffer[]>([])
+    const [page, setPage] = useState(0)
+    const [revision, setRevision] = useState(0)
+    const [settled, setSettled] = useState({ page: -1, revision: -1, error: false })
+    const [hasMore, setHasMore] = useState(false)
+    const [selected, setSelected] = useState<string | null>(null)
+    const [quote, setQuote] = useState<{ id: string; value?: LaunchpadOfferQuote; error?: boolean } | null>(null)
+    const loading = settled.page !== page || settled.revision !== revision
+    const error = !loading && settled.error
+
+    useEffect(() => {
+        let cancelled = false
+        void listLaunchpadMarketOffers(rpcUrl, page, PAGE_SIZE).then((next) => {
+            if (cancelled) return
+            setItems((previous) => page === 0 ? next : [...previous, ...next])
+            setHasMore(next.length === PAGE_SIZE)
+            setSettled({ page, revision, error: false })
+        }).catch(() => {
+            if (cancelled) return
+            setSettled({ page, revision, error: true })
+        })
+        return () => { cancelled = true }
+    }, [rpcUrl, page, revision])
+
+    useEffect(() => {
+        if (!selected) return
+        const item = items.find((offer) => offer.id === selected)
+        if (!item) return
+        let cancelled = false
+        void getLaunchpadOfferQuote(rpcUrl, item).then((value) => {
+            if (!cancelled) setQuote({ id: selected, value })
+        }).catch(() => {
+            if (!cancelled) setQuote({ id: selected, error: true })
+        })
+        return () => { cancelled = true }
+    }, [rpcUrl, selected, items])
+
+    const retry = () => setRevision((value) => value + 1)
+    return <div className="os-stack">
+        <p className="os-sub os-market-tab-description">A buyer funds each offer in full. Active escrow stays in the market until the owner accepts or the buyer exits; expired offers can be refunded to the buyer.</p>
+        {loading && items.length === 0 && <Loading label="Loading Launchpad offers…" />}
+        {error && <ErrorState message="Could not read offers from this network." onRetry={retry} />}
+        {!loading && !error && items.length === 0 && <Empty title="No Launchpad offers have been created yet." />}
+        {items.length > 0 && <div className="os-market-list" role="list">{items.map((item) => <article className="os-market-record" role="listitem" key={item.id}>
+            <div className="os-market-record-core">
+                <span className="os-market-token">{item.collection} <span aria-hidden="true">/</span> #{item.number.toString()}</span>
+                <strong>{item.price.toLocaleString()} <small>{currencyLabel(item.currency)}</small></strong>
+            </div>
+            <div className="os-market-record-meta"><Pill tone={item.status === "active" ? "ok" : "neutral"}>{item.status}</Pill><span>DAO {formatBPS(item.protocolFeeBPS)} · Creator {formatBPS(item.royaltyBPS)}</span><span>Buyer {item.buyer.slice(0, 10)}{item.buyer.length > 10 ? "…" : ""}</span></div>
+            <button type="button" className="os-btn os-quiet" aria-expanded={selected === item.id} onClick={() => { setSelected((id) => id === item.id ? null : item.id); setQuote(null) }}>{selected === item.id ? "Hide terms" : "Inspect terms"}</button>
+            {selected === item.id && <div className="os-market-terms">
+                <span>Buyer <code>{item.buyer}</code></span>
+                <span>Currency <code>{item.currency}</code></span>
+                <span>Offer {item.id} · Fee fixed at config version {item.configVersion.toString()}</span>
+                <span>Expires {formatExpiry(item.expiresAt)}</span>
+                {item.status === "cancelled" || item.status === "expired" ? <span>Escrow was returned to the buyer.</span> : item.status === "accepted" ? <span>Escrow was settled to the seller, DAO and royalty receivers.</span> : <span>The buyer can cancel this funded offer, including while trading is paused.</span>}
+                {!quote || quote.id !== item.id || (!quote.value && !quote.error) ? <Loading label="Reading offer split…" /> : quote.error ? <span role="alert">Could not verify the current offer split.</span> : <>
+                    <span>Seller receives {quote.value!.sellerAmount.toLocaleString()} · DAO receives {quote.value!.protocolAmount.toLocaleString()} · Creator royalties {quote.value!.royaltyTotal.toLocaleString()}</span>
+                    <span>DAO treasury <code>{quote.value!.treasury}</code></span>
+                    {quote.value!.royalties.map((receiver) => <span key={receiver.account}>Royalty {receiver.amount.toLocaleString()} to <code>{receiver.account}</code></span>)}
+                    <span>{quote.value!.executable ? "Token and owner approval currently allow acceptance." : "Offer is not executable now."} Trading policy is checked again when accepting.</span>
+                </>}
+            </div>}
+        </article>)}</div>}
+        {loading && items.length > 0 && <Loading label="Loading more offers…" />}
+        {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more offers</button>}
+    </div>
+}
+
 function currencyLabel(key: string): string { return key === "ugnot" ? "ugnot" : key.split(".").at(-1) ?? key }
 function formatBPS(bps: bigint): string { return `${(Number(bps) / 100).toFixed(2)}%` }
+function formatExpiry(seconds: bigint): string {
+    const date = new Date(Number(seconds) * 1000)
+    return Number.isFinite(date.getTime()) ? date.toLocaleString() : `${seconds.toString()} Unix seconds`
+}

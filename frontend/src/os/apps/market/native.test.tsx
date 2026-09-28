@@ -6,18 +6,27 @@ import MarketWindow from "./native"
 const availability = vi.hoisted(() => ({ enabled: false, ledger: false, market: false }))
 const list = vi.hoisted(() => vi.fn())
 const getQuote = vi.hoisted(() => vi.fn())
+const listOffers = vi.hoisted(() => vi.fn())
+const getOfferQuote = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
     isRealmValidOn: (_network: string, path: string) => path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === LAUNCHPAD_MARKET_PATH ? availability.market : false,
 }))
-vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: list, getLaunchpadMarketQuote: getQuote }))
+vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: list, getLaunchpadMarketQuote: getQuote,
+    listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote }))
 
 const item = { id: "L1", collection: "C4", number: 1n, seller: "g1seller", price: 10000n, currency: "ugnot",
     expiresAt: 1000n, createdAt: 500n, configVersion: 2n, protocolFeeBPS: 50n, royaltyBPS: 500n, status: "active" }
 const quote = { listing: "L1", price: 10000n, currency: "ugnot", sellerAmount: 9450n,
     protocolAmount: 50n, royaltyTotal: 500n, treasury: "g1treasury", currentConfigVersion: 2n,
     executable: true, royalties: [{ account: "g1artist", amount: 500n }] }
+const offer = { id: "O1", collection: "C4", number: 1n, buyer: "g1buyer", price: 10000n, currency: "ugnot",
+    expiresAt: 2000000000n, createdAt: 1000000000n, configVersion: 3n, protocolFeeBPS: 200n,
+    royaltyBPS: 500n, status: "active" }
+const offerQuote = { offer: "O1", price: 10000n, currency: "ugnot", sellerAmount: 9300n,
+    protocolAmount: 200n, royaltyTotal: 500n, treasury: "g1treasury", currentConfigVersion: 4n,
+    executable: false, royalties: [{ account: "g1artist", amount: 500n }] }
 const base = { query: undefined, close: () => {}, toast: () => {}, openApp: () => {}, fallback: <p>classic market</p>,
     session: { network: { key: "testnet12" } } as never }
 
@@ -28,6 +37,8 @@ describe("native Market window", () => {
         availability.market = false
         list.mockReset()
         getQuote.mockReset()
+        listOffers.mockReset()
+        getOfferQuote.mockReset()
     })
 
     it("keeps existing Market sections in their current lane", () => {
@@ -77,5 +88,25 @@ describe("native Market window", () => {
         render(<MarketWindow {...base} section="launchpad" open={vi.fn()} />)
         expect(await screen.findByRole("alert")).toHaveTextContent("Could not read sale records")
         expect(screen.queryByText("No Launchpad sale records have been created yet.")).toBeNull()
+    })
+
+    it("shows funded offers and a fresh split in a separate read-only tab", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        list.mockResolvedValue([])
+        listOffers.mockResolvedValue([offer])
+        getOfferQuote.mockResolvedValue(offerQuote)
+        render(<MarketWindow {...base} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        expect(await screen.findByText(/g1buyer/)).toBeInTheDocument()
+        expect(screen.getByText(/DAO 2.00%/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Inspect terms" }))
+        await waitFor(() => expect(screen.getByText(/Seller receives 9,300/)).toBeInTheDocument())
+        expect(screen.getByText(/The buyer can cancel this funded offer/)).toBeInTheDocument()
+        expect(screen.getByText(/Offer is not executable now/)).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: /Accept offer|Cancel offer/ })).toBeNull()
+        expect(listOffers).toHaveBeenCalledWith(expect.any(String), 0, 20)
+        expect(getOfferQuote).toHaveBeenCalledWith(expect.any(String), offer)
     })
 })

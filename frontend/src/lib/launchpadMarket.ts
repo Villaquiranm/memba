@@ -1,0 +1,130 @@
+/** Strict reads for the unpublished Launchpad fixed-price NFT market. */
+import { queryEval, parseQevalJSON } from "./dao/shared"
+import { LAUNCHPAD_MARKET_PATH } from "./nftConfig"
+
+const MAX_INT64 = 9223372036854775807n
+const LISTING_KEYS = ["id", "collection", "number", "seller", "price", "currency", "expiresAt", "createdAt", "configVersion", "protocolFeeBPS", "royaltyBPS", "status"] as const
+const QUOTE_KEYS = ["listing", "price", "currency", "sellerAmount", "protocolAmount", "royaltyTotal", "treasury", "currentConfigVersion", "executable", "royalties"] as const
+
+export type LaunchpadMarketStatus = "active" | "replaced" | "cancelled" | "filled"
+
+export interface LaunchpadMarketListing {
+    id: string
+    collection: string
+    number: bigint
+    seller: string
+    price: bigint
+    currency: string
+    expiresAt: bigint
+    createdAt: bigint
+    configVersion: bigint
+    protocolFeeBPS: bigint
+    royaltyBPS: bigint
+    status: LaunchpadMarketStatus
+}
+
+export interface LaunchpadMarketQuote {
+    listing: string
+    price: bigint
+    currency: string
+    sellerAmount: bigint
+    protocolAmount: bigint
+    royaltyTotal: bigint
+    treasury: string
+    currentConfigVersion: bigint
+    executable: boolean
+    royalties: { account: string; amount: bigint }[]
+}
+
+function row(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid ${label} response`)
+    const result = value as Record<string, unknown>
+    if (Object.keys(result).sort().join("|") !== [...keys].sort().join("|")) throw new Error(`Invalid ${label} fields`)
+    return result
+}
+
+function text(value: unknown, label: string): string {
+    if (typeof value !== "string" || value.length === 0) throw new Error(`Invalid ${label}`)
+    return value
+}
+
+function amount(value: unknown, label: string): bigint {
+    if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) throw new Error(`Invalid ${label}`)
+    const n = BigInt(value)
+    if (n > MAX_INT64) throw new Error(`Invalid ${label}`)
+    return n
+}
+
+function listingId(value: unknown): string {
+    const id = text(value, "listing ID")
+    if (!/^L[1-9]\d*$/.test(id)) throw new Error("Invalid listing ID")
+    return id
+}
+
+export function parseLaunchpadMarketListing(value: unknown): LaunchpadMarketListing {
+    const item = row(value, LISTING_KEYS, "listing")
+    const collection = text(item.collection, "collection ID")
+    if (!/^C[1-9]\d*$/.test(collection)) throw new Error("Invalid collection ID")
+    const status = text(item.status, "listing status")
+    if (status !== "active" && status !== "replaced" && status !== "cancelled" && status !== "filled") throw new Error("Invalid listing status")
+    const number = amount(item.number, "token number")
+    const price = amount(item.price, "listing price")
+    const createdAt = amount(item.createdAt, "creation time")
+    const expiresAt = amount(item.expiresAt, "expiry")
+    const protocolFeeBPS = amount(item.protocolFeeBPS, "protocol fee")
+    const royaltyBPS = amount(item.royaltyBPS, "royalty rate")
+    if (number === 0n || price === 0n || createdAt === 0n || expiresAt <= createdAt ||
+        protocolFeeBPS > 200n || royaltyBPS > 1000n) throw new Error("Inconsistent listing terms")
+    return {
+        id: listingId(item.id), collection, number,
+        seller: text(item.seller, "seller"), price,
+        currency: text(item.currency, "currency"), expiresAt, createdAt,
+        configVersion: amount(item.configVersion, "config version"),
+        protocolFeeBPS, royaltyBPS, status,
+    }
+}
+
+export function parseLaunchpadMarketQuote(value: unknown, listing: LaunchpadMarketListing): LaunchpadMarketQuote {
+    const quote = row(value, QUOTE_KEYS, "quote")
+    const id = listingId(quote.listing)
+    const price = amount(quote.price, "quoted price")
+    const currency = text(quote.currency, "quoted currency")
+    const sellerAmount = amount(quote.sellerAmount, "seller amount")
+    const protocolAmount = amount(quote.protocolAmount, "protocol amount")
+    const royaltyTotal = amount(quote.royaltyTotal, "royalty total")
+    const currentConfigVersion = amount(quote.currentConfigVersion, "current config version")
+    if (typeof quote.executable !== "boolean" || !Array.isArray(quote.royalties) || quote.royalties.length > 10) throw new Error("Invalid quote terms")
+    const royalties = quote.royalties.map((value: unknown) => {
+        const receiver = row(value, ["account", "amount"], "royalty payout")
+        return { account: text(receiver.account, "royalty receiver"), amount: amount(receiver.amount, "royalty amount") }
+    })
+    if (id !== listing.id || price !== listing.price || currency !== listing.currency ||
+        protocolAmount !== price * listing.protocolFeeBPS / 10000n ||
+        royaltyTotal > price * listing.royaltyBPS / 10000n ||
+        sellerAmount + protocolAmount + royaltyTotal !== price ||
+        royalties.reduce((sum, receiver) => sum + receiver.amount, 0n) !== royaltyTotal ||
+        (quote.executable && listing.status !== "active")) {
+        throw new Error("Inconsistent market quote")
+    }
+    return { listing: id, price, currency, sellerAmount, protocolAmount, royaltyTotal,
+        treasury: text(quote.treasury, "treasury"), currentConfigVersion,
+        executable: quote.executable, royalties }
+}
+
+/** A missing or malformed RPC answer is an error, never an empty market. */
+export async function listLaunchpadMarketListings(rpcUrl: string, page = 0, size = 20): Promise<LaunchpadMarketListing[]> {
+    if (!Number.isSafeInteger(page) || page < 0 || !Number.isSafeInteger(size) || size < 1 || size > 100) throw new Error("Invalid listing page")
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_MARKET_PATH, `ListListingsJSON(${page}, ${size})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad market")
+    const payload = parseQevalJSON(raw)
+    if (!Array.isArray(payload) || payload.length > size) throw new Error("Invalid listing list response")
+    const listings = payload.map(parseLaunchpadMarketListing)
+    if (new Set(listings.map((item) => item.id)).size !== listings.length) throw new Error("Duplicate listing ID")
+    return listings
+}
+
+export async function getLaunchpadMarketQuote(rpcUrl: string, listing: LaunchpadMarketListing): Promise<LaunchpadMarketQuote> {
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_MARKET_PATH, `QuoteJSON(${JSON.stringify(listing.id)})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad market quote")
+    return parseLaunchpadMarketQuote(parseQevalJSON(raw), listing)
+}

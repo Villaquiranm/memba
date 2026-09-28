@@ -27,6 +27,9 @@ export const NFT_COLLECTIONS_PATH = "gno.land/r/samcrew/memba_collections"
 /** New Launchpad ledger. Unpublished; keep it outside every realm allowlist until deployment. */
 export const LAUNCHPAD_NFT_PATH = "gno.land/r/samcrew/launchpad/nft/v1"
 
+/** New Launchpad fixed-price market. Unpublished; never infer deployment from this constant. */
+export const LAUNCHPAD_MARKET_PATH = "gno.land/r/samcrew/launchpad/market/v1"
+
 /**
  * Bech32 address of the marketplace realm.
  * Used as `operator` in SetApprovalForAll / Approve calls on the collection.

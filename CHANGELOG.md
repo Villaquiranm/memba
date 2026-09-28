@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: native Market desk and guarded Launchpad sale records (2026-09-28)
+
+- Open a native Market home for services and collectibles. After the Launchpad ledger and market are deployed and allowlisted, read exact sale records and seller, DAO and royalty quotes from chain; keep buying disabled until the trading review and wallet flow are complete.
+
 ### Memba OS: guarded Launchpad NFT collection discovery (2026-09-28)
 
 - Prepare the NFT window to read collections and SoulBound terms from the new Launchpad ledger once its realm is deployed and allowlisted. Show loading and read failures separately from an empty collection list; keep creation and trading tied to the existing realms until their new contract flows are ready.

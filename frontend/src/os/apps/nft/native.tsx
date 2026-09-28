@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react"
 import type { NativeViewProps } from "../../native/types"
 import { GNO_CHAIN_ID, GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
-import { LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
 import { listLaunchpadNftCollections, type LaunchpadNftCollection } from "../../../lib/launchpadNft"
 import { Card, CardGrid, Empty, ErrorState, Loading, Pill } from "../../kit"
 import { Icon } from "../../shell/icons"
@@ -26,6 +26,7 @@ export default function NftWindow({ section, session, open, openApp, fallback }:
     const legacyAvailable = isRealmValidOn(session.network.key, NFT_COLLECTIONS_PATH)
     const ledgerAvailable = isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)
     const marketAvailable = isRealmValidOn(session.network.key, NFT_MARKETPLACE_V3_PATH)
+    const launchpadMarketAvailable = isRealmValidOn(session.network.key, LAUNCHPAD_MARKET_PATH)
     if (!enabled || (!legacyAvailable && !ledgerAvailable)) {
         return (
             <div className="os-stack">
@@ -57,6 +58,10 @@ export default function NftWindow({ section, session, open, openApp, fallback }:
                 {legacyAvailable && marketAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "market", section: "nfts" })!)}>
                     <Icon name="tag" />
                     <span className="os-grow"><b>Browse NFTs</b><span className="os-sub os-block">Collections and listings, in Market</span></span>
+                </Card>}
+                {ledgerAvailable && launchpadMarketAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "market", section: "launchpad" })!)}>
+                    <Icon name="tag" />
+                    <span className="os-grow"><b>Launchpad sale records</b><span className="os-sub os-block">Inspect listings and on-chain fee splits in Market</span></span>
                 </Card>}
                 {legacyAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "create" })!)}>
                     <Icon name="nft" />

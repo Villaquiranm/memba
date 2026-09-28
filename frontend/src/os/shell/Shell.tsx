@@ -32,6 +32,9 @@ import { LiveTicker } from "../apps/live/LiveTicker"
 import { LiveActivityProvider } from "../apps/live/LiveProvider"
 import { Launcher } from "./Launcher"
 import { WindowFrame, type FrameActions } from "./WindowFrame"
+import { MeetStage } from "../apps/meet/MeetStage"
+import { normaliseRoomId } from "../apps/meet/rooms"
+import { MeetStageContext } from "../apps/meet/stageContext"
 import {
     appSpec, EMPTY_WINDOWS, newDaoSpec, specForTarget, useWindows, visibleWindows, welcomeSpec, windowsReducer,
     type DeskSize, type OsWindow, type WindowSpec, type WindowsState,
@@ -99,6 +102,7 @@ export function Shell() {
     const phone = useSyncExternalStore(subscribePhoneLayout, phoneLayout, () => false)
     const location = useLocation()
     const navigate = useNavigate()
+    const [meetSlot, setMeetSlot] = useState<HTMLDivElement | null>(null)
 
     // ── desk size (windows and items are placed in it) ──
     // A state ref: the desk mounts again after a phone → desktop switch, and must be observed again.
@@ -385,6 +389,8 @@ export function Shell() {
                 // ⌥F: the front window full screen and back (D32: every game has a full-screen mode).
                 e.preventDefault()
                 if (document.fullscreenElement) void document.exitFullscreen()
+                else if (front.target?.kind === "app" && front.target.app === "meet" && front.target.section)
+                    void document.querySelector<HTMLIFrameElement>(".meet-stage iframe")?.requestFullscreen?.()
                 else void document.querySelector<HTMLElement>(`[data-win="${CSS.escape(front.key)}"]`)?.requestFullscreen?.()
             }
         }
@@ -421,6 +427,10 @@ export function Shell() {
     }
 
     const visible = visibleWindows(win.wins)
+    const meetWindow = win.wins.find((w) => w.target?.kind === "app" && w.target.app === "meet" && !!w.target.section)
+    const meetRoom = meetWindow?.target?.kind === "app" && meetWindow.target.section ? normaliseRoomId(meetWindow.target.section) : null
+    const meetStage = meetWindow && meetRoom ? <MeetStage key="meet-stage" roomId={meetRoom} slot={meetSlot} minimized={meetWindow.min}
+        foreground={front?.id === meetWindow.id && !modalBlocked} restore={() => win.focus(meetWindow.id)} /> : null
     const shared = (
         <>
             {booting && (
@@ -445,12 +455,13 @@ export function Shell() {
             )}
         </>
     )
-    // A phone draws the same windows as full-screen sheets on a home screen (day 6).
-    if (phone) {
-        return (
-            <LiveActivityProvider networkKey={session.network.key} active={!locked && front?.app === "live"}>
-            <SignerProvider key={signerOwner} session={session} toast={showToast}>
-                <div className="os-workspace" data-locked={locked || undefined} inert={locked} aria-hidden={locked}>
+    // The video stays at one React position while the visible layout changes.
+    return (
+        <LiveActivityProvider networkKey={session.network.key} active={!locked && (!phone || front?.app === "live")}>
+        <SignerProvider key={signerOwner} session={session} toast={showToast}>
+            <div className="os-workspace" data-locked={locked || undefined} inert={locked} aria-hidden={locked}>
+            <MeetStageContext.Provider value={setMeetSlot}>
+            {phone ? <>
                 <PhoneShell locked={modalBlocked} session={session} front={front} wins={win.wins} items={deskItems.items} open={open} openApp={openApp} openItem={openItem}
                     close={win.close} toast={showToast} openSearch={openLauncher}
                     home={(id) => {
@@ -462,16 +473,7 @@ export function Shell() {
                         win.minimiseAll()
                     }} />
                 {launcher && <Launcher network={session.network.key} open={(spec) => open(spec, false)} onClose={closeLauncher} />}
-                </div>
-                {shared}
-            </SignerProvider>
-            </LiveActivityProvider>
-        )
-    }
-    return (
-        <LiveActivityProvider networkKey={session.network.key} active={!locked}>
-        <SignerProvider key={signerOwner} session={session} toast={showToast}>
-            <div className="os-workspace" data-locked={locked || undefined} inert={locked} aria-hidden={locked}>
+            </> : <>
             <MenuBar locked={modalBlocked} session={session} wins={win.wins} front={front} openApp={openApp} openSpec={open} focusWin={win.focus} closeWin={win.close}
                 closeAll={win.closeAll} minimiseAll={win.minimiseAll} tile={tile} nextWin={win.next} lock={lock} toast={showToast}
                 isPinned={deskItems.isPinned} pin={deskItems.pin} startRequest={startRequest} openSearch={openLauncher} />
@@ -504,6 +506,9 @@ export function Shell() {
                 </div>
             )}
             <Dock wins={win.wins} openApp={openApp} restore={win.focus} locked={modalBlocked} />
+            </>}
+            {meetStage}
+            </MeetStageContext.Provider>
             </div>
             {shared}
         </SignerProvider>

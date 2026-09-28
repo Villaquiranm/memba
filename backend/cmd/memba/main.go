@@ -474,7 +474,8 @@ func main() {
 	mux.Handle("/api/nft/image", rateLimitMiddleware("nft", service.HandleNFTImage()))
 	mux.Handle("/api/nft/metadata", rateLimitMiddleware("nft", service.HandleNFTMetadata()))
 	mux.Handle("/api/nft/launchpad-holdings", rateLimitMiddleware("nft", service.HandleLaunchpadHoldings(
-		database, os.Getenv("GNO_CHAIN_ID"), os.Getenv("LAUNCHPAD_NFT_INDEXER_ENABLED") == "1")))
+		database, os.Getenv("GNO_CHAIN_ID"), os.Getenv("LAUNCHPAD_NFT_INDEXER_ENABLED") == "1" &&
+			int64Or("LAUNCHPAD_NFT_START_BLOCK", 0) > 0)))
 	// Membas Genesis mint plumbing — both endpoints are OFF (404) until their
 	// envs are set at ceremony time (brief §8): the allowlist proofs file and
 	// the mint-ticket collection config.

@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: weighted NFT curation proposals (2026-09-28)
+
+- Show read-only curation DAO proposals in Market Operations after the separate versioned DAO realm is deployed and allowlisted. Verify the target, action details and proposal state from chain; keep voting and manager changes gated until the authority and wallet release are reviewed.
+
 ### Memba OS: public Market Operations records (2026-09-28)
 
 - Add a guarded Market Operations view for the DAO appointed manager roster, founder application statuses and public curation receipts. Keep manager actions and private founder conversations gated until the DAO adapter and role checked inbox are ready.

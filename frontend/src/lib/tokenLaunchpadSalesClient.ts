@@ -24,7 +24,7 @@ function string(row: Record<string, unknown>, key: string, empty = false): strin
 
 function amount(row: Record<string, unknown>, key: string): bigint {
     const value = string(row, key)
-    if (!/^(0|[1-9][0-9]*)$/.test(value)) invalid(`invalid ${key}`)
+    if (value.length > 19 || !/^(0|[1-9][0-9]*)$/.test(value)) invalid(`invalid ${key}`)
     const parsed = BigInt(value)
     if (parsed > MAX_INT64) invalid(`${key} exceeds int64`)
     return parsed
@@ -170,10 +170,12 @@ export function parseLaunchpadSale(value: unknown): LaunchpadSaleView {
     }))
     const vestingCount = row.vestingCount
     if (!Number.isSafeInteger(vestingCount) || (vestingCount as number) < 0) invalid("invalid vestingCount")
-    if (curve && (token.mode !== "curve" || curve.creator !== token.creator || curve.configVersion !== token.configVersion || curve.sold > curve.curveAllocation || curve.raised > curve.graduationTarget)) invalid("inconsistent curve")
-    if (fairSale && (token.mode !== "fairsale" || fairSale.creator !== token.creator || fairSale.configVersion !== token.configVersion || fairSale.primaryFeeBps > 10000n || fairSale.seedQuote !== 0n || fairSale.soldTokens > fairSale.allocation || fairSale.primaryFeeQuote + fairSale.creatorQuote > fairSale.grossQuote)) invalid("inconsistent fair sale")
+    if (curve && (token.mode !== "curve" || curve.creator !== token.creator || curve.configVersion !== token.configVersion || !["trading", "cancelled", "graduating", "graduated", "refunding"].includes(curve.status) || curve.sold > curve.curveAllocation || curve.raised > curve.graduationTarget)) invalid("inconsistent curve")
+    if (fairSale && ((token.mode !== "fairsale" && token.mode !== "direct_fixed" && token.mode !== "direct_capped") || fairSale.creator !== token.creator || (token.mode === "fairsale" && fairSale.configVersion !== token.configVersion) || fairSale.primaryFeeBps > 10000n || fairSale.seedQuote !== 0n || fairSale.soldTokens > fairSale.allocation || fairSale.primaryFeeQuote + fairSale.creatorQuote > fairSale.grossQuote)) invalid("inconsistent fair sale")
+    if (fairSale?.settled && (fairSale.grossQuote + fairSale.refundQuote !== fairSale.totalDeposits || fairSale.soldTokens + fairSale.unsoldTokens !== fairSale.allocation || fairSale.primaryFeeQuote + fairSale.creatorQuote !== fairSale.grossQuote)) invalid("unbalanced settled fair sale")
+    if (fairSale?.proceedsReleased && (!fairSale.settled || !fairSale.succeeded)) invalid("released unsettled proceeds")
     if (curve && fairSale) invalid("multiple sale modes")
-    if (airdrop && airdrop.claimed > airdrop.total) invalid("inconsistent airdrop")
+    if (airdrop && (!/^[0-9a-f]{64}$/.test(airdrop.root) || /^0+$/.test(airdrop.root) || airdrop.claimed > airdrop.total)) invalid("inconsistent airdrop")
     return { token, tokenLiability: amount(row, "tokenLiability"), vestingCount: vestingCount as number, curve, fairSale, airdrop }
 }
 

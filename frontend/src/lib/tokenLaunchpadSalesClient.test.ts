@@ -54,7 +54,7 @@ function fairSale() {
 
 function curve() {
     return {
-        creator: CREATOR, quoteCurrency: "ugnot", configVersion: "1", status: "created", everTraded: false,
+        creator: CREATOR, quoteCurrency: "ugnot", configVersion: "1", status: "trading", everTraded: false,
         supply: "1000", virtualReserve: "100", graduationTarget: "600", curveAllocation: "800",
         lpReserve: "200", raised: "0", sold: "0",
     }
@@ -72,9 +72,13 @@ beforeEach(() => {
 describe("Token Launchpad sales reader", () => {
     it("parses direct, fair, curve and airdrop state with exact int64 amounts", () => {
         expect(parseLaunchpadSale(launch()).fairSale).toBeNull()
-        const fair = parseLaunchpadSale({ ...launch("fairsale"), fairSale: fairSale(), airdrop: { root: "sha256:root", total: "9223372036854775807", claimed: "1" } })
+        const fair = parseLaunchpadSale({ ...launch("fairsale"), fairSale: fairSale(), airdrop: { root: "a".repeat(64), total: "9223372036854775807", claimed: "1" } })
         expect(fair.fairSale?.creatorQuote).toBe(585n)
         expect(fair.airdrop?.total).toBe(9223372036854775807n)
+        for (const mode of ["direct_fixed", "direct_capped"]) {
+            const attached = parseLaunchpadSale({ ...launch(mode), fairSale: { ...fairSale(), configVersion: "2" } })
+            expect(attached.fairSale?.configVersion).toBe(2n)
+        }
         const curved = parseLaunchpadSale({ ...launch("curve"), curve: curve() })
         expect(curved.curve?.graduationTarget).toBe(600n)
     })
@@ -84,11 +88,14 @@ describe("Token Launchpad sales reader", () => {
             { ...launch(), schema: "v2" },
             { ...launch(), tokenLiability: 1 },
             { ...launch(), tokenLiability: "01" },
+            { ...launch(), tokenLiability: "9".repeat(100000) },
             { ...launch(), vestingCount: "0" },
             { ...launch("curve"), curve: { ...curve(), sold: "801" } },
             { ...launch("curve"), curve: { ...curve(), creator: BUYER } },
             { ...launch("fairsale"), fairSale: { ...fairSale(), seedQuote: "1" } },
             { ...launch("fairsale"), fairSale: { ...fairSale(), primaryFeeQuote: "601" } },
+            { ...launch("fairsale"), fairSale: { ...fairSale(), creatorQuote: "584" } },
+            { ...launch("curve"), curve: { ...curve(), status: "unknown" } },
             { ...launch(), airdrop: { root: "x", total: "1", claimed: "2" } },
         ]) expect(() => parseLaunchpadSale(value)).toThrow()
     })
@@ -97,12 +104,14 @@ describe("Token Launchpad sales reader", () => {
         const buyer = { buyer: BUYER, lots: "2", deposit: "24", claimableTokens: "20", claimableRefund: "8", claimed: false }
         expect(parseFairBuyer(buyer).claimableRefund).toBe(8n)
         expect(() => parseFairBuyer({ ...buyer, claimed: true })).toThrow()
+        expect(() => parseFairBuyer({ ...buyer, deposit: "9".repeat(100000) })).toThrow()
         const vesting = {
             index: 0, beneficiary: CREATOR, pendingBeneficiary: "", total: "100", claimed: "25",
             start: "100", cliff: "10", duration: "200", revocable: true, revoked: false, revokedVested: "0",
         }
         expect(parseVesting(vesting).claimed).toBe(25n)
         expect(() => parseVesting({ ...vesting, claimed: "101" })).toThrow()
+        expect(() => parseVesting({ ...vesting, total: "9".repeat(100000) })).toThrow()
     })
 
     it("uses exact source expressions and checks returned token, buyer and vesting identities", async () => {

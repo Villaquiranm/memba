@@ -6,3 +6,4 @@
 .memba-os .os-token-launchpad__facts dd { margin: 0; overflow-wrap: anywhere; }
 .memba-os .os-token-launchpad__sections { display: grid; gap: 14px; margin-top: 16px; }
 .memba-os .os-token-launchpad__sections h4 { margin: 0 0 6px; }
+.memba-os .os-token-launchpad__legacy { margin-top: 12px; }

@@ -1,5 +1,6 @@
 /** Native Token Launchpad reads. Transactions remain gated by their deployed realms. */
 import { useState } from "react"
+import type { ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { GNO_CHAIN_ID, GRC20_FACTORY_PATH, NETWORKS, isRealmValidOn } from "../../../lib/config"
 import { TokenLaunchpadClient, TOKEN_LAUNCHPAD_PATH } from "../../../lib/tokenLaunchpadClient"
@@ -8,12 +9,21 @@ import { Pill } from "../../kit"
 import type { NativeViewProps } from "../../native/types"
 import "./native.css"
 
-export default function TokensWindow({ session, fallback }: NativeViewProps) {
+function tokenAmount(amount: bigint, decimals: number): string {
+    if (decimals === 0) return amount.toString()
+    const digits = amount.toString().padStart(decimals + 1, "0")
+    const fraction = digits.slice(-decimals).replace(/0+$/, "")
+    return digits.slice(0, -decimals) + (fraction ? `.${fraction}` : "")
+}
+
+export default function TokensWindow({ section, session, fallback }: NativeViewProps) {
     const network = session.network.key
+    const factoryAvailable = isRealmValidOn(network, GRC20_FACTORY_PATH)
+    if (section !== null && factoryAvailable) return <>{fallback}</>
     if (isRealmValidOn(network, TOKEN_LAUNCHPAD_PATH)) {
-        return <LaunchpadTokens network={network} address={session.status === "member" ? session.address : null} salesAvailable={isRealmValidOn(network, TOKEN_LAUNCHPAD_SALES_PATH)} />
+        return <LaunchpadTokens network={network} address={session.status === "member" ? session.address : null} salesAvailable={isRealmValidOn(network, TOKEN_LAUNCHPAD_SALES_PATH)} legacyFallback={factoryAvailable ? fallback : null} />
     }
-    if (isRealmValidOn(network, GRC20_FACTORY_PATH)) return <>{fallback}</>
+    if (factoryAvailable) return <>{fallback}</>
     const chainId = NETWORKS[network]?.chainId ?? GNO_CHAIN_ID
 
     return (
@@ -26,10 +36,11 @@ export default function TokensWindow({ session, fallback }: NativeViewProps) {
     )
 }
 
-function LaunchpadTokens({ network, address, salesAvailable }: { network: string; address: string | null; salesAvailable: boolean }) {
+function LaunchpadTokens({ network, address, salesAvailable, legacyFallback }: { network: string; address: string | null; salesAvailable: boolean; legacyFallback: ReactNode }) {
     const [page, setPage] = useState(0)
     const [selected, setSelected] = useState<string | null>(null)
     const [vestingIndex, setVestingIndex] = useState(0)
+    const [showLegacy, setShowLegacy] = useState(false)
     const tokenClient = new TokenLaunchpadClient(network)
     const salesClient = new TokenLaunchpadSalesClient(network)
     const tokens = useQuery({
@@ -63,6 +74,10 @@ function LaunchpadTokens({ network, address, salesAvailable }: { network: string
             <h2>Token Launchpad</h2>
             <p className="os-sub">Browse registered tokens and their on-chain launch state.</p>
         </div>
+        {legacyFallback && <div>
+            <button type="button" className="os-btn os-quiet" aria-expanded={showLegacy} onClick={() => setShowLegacy(!showLegacy)}>{showLegacy ? "Hide existing token factory" : "Open existing token factory"}</button>
+            {showLegacy && <div className="os-token-launchpad__legacy os-classic">{legacyFallback}</div>}
+        </div>}
         {tokens.isPending && <p role="status">Loading tokens…</p>}
         {tokens.isError && <div className="os-note os-err" role="alert">Tokens could not be loaded. <button type="button" className="os-btn os-quiet" onClick={() => void tokens.refetch()}>Retry</button></div>}
         {tokens.isSuccess && tokens.data.length === 0 && <p className="os-sub">No tokens on this page.</p>}
@@ -82,7 +97,7 @@ function LaunchpadTokens({ network, address, salesAvailable }: { network: string
             <dl className="os-token-launchpad__facts">
                 <div><dt>Token ID</dt><dd>{selectedToken.id}</dd></div>
                 <div><dt>Creator</dt><dd>{selectedToken.creator}</dd></div>
-                <div><dt>Supply</dt><dd>{selectedToken.totalSupply.toString()}</dd></div>
+                <div><dt>Supply</dt><dd>{tokenAmount(selectedToken.totalSupply, selectedToken.decimals)} {selectedToken.ticker}</dd></div>
                 <div><dt>Currency</dt><dd>{selectedToken.currencyKey}</dd></div>
             </dl>
             {!salesAvailable && <p className="os-note" role="status">Sales details are unavailable on this network.</p>}
@@ -91,24 +106,24 @@ function LaunchpadTokens({ network, address, salesAvailable }: { network: string
             {launch.data && <div className="os-token-launchpad__sections">
                 {launch.data.curve && <div>
                     <h4>Bonding curve</h4>
-                    <p>Status: {launch.data.curve.status}. Raised {launch.data.curve.raised.toString()} of {launch.data.curve.graduationTarget.toString()} {launch.data.curve.quoteCurrency}; {launch.data.curve.sold.toString()} tokens sold.</p>
+                    <p>Status: {launch.data.curve.status}. Raised {launch.data.curve.raised.toString()} of {launch.data.curve.graduationTarget.toString()} base units of {launch.data.curve.quoteCurrency}; {tokenAmount(launch.data.curve.sold, selectedToken.decimals)} {selectedToken.ticker} sold.</p>
                 </div>}
                 {launch.data.fairSale && <div>
                     <h4>Fair sale</h4>
                     <p>{launch.data.fairSale.cancelled ? "Cancelled" : launch.data.fairSale.settled ? launch.data.fairSale.succeeded ? "Succeeded" : "Refunding" : "Open or awaiting settlement"}. {launch.data.fairSale.totalLots.toString()} of {launch.data.fairSale.hardCapLots.toString()} lots filled.</p>
-                    {launch.data.fairSale.settled && <p>Final price {launch.data.fairSale.closePrice.toString()} {launch.data.fairSale.quoteCurrency} per lot. {launch.data.fairSale.proceedsReleased ? "Proceeds released." : "Proceeds pending."}</p>}
+                    {launch.data.fairSale.settled && <p>Final price {launch.data.fairSale.closePrice.toString()} base units of {launch.data.fairSale.quoteCurrency} per lot. {launch.data.fairSale.proceedsReleased ? "Proceeds released." : "Proceeds pending."}</p>}
                     {address && buyer.isPending && <p role="status">Loading your sale claim…</p>}
                     {address && buyer.isError && <p className="os-note os-err" role="alert">Your sale claim could not be loaded.</p>}
-                    {buyer.data && <p>Your claim: {buyer.data.claimableTokens.toString()} tokens and {buyer.data.claimableRefund.toString()} {launch.data.fairSale.quoteCurrency} refund{buyer.data.claimed ? " (claimed)" : ""}.</p>}
+                    {buyer.data && <p>Your claim: {tokenAmount(buyer.data.claimableTokens, selectedToken.decimals)} {selectedToken.ticker} and {buyer.data.claimableRefund.toString()} base units of {launch.data.fairSale.quoteCurrency} refund{buyer.data.claimed ? " (claimed)" : ""}.</p>}
                 </div>}
                 {launch.data.airdrop && <div>
                     <h4>Airdrop</h4>
-                    <p>{launch.data.airdrop.claimed.toString()} of {launch.data.airdrop.total.toString()} tokens claimed.</p>
+                    <p>{tokenAmount(launch.data.airdrop.claimed, selectedToken.decimals)} of {tokenAmount(launch.data.airdrop.total, selectedToken.decimals)} {selectedToken.ticker} claimed.</p>
                 </div>}
                 {launch.data.vestingCount > 0 && <div>
                     <h4>Vesting</h4>
                     <p>{launch.data.vestingCount} schedule{launch.data.vestingCount === 1 ? "" : "s"}</p>
-                    {vesting.data && <p>Schedule {vesting.data.index + 1}: {vesting.data.claimed.toString()} of {vesting.data.total.toString()} claimed by {vesting.data.beneficiary}.</p>}
+                    {vesting.data && <p>Schedule {vesting.data.index + 1}: {tokenAmount(vesting.data.claimed, selectedToken.decimals)} of {tokenAmount(vesting.data.total, selectedToken.decimals)} {selectedToken.ticker} claimed by {vesting.data.beneficiary}.</p>}
                     {vesting.isError && <p className="os-note os-err" role="alert">Vesting details could not be loaded.</p>}
                     <div className="os-row">
                         <button type="button" className="os-btn os-quiet" disabled={vestingIndex === 0} onClick={() => setVestingIndex(vestingIndex - 1)}>Previous schedule</button>

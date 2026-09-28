@@ -22,8 +22,12 @@ interface ActivationModalProps {
 export function ActivationModal({ address, rawUgnot, balanceLoading, balanceError, onRetryBalance, faucetUrl, onSuccess, onDismiss }: ActivationModalProps) {
     const [activating, setActivating] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    // The balance hook retains its last value during refresh. That value must
+    // not authorize a new transaction until the current check succeeds.
+    const checkedUgnot = balanceLoading || balanceError ? undefined : rawUgnot
 
     const handleActivate = async () => {
+        if (checkedUgnot === undefined || checkedUgnot <= 0n) return
         setActivating(true)
         setError(null)
         try {
@@ -99,12 +103,12 @@ export function ActivationModal({ address, rawUgnot, balanceLoading, balanceErro
                 </div>
 
                 <div className="activation-modal-footer">
-                    {rawUgnot === undefined ? (
+                    {checkedUgnot === undefined ? (
                         <div role="status">
                             <p>{balanceError ? "Could not check your GNOT balance. Try again before activating." : balanceLoading ? "Checking your GNOT balance before activation…" : "Your GNOT balance is unavailable. Check it before activating."}</p>
                             {onRetryBalance && <button type="button" className="k-button k-button-outline" onClick={onRetryBalance} disabled={balanceLoading}>Retry balance check</button>}
                         </div>
-                    ) : rawUgnot > 0n ? (
+                    ) : checkedUgnot > 0n ? (
                         <button
                             className="k-button k-button-primary activation-btn"
                             onClick={handleActivate}

@@ -10,7 +10,7 @@ import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveList
 import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferExit } from "../../../lib/launchpadOfferExit"
 import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
 import { ACCEPT_OFFER_GAS_WANTED, acceptOfferRequest, acceptOfferScope } from "../../../lib/launchpadOfferAccept"
-import { PROCEEDS_CLAIM_GAS_WANTED, claimNativeProceedsRequest, proceedsClaimScope, readNativeProceeds, type NativeProceeds } from "../../../lib/launchpadProceeds"
+import { PROCEEDS_CLAIM_GAS_WANTED, claimProceedsRequest, proceedsClaimScope, readCurrencyProceeds, type NativeProceeds, type ProceedsCurrency } from "../../../lib/launchpadProceeds"
 import { APPROVE_WUGNOT_GAS_WANTED, BUY_WUGNOT_GAS_WANTED, WUGNOT_KEY, approveWugnotRequest, approveWugnotScope, buyWugnotRequest, readWugnotSpend, type WugnotSpend } from "../../../lib/launchpadTokenTrade"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
@@ -101,6 +101,13 @@ function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toas
 function LaunchpadProceeds({ rpcUrl, session, available, toast }: {
     rpcUrl: string; session: NativeViewProps["session"]; available: boolean; toast: (message: string) => void
 }) {
+    return <div className="os-stack"><ProceedsCurrencyPanel currency="ugnot" rpcUrl={rpcUrl} session={session} available={available} toast={toast} />
+        <ProceedsCurrencyPanel currency={WUGNOT_KEY} rpcUrl={rpcUrl} session={session} available={available} toast={toast} /></div>
+}
+
+function ProceedsCurrencyPanel({ currency, rpcUrl, session, available, toast }: {
+    currency: ProceedsCurrency; rpcUrl: string; session: NativeViewProps["session"]; available: boolean; toast: (message: string) => void
+}) {
     const signer = useSigner()
     const [revision, setRevision] = useState(0)
     const [state, setState] = useState<{ loading: boolean; error: boolean; value: NativeProceeds | null }>({ loading: true, error: false, value: null })
@@ -111,28 +118,30 @@ function LaunchpadProceeds({ rpcUrl, session, available, toast }: {
     useEffect(() => {
         if (!available) return
         let cancelled = false
-        void readNativeProceeds(rpcUrl, member).then((value) => {
+        void readCurrencyProceeds(rpcUrl, member, currency).then((value) => {
             if (!cancelled) setState({ loading: false, error: false, value })
         }).catch(() => { if (!cancelled) setState({ loading: false, error: true, value: null }) })
         return () => { cancelled = true }
-    }, [available, rpcUrl, member, revision])
+    }, [available, rpcUrl, member, currency, revision])
     const refresh = () => { setState((previous) => ({ ...previous, loading: true })); setRevision((value) => value + 1) }
     if (!available) return <div className="os-note os-warn" role="note">Proceeds are available after the reviewed config and fees realms are published on this network.</div>
     const snapshot = state.value
-    const scope = member && proceedsClaimScope(session.network.chainId, member)
+    const scope = member && proceedsClaimScope(session.network.chainId, member, currency)
     const receipt = scope && readGovernanceReceipt(scope)
-    return <section className="os-stack" aria-label="Launchpad proceeds">
-        <div className="os-ops-section-head"><h2>Native proceeds</h2><button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh</button></div>
-        <p className="os-sub">Completed sales create claimable credits. These figures come from the fees realm in raw ugnot units.</p>
+    const unit = currency === "ugnot" ? "ugnot" : "wugnot"
+    const heading = currency === "ugnot" ? "Native proceeds" : "WUGNOT proceeds"
+    return <section className="os-stack" aria-label={heading}>
+        <div className="os-ops-section-head"><h2>{heading}</h2><button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh</button></div>
+        <p className="os-sub">Completed sales create claimable credits. These figures come from the fees realm in raw {unit} units.</p>
         {state.loading && <Loading label="Reading proceeds…" />}
         {state.error && <ErrorState message="Could not verify native proceeds from this network." onRetry={refresh} />}
         {!state.loading && !state.error && snapshot && <div className="os-stack os-note">
-            <strong>DAO treasury: {snapshot.treasuryClaimable.toLocaleString()} ugnot claimable</strong>
+            <strong>DAO treasury: {snapshot.treasuryClaimable.toLocaleString()} {unit} claimable</strong>
             <span>Reserve address <code>{snapshot.treasury}</code></span>
-            <span>Total outstanding native proceeds: {snapshot.totalLiability.toLocaleString()} ugnot · Config version {snapshot.configVersion.toString()}</span>
+            <span>Total outstanding {unit} proceeds: {snapshot.totalLiability.toLocaleString()} {unit} · Config version {snapshot.configVersion.toString()}</span>
             <span>The DAO reserve must sign its own Claim transaction with the reviewed multisig threshold. A member wallet cannot claim its credit.</span>
             {member && <>
-                <strong>Your claimable proceeds: {snapshot.memberClaimable?.toLocaleString() ?? "unavailable"} ugnot</strong>
+                <strong>Your claimable proceeds: {snapshot.memberClaimable?.toLocaleString() ?? "unavailable"} {unit}</strong>
                 <span>Receiver <code>{member}</code></span>
                 {member === snapshot.treasury ? <span>This address is the DAO reserve. Use the reserve signing ceremony.</span> :
                     receipt && scope ? <div className="os-stack os-tight os-note os-warn" role="status">
@@ -150,7 +159,7 @@ function LaunchpadProceeds({ rpcUrl, session, available, toast }: {
                             setPreparing(true)
                             void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => {
                                 const estimatedGasFeeUgnot = feeForGasWanted(PROCEEDS_CLAIM_GAS_WANTED, gasPrice)
-                                signer.sign(claimNativeProceedsRequest({ caller: member, amount: snapshot.memberClaimable!, rpcUrl,
+                                signer.sign(claimProceedsRequest({ caller: member, amount: snapshot.memberClaimable!, rpcUrl, currency,
                                     chainId: session.network.chainId, estimatedGasFeeUgnot, onSettled: refresh }))
                             }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare proceeds claim."))
                                 .finally(() => setPreparing(false))

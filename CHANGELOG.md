@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: WUGNOT marketplace proceeds (2026-09-28)
+
+- Show separate chain-backed native and WUGNOT credits for the DAO reserve and connected receiver. A personal receiver can review a direct WUGNOT claim with a fresh exact-amount check and its own uncertain-outcome lock; DAO reserve credits continue to require threshold multisig signing.
+
 ### Memba OS: WUGNOT NFT seller listings (2026-09-28)
 
 - Let sellers choose GNOT or WUGNOT for fixed-price Open NFT listings. WUGNOT prices use exact whole-token units, and the selected currency's market policy, seller and DAO fee, and creator royalties are reviewed and rechecked before signing.

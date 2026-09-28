@@ -21,7 +21,7 @@ const sign = vi.hoisted(() => vi.fn())
 const gasPrice = vi.hoisted(() => vi.fn(async () => ({ gas: 1000, ugnot: 1 })))
 const readListingReadiness = vi.hoisted(() => vi.fn())
 const readOfferReadiness = vi.hoisted(() => vi.fn())
-const readNativeProceeds = vi.hoisted(() => vi.fn())
+const readCurrencyProceeds = vi.hoisted(() => vi.fn())
 const readWugnotSpend = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/grc20", async (original) => ({ ...(await original<typeof import("../../../lib/grc20")>()), networkGasPrice: gasPrice }))
 vi.mock("../../../lib/config", async (original) => ({
@@ -34,7 +34,7 @@ vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: li
     isLaunchpadMarketPolicyReady: policyReady }))
 vi.mock("../../../lib/launchpadListing", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadListing")>()), readListingReadiness }))
 vi.mock("../../../lib/launchpadOfferTrade", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadOfferTrade")>()), readOfferReadiness }))
-vi.mock("../../../lib/launchpadProceeds", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadProceeds")>()), readNativeProceeds }))
+vi.mock("../../../lib/launchpadProceeds", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadProceeds")>()), readCurrencyProceeds }))
 vi.mock("../../../lib/launchpadTokenTrade", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadTokenTrade")>()), readWugnotSpend }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
 vi.mock("../../../lib/launchpadCurationDao", () => ({ readCurationDaoSnapshot }))
@@ -80,7 +80,7 @@ describe("native Market window", () => {
         gasPrice.mockClear()
         readListingReadiness.mockReset()
         readOfferReadiness.mockReset()
-        readNativeProceeds.mockReset()
+        readCurrencyProceeds.mockReset()
         readWugnotSpend.mockReset()
         localStorage.clear()
         clearGovernanceMemory()
@@ -457,18 +457,24 @@ describe("native Market window", () => {
         list.mockResolvedValue([])
         const treasury = `g1${"t".repeat(38)}`
         const member = `g1${"p".repeat(38)}`
-        readNativeProceeds.mockResolvedValue({ configVersion: 4n, treasury, treasuryClaimable: 500n,
-            member, memberClaimable: 100n, totalLiability: 900n })
+        readCurrencyProceeds.mockImplementation(async (_rpc: string, _member: string, currency: string) => ({ configVersion: 4n, treasury,
+            treasuryClaimable: currency === "ugnot" ? 500n : 50n, member,
+            memberClaimable: currency === "ugnot" ? 100n : 10n, totalLiability: 900n }))
         const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: member, openConnect: vi.fn() } as never
         render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
         fireEvent.click(screen.getByRole("tab", { name: "Proceeds" }))
         expect(await screen.findByText(/DAO treasury: 500 ugnot claimable/)).toBeInTheDocument()
         expect(screen.getByText(/Your claimable proceeds: 100 ugnot/)).toBeInTheDocument()
-        fireEvent.click(screen.getByRole("button", { name: "Review proceeds claim" }))
+        fireEvent.click(screen.getAllByRole("button", { name: "Review proceeds claim" })[0])
         await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
         expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
             caller: member, send: "", func: "Claim", args: ["ugnot"] } })
         expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["Receiver and signer", member])
+        expect(await screen.findByText(/DAO treasury: 50 wugnot claimable/)).toBeInTheDocument()
+        fireEvent.click(screen.getAllByRole("button", { name: "Review proceeds claim" })[1])
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(2))
+        expect(sign.mock.calls[1][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: member, send: "", func: "Claim", args: [WUGNOT_KEY] } })
     })
 
     it("does not offer a single-wallet claim for the DAO reserve", async () => {
@@ -479,12 +485,12 @@ describe("native Market window", () => {
         availability.fees = true
         list.mockResolvedValue([])
         const treasury = `g1${"t".repeat(38)}`
-        readNativeProceeds.mockResolvedValue({ configVersion: 4n, treasury, treasuryClaimable: 500n,
+        readCurrencyProceeds.mockResolvedValue({ configVersion: 4n, treasury, treasuryClaimable: 500n,
             member: treasury, memberClaimable: 500n, totalLiability: 900n })
         const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: treasury, openConnect: vi.fn() } as never
         render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
         fireEvent.click(screen.getByRole("tab", { name: "Proceeds" }))
-        expect(await screen.findByText(/Use the reserve signing ceremony/)).toBeInTheDocument()
+        expect((await screen.findAllByText(/Use the reserve signing ceremony/)).length).toBe(2)
         expect(screen.queryByRole("button", { name: "Review proceeds claim" })).toBeNull()
     })
 

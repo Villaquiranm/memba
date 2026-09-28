@@ -10,6 +10,7 @@ const getQuote = vi.hoisted(() => vi.fn())
 const policyReady = vi.hoisted(() => vi.fn())
 const listOffers = vi.hoisted(() => vi.fn())
 const getOfferQuote = vi.hoisted(() => vi.fn())
+const getTokenOwner = vi.hoisted(() => vi.fn())
 const getCurationState = vi.hoisted(() => vi.fn())
 const listCurationManagers = vi.hoisted(() => vi.fn())
 const listCurationApplications = vi.hoisted(() => vi.fn())
@@ -26,7 +27,8 @@ vi.mock("../../../lib/config", async (original) => ({
     isRealmValidOn: (_network: string, path: string) => path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === LAUNCHPAD_MARKET_PATH ? availability.market : path === LAUNCHPAD_CONFIG_PATH ? availability.config : path === LAUNCHPAD_FEES_PATH ? availability.fees : path === LAUNCHPAD_CURATION_PATH ? availability.curation : path === LAUNCHPAD_CURATION_DAO_PATH ? availability.curationDao : false,
 }))
 vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: list, getLaunchpadMarketQuote: getQuote,
-    listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote, isLaunchpadMarketPolicyReady: policyReady }))
+    listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote, getLaunchpadMarketTokenOwner: getTokenOwner,
+    isLaunchpadMarketPolicyReady: policyReady }))
 vi.mock("../../../lib/launchpadListing", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadListing")>()), readListingReadiness }))
 vi.mock("../../../lib/launchpadOfferTrade", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadOfferTrade")>()), readOfferReadiness }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
@@ -62,6 +64,8 @@ describe("native Market window", () => {
         policyReady.mockResolvedValue(true)
         listOffers.mockReset()
         getOfferQuote.mockReset()
+        getTokenOwner.mockReset()
+        getTokenOwner.mockResolvedValue(null)
         getCurationState.mockReset()
         listCurationManagers.mockReset()
         listCurationApplications.mockReset()
@@ -315,6 +319,32 @@ describe("native Market window", () => {
         fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
         expect(await screen.findByText("Previous offer refund outcome needs review")).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: "Return expired escrow" })).toBeNull()
+    })
+
+    it("offers acceptance only to the current owner after a verified payout quote", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        const buyer = `g1${"p".repeat(38)}`
+        const seller = `g1${"q".repeat(38)}`
+        const funded = { ...offer, buyer, expiresAt: 4102444800n }
+        const payout = { ...offerQuote, executable: true, treasury: `g1${"t".repeat(38)}`,
+            royalties: [{ account: `g1${"a".repeat(38)}`, amount: 500n }] }
+        listOffers.mockResolvedValue([funded])
+        getOfferQuote.mockResolvedValue(payout)
+        getTokenOwner.mockResolvedValue(seller)
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Offers" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Review offer acceptance" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: seller, send: "", func: "AcceptOffer", args: ["O1", "4"] } })
+        expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["DAO treasury", payout.treasury])
     })
 
     it("reviews a full native escrow deposit before funding a token-specific offer", async () => {

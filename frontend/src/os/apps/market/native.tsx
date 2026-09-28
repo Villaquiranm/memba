@@ -4,11 +4,12 @@ import type { NativeViewProps } from "../../native/types"
 import { GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
 import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
 import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
-import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
+import { getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
 import { BUY_GAS_WANTED, CANCEL_GAS_WANTED, buyLaunchpadNativeRequest, buyScope, cancelLaunchpadListingRequest, cancelListingScope } from "../../../lib/launchpadTrade"
 import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveListingScope, createListingRequest, createListingScope, parseGnotPrice, readListingReadiness, type ListingReadiness } from "../../../lib/launchpadListing"
 import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferExit } from "../../../lib/launchpadOfferExit"
 import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
+import { ACCEPT_OFFER_GAS_WANTED, acceptOfferRequest, acceptOfferScope } from "../../../lib/launchpadOfferAccept"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
@@ -81,7 +82,7 @@ function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toas
             <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
             <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
         </header>
-        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying, listing and funded offers are available after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings and buyers can exit funded offers during a market pause. Offer acceptance and token payments remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
+        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying, listing and funded offers are available after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings and buyers can exit funded offers during a market pause. Owners can accept active offers after payout review. Token payments remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
         <div className="os-market-tabs" role="tablist" aria-label="Collectible market records">
             <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
             <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
@@ -340,7 +341,7 @@ function LaunchpadOffers({ rpcUrl, session, tradingAvailable, toast }: { rpcUrl:
     const [settled, setSettled] = useState({ page: -1, revision: -1, error: false })
     const [hasMore, setHasMore] = useState(false)
     const [selected, setSelected] = useState<string | null>(null)
-    const [quote, setQuote] = useState<{ id: string; value?: LaunchpadOfferQuote; error?: boolean } | null>(null)
+    const [quote, setQuote] = useState<{ id: string; value?: LaunchpadOfferQuote; owner?: string | null; error?: boolean } | null>(null)
     const loading = settled.page !== page || settled.revision !== revision
     const error = !loading && settled.error
 
@@ -368,8 +369,9 @@ function LaunchpadOffers({ rpcUrl, session, tradingAvailable, toast }: { rpcUrl:
         const item = items.find((offer) => offer.id === selected)
         if (!item) return
         let cancelled = false
-        void getLaunchpadOfferQuote(rpcUrl, item).then((value) => {
-            if (!cancelled) setQuote({ id: selected, value })
+        void Promise.all([getLaunchpadOfferQuote(rpcUrl, item),
+            getLaunchpadMarketTokenOwner(rpcUrl, item.collection, item.number).catch(() => null)]).then(([value, owner]) => {
+            if (!cancelled) setQuote({ id: selected, value, owner })
         }).catch(() => {
             if (!cancelled) setQuote({ id: selected, error: true })
         })
@@ -405,6 +407,9 @@ function LaunchpadOffers({ rpcUrl, session, tradingAvailable, toast }: { rpcUrl:
                     <span>DAO treasury <code>{quote.value!.treasury}</code></span>
                     {quote.value!.royalties.map((receiver) => <span key={receiver.account}>Royalty {receiver.amount.toLocaleString()} to <code>{receiver.account}</code></span>)}
                     <span>{quote.value!.executable ? "Token and owner approval currently allow acceptance." : "Offer is not executable now."} Trading policy is checked again when accepting.</span>
+                    {tradingAvailable && session.status === "member" && quote.owner === session.address && quote.value!.executable &&
+                        <OfferAcceptAction key={`${session.address}:${item.id}`} offer={item} quote={quote.value!} seller={session.address}
+                            chainId={session.network.chainId} rpcUrl={rpcUrl} refresh={refresh} toast={toast} />}
                 </>}
             </div>}
         </article>)}</div>}
@@ -479,6 +484,40 @@ function MakeOfferComposer({ session, rpcUrl, refresh, toast }: {
             </>}
         </div>}
     </section>
+}
+
+function OfferAcceptAction({ offer, quote, seller, chainId, rpcUrl, refresh, toast }: {
+    offer: LaunchpadMarketOffer; quote: LaunchpadOfferQuote; seller: string; chainId: string; rpcUrl: string;
+    refresh: () => void; toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [preparing, setPreparing] = useState(false)
+    const [checkedOutcome, setCheckedOutcome] = useState(false)
+    const [, refreshReceipt] = useState(0)
+    const scope = acceptOfferScope(chainId, seller, offer.id)
+    const receipt = readGovernanceReceipt(scope)
+    if (receipt) {
+        const link = receipt.hash ? txExplorerUrl(receipt.hash, chainId) : null
+        return <div className="os-stack os-tight os-note os-warn" role="status">
+            <strong>Previous offer acceptance needs review</strong>
+            <span>Check the transaction, NFT owner and offer status before another attempt.</span>
+            {receipt.hash && (link ? <a href={link} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
+            <button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh offer</button>
+            <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and this acceptance did not execute.</label>
+            <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
+                try { clearGovernanceReceipt(scope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
+                catch { /* an in-flight wallet request keeps the receipt locked */ }
+            }}>Review acceptance again</button>
+        </div>
+    }
+    return <button type="button" className="os-btn" disabled={preparing} onClick={() => {
+        setPreparing(true)
+        void networkGasPrice(chainId, [rpcUrl]).then((gasPrice) => {
+            const estimatedGasFeeUgnot = feeForGasWanted(ACCEPT_OFFER_GAS_WANTED, gasPrice)
+            signer.sign(acceptOfferRequest({ offer, quote, seller, rpcUrl, chainId, estimatedGasFeeUgnot, onSettled: refresh }))
+        }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare offer acceptance."))
+            .finally(() => setPreparing(false))
+    }}>{preparing ? "Preparing acceptance…" : "Review offer acceptance"}</button>
 }
 
 function OfferExitAction({ offer, session, rpcUrl, refresh, toast, now }: {

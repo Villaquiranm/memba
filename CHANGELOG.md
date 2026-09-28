@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: guarded Launchpad NFT collection discovery (2026-09-28)
+
+- Prepare the NFT window to read collections and SoulBound terms from the new Launchpad ledger once its realm is deployed and allowlisted. Show loading and read failures separately from an empty collection list; keep creation and trading tied to the existing realms until their new contract flows are ready.
+
 ### Memba OS: native Settings
 
 - Give Settings a native OS window with desktop appearance, wallpaper and icon size controls, honest notification availability, read-only network details, local gas defaults, account status and About access. Reset only disposable local UI data after confirmation, preserving unsent drafts, saved recipients and send locks.

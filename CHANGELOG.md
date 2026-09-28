@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: private founder and manager text threads (2026-09-28)
+
+- Add a disabled, authenticated text inbox for collection founders and active unconflicted managers. Each private request rechecks on-chain access; message content is encrypted before SQLite storage, writes have a per-wallet cap and idempotency key, and read/send metadata is audited. Activation still requires key, backup, retention and target-chain review.
+
 ### Memba OS: chain-backed founder inbox permissions (2026-09-28)
 
 - Add an opt-in, authenticated curation access probe for the unpublished founder inbox. It requires a wallet token signed for the exact chain, verifies a single configured RPC's network, and checks the current founder or unconflicted manager snapshot from the curation realm before any private workflow can be enabled.

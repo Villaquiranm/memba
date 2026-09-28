@@ -332,6 +332,15 @@ func (s *MultisigService) AllowUpload(addr string) bool {
 	return s.userLimiter.AllowKey(addr, ratelimit.ImageUploadEndpoint)
 }
 
+// AllowCurationMessage bounds private inbox writes per authenticated wallet.
+// The handler also sits behind the per-IP curation_inbox bucket.
+func (s *MultisigService) AllowCurationMessage(addr string) bool {
+	if s.userLimiter == nil {
+		return true // tests inject a limiter where write quotas matter
+	}
+	return s.userLimiter.AllowKey(addr, ratelimit.CurationMessageEndpoint)
+}
+
 // AllowArcadeSubmit applies the per-authenticated-wallet BARRICADE submit cap
 // (same AllowKey machinery). Returns true when the wallet is under quota — or
 // when no limiter is configured (the default in tests), so it's a no-op there.

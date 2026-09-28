@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -482,6 +483,26 @@ func main() {
 		svc, os.Getenv("GNO_CHAIN_ID"), service.HandleLaunchpadCurationAccess(
 			os.Getenv("LAUNCHPAD_CURATION_RPC_URL"), os.Getenv("GNO_CHAIN_ID"),
 			os.Getenv("LAUNCHPAD_CURATION_ACCESS_ENABLED") == "1"))))
+	var curationInbox http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"curation inbox unavailable"}`, http.StatusServiceUnavailable)
+	})
+	if os.Getenv("LAUNCHPAD_CURATION_INBOX_ENABLED") == "1" && os.Getenv("LAUNCHPAD_CURATION_ACCESS_ENABLED") == "1" {
+		key, keyErr := hex.DecodeString(os.Getenv("LAUNCHPAD_CURATION_INBOX_KEY_HEX"))
+		if keyErr == nil {
+			var inbox http.Handler
+			inbox, keyErr = service.NewCurationInboxHandler(database, service.CurationInboxConfig{
+				RPCURL: os.Getenv("LAUNCHPAD_CURATION_RPC_URL"), ChainID: os.Getenv("GNO_CHAIN_ID"),
+				Key: key, AllowSend: svc.AllowCurationMessage,
+			})
+			if keyErr == nil {
+				curationInbox = inbox
+			}
+		}
+		if keyErr != nil {
+			logger.Error("curation inbox disabled: invalid configuration", "error", keyErr)
+		}
+	}
+	mux.Handle("/api/nft/curation-thread", rateLimitMiddleware("curation_inbox", launchpadCurationAccessHandler(svc, os.Getenv("GNO_CHAIN_ID"), curationInbox)))
 	// Membas Genesis mint plumbing — both endpoints are OFF (404) until their
 	// envs are set at ceremony time (brief §8): the allowlist proofs file and
 	// the mint-ticket collection config.

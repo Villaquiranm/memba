@@ -3,10 +3,12 @@ import { useEffect, useState } from "react"
 import { getCollectionCuration, getCurationState, listCurationApplications, listCurationManagers, type CurationApplication, type CurationReceipt, type CurationSeat, type CurationState } from "../../../lib/launchpadCuration"
 import { readCurationDaoSnapshot, type CurationDaoProposal } from "../../../lib/launchpadCurationDao"
 import { Empty, ErrorState, Loading, Pill } from "../../kit"
+import type { OsSession } from "../../shell/useOsSession"
+import CurationDiscussion from "./discussion"
 
 const PAGE_SIZE = 20
 
-export default function MarketOperations({ rpcUrl, daoAvailable }: { rpcUrl: string; daoAvailable: boolean }) {
+export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rpcUrl: string; daoAvailable: boolean; session: OsSession }) {
     const [page, setPage] = useState(0)
     const [revision, setRevision] = useState(0)
     const [team, setTeam] = useState<{ state: CurationState; seats: CurationSeat[] } | null>(null)
@@ -45,7 +47,7 @@ export default function MarketOperations({ rpcUrl, daoAvailable }: { rpcUrl: str
 
     return <div className="os-stack os-market-operations">
         <header className="os-market-records-head"><div><h1>Market Operations</h1><p className="os-sub">A public trail of founder applications, community review seats and editorial decisions.</p></div><Pill tone="neutral">Public record</Pill></header>
-        <div className="os-note" role="note">This workspace reads chain records. Founder conversations and review drafts are private and will require a role checked inbox. Manager and DAO actions will open after governance and wallet review are ready.</div>
+        <div className="os-note" role="note">Application status and evidence hashes are public. Founder discussions require a connected founder or eligible manager wallet. Manager and DAO actions open after governance and wallet review are ready.</div>
         {loading && applications.length === 0 && <Loading label="Loading curation records…" />}
         {error && <ErrorState message="Could not verify curation records from this network." onRetry={() => setRevision((value) => value + 1)} />}
         {!error && team && !team.state.governed && <div className="os-note os-warn" role="note">The curation realm has not completed its DAO handoff.</div>}
@@ -66,6 +68,11 @@ export default function MarketOperations({ rpcUrl, daoAvailable }: { rpcUrl: str
                     {item.reviewer && <span>Reviewer <code>{item.reviewer}</code></span>}
                     {item.reasonHash && <span>Review reason hash <code>{item.reasonHash}</code></span>}
                     {!receipt || receipt.id !== item.collection || (!receipt.value && !receipt.error) ? <Loading label="Reading curation receipt…" /> : receipt.error ? <span role="alert">Could not verify this collection’s curation receipt.</span> : <ReceiptView value={receipt.value!} />}
+                </div>}
+                {selected === item.collection && <div className="os-curation-private-entry">
+                    {session.status !== "member" || !session.layout.auth.token
+                        ? <div className="os-note"><span>Connect a wallet to check whether you can join the private founder discussion.</span><button type="button" className="os-btn os-quiet" onClick={session.openConnect}>Connect wallet</button></div>
+                        : <CurationDiscussion key={`${session.network.chainId}:${session.address}:${session.layout.auth.token.nonce}:${item.collection}`} collection={item.collection} account={session.address} chainId={session.network.chainId} token={session.layout.auth.token} />}
                 </div>}
             </article>)}</div>}
             {loading && applications.length > 0 && <Loading label="Loading more applications…" />}

@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: native founder discussion in Market Operations (2026-09-28)
+
+- Let eligible founders and community managers open a private text thread from an application record. The native desk binds reads and sends to the signed wallet and network, checks current chain access, clears private content before a refresh, and explains denied or unavailable states.
+
 ### Memba OS: private founder and manager text threads (2026-09-28)
 
 - Add a disabled, authenticated text inbox for collection founders and active unconflicted managers. Each private request rechecks on-chain access; message content is encrypted before SQLite storage, writes have a per-wallet cap and idempotency key, and read/send metadata is audited. Activation still requires key, backup, retention and target-chain review.

@@ -368,6 +368,19 @@ func main() {
 			Logger:           logger,
 		})
 	}
+	// New Launchpad NFT ownership has its own chain-scoped ledger and cursor.
+	// It remains dormant until the realm is published and its exact deployment
+	// block is configured; the legacy NFT_INDEXER_DISABLED switch is unrelated.
+	if os.Getenv("LAUNCHPAD_NFT_INDEXER_ENABLED") == "1" {
+		indexer.StartLaunchpadNFTTailer(ctx, database, indexer.LaunchpadTailerConfig{
+			RPCURL:        envOr("LAUNCHPAD_NFT_RPC_URL", nftRPCURL),
+			ChainID:       os.Getenv("GNO_CHAIN_ID"),
+			StartBlock:    int64Or("LAUNCHPAD_NFT_START_BLOCK", 0),
+			Confirmations: int64Or("LAUNCHPAD_NFT_CONFIRMATIONS", 5),
+			Interval:      durationOr("LAUNCHPAD_NFT_TAILER_INTERVAL", 3*time.Second),
+			Logger:        logger,
+		})
+	}
 
 	// Start the social-feed indexer (W7.2): a separate goroutine + cursor +
 	// raw ledger, decoupled from the NFT money-path tailer. Projects

@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: fund native NFT offers (2026-09-28)
+
+- Let a member inspect an active Open NFT and review a token-specific GNOT offer. The full amount enters market escrow after a wallet review of expiry, pinned DAO fee, creator royalties and future seller payout. Recheck ownership and policy before signing, verify the exact new offer record, and hold uncertain outcomes for chain review.
+
 ### Memba OS: funded NFT offer refunds (2026-09-28)
 
 - Let buyers review cancellation of their funded Launchpad offers, including during a trading pause. Any connected member can review an expired-offer refund to its original buyer. Both actions recheck the offer, show the refund recipient and gas payer, and hold uncertain outcomes for chain review.

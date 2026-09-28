@@ -8,6 +8,7 @@ import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, isLaunchpadMarketPolic
 import { BUY_GAS_WANTED, CANCEL_GAS_WANTED, buyLaunchpadNativeRequest, buyScope, cancelLaunchpadListingRequest, cancelListingScope } from "../../../lib/launchpadTrade"
 import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveListingScope, createListingRequest, createListingScope, parseGnotPrice, readListingReadiness, type ListingReadiness } from "../../../lib/launchpadListing"
 import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferExit } from "../../../lib/launchpadOfferExit"
+import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
@@ -80,14 +81,14 @@ function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toas
             <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
             <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
         </header>
-        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying and listing are available after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings and buyers can exit funded offers during a market pause. New offers, acceptance and token payments remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
+        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying, listing and funded offers are available after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings and buyers can exit funded offers during a market pause. Offer acceptance and token payments remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
         <div className="os-market-tabs" role="tablist" aria-label="Collectible market records">
             <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
             <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
             <button type="button" role="tab" aria-selected={tab === "sell"} onClick={() => setTab("sell")}>Sell</button>
         </div>
         {tab === "listings" ? <LaunchpadListings rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> :
-            tab === "offers" ? <LaunchpadOffers rpcUrl={rpcUrl} session={session} toast={toast} /> :
+            tab === "offers" ? <LaunchpadOffers rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> :
                 <ListingComposer key={session.status === "member" ? session.address : "visitor"} rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} />}
     </div>
 }
@@ -331,7 +332,7 @@ function CancelListingAction({ listing, session, rpcUrl, refresh, toast }: {
     }}>{preparing ? "Preparing cancellation…" : "Review cancellation"}</button>
 }
 
-function LaunchpadOffers({ rpcUrl, session, toast }: { rpcUrl: string; session: NativeViewProps["session"]; toast: (message: string) => void }) {
+function LaunchpadOffers({ rpcUrl, session, tradingAvailable, toast }: { rpcUrl: string; session: NativeViewProps["session"]; tradingAvailable: boolean; toast: (message: string) => void }) {
     const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
     const [items, setItems] = useState<LaunchpadMarketOffer[]>([])
     const [page, setPage] = useState(0)
@@ -379,6 +380,7 @@ function LaunchpadOffers({ rpcUrl, session, toast }: { rpcUrl: string; session: 
     const refresh = () => { setPage(0); setRevision((value) => value + 1) }
     return <div className="os-stack">
         <p className="os-sub os-market-tab-description">A buyer funds each offer in full. Active escrow stays in the market until the owner accepts or the buyer exits; expired offers can be refunded to the buyer.</p>
+        {tradingAvailable && <MakeOfferComposer key={session.status === "member" ? session.address : "visitor"} session={session} rpcUrl={rpcUrl} refresh={refresh} toast={toast} />}
         {loading && items.length === 0 && <Loading label="Loading Launchpad offers…" />}
         {error && <ErrorState message="Could not read offers from this network." onRetry={retry} />}
         {!loading && !error && items.length === 0 && <Empty title="No Launchpad offers have been created yet." />}
@@ -409,6 +411,74 @@ function LaunchpadOffers({ rpcUrl, session, toast }: { rpcUrl: string; session: 
         {loading && items.length > 0 && <Loading label="Loading more offers…" />}
         {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more offers</button>}
     </div>
+}
+
+function MakeOfferComposer({ session, rpcUrl, refresh, toast }: {
+    session: NativeViewProps["session"]; rpcUrl: string; refresh: () => void; toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [collectionID, setCollectionID] = useState("")
+    const [numberText, setNumberText] = useState("")
+    const [priceText, setPriceText] = useState("")
+    const [days, setDays] = useState(7)
+    const [readiness, setReadiness] = useState<OfferReadiness | null>(null)
+    const [checking, setChecking] = useState(false)
+    const [preparing, setPreparing] = useState(false)
+    const [checkedOutcome, setCheckedOutcome] = useState(false)
+    const [error, setError] = useState("")
+    const [, refreshReceipt] = useState(0)
+    if (session.status !== "member") return <div className="os-note">Connect a wallet to make a funded offer on an Open NFT. <button type="button" className="os-btn os-quiet" onClick={session.openConnect}>Connect wallet</button></div>
+
+    const scope = readiness && makeOfferScope(session.network.chainId, session.address, readiness.collection.id, readiness.number)
+    const receipt = scope && readGovernanceReceipt(scope)
+    const check = () => {
+        if (!/^C[1-9]\d*$/.test(collectionID) || !/^[1-9]\d*$/.test(numberText)) { setError("Enter a collection ID and positive token number."); return }
+        setChecking(true); setError("")
+        void readOfferReadiness(rpcUrl, collectionID, BigInt(numberText), session.address).then(setReadiness)
+            .catch((cause) => { setReadiness(null); setError(cause instanceof Error ? cause.message : "Could not verify this NFT.") })
+            .finally(() => setChecking(false))
+    }
+    return <section className="os-stack os-note" aria-label="Make a funded NFT offer">
+        <div><h2>Make a funded offer</h2><p className="os-sub">Your full price moves into market escrow now. The NFT owner can accept it while the offer is active.</p></div>
+        <label>Offer collection ID <input value={collectionID} placeholder="C1" disabled={checking || preparing} onChange={(event) => { setCollectionID(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
+        <label>Offer token number <input value={numberText} inputMode="numeric" placeholder="1" disabled={checking || preparing} onChange={(event) => { setNumberText(event.target.value.trim()); setReadiness(null); setError("") }} /></label>
+        <button type="button" className="os-btn os-quiet" disabled={checking} onClick={check}>{checking ? "Checking chain…" : "Check NFT"}</button>
+        {error && <p role="alert">{error}</p>}
+        {readiness && <div className="os-stack os-tight">
+            <strong>{readiness.collection.name} · {readiness.collection.id} #{readiness.number.toString()}</strong>
+            <span>Current owner <code>{readiness.owner}</code></span>
+            <span>DAO trading fee: {formatBPS(readiness.feeBPS)} · Creator royalties: {formatBPS(readiness.collection.royaltyBPS)}</span>
+            <span>Market policy: {readiness.policyReady ? "ready" : "paused or unavailable"}</span>
+            {receipt && scope ? <div className="os-stack os-tight os-note os-warn" role="status">
+                <strong>Previous funded-offer outcome needs review</strong>
+                <span>Check the transaction and offer records before funding another offer for this NFT.</span>
+                {receipt.hash && (txExplorerUrl(receipt.hash, session.network.chainId)
+                    ? <a href={txExplorerUrl(receipt.hash, session.network.chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
+                <button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh offers</button>
+                <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and know whether this offer was funded.</label>
+                <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
+                    try { clearGovernanceReceipt(scope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
+                    catch { /* an in-flight wallet request keeps the receipt locked */ }
+                }}>Review a new offer</button>
+            </div> : <>
+                <label>Offer price (GNOT) <input value={priceText} inputMode="decimal" placeholder="1.25" onChange={(event) => setPriceText(event.target.value.trim())} /></label>
+                <label>Offer duration <select value={days} onChange={(event) => setDays(Number(event.target.value))}>
+                    <option value={1}>1 day</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
+                </select></label>
+                <button type="button" className="os-btn" disabled={preparing || !readiness.policyReady} onClick={() => {
+                    setPreparing(true)
+                    void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => {
+                        const price = parseGnotPrice(priceText)
+                        const expiresAt = BigInt(Math.floor(Date.now() / 1000) + days * 86400)
+                        const estimatedGasFeeUgnot = feeForGasWanted(MAKE_OFFER_GAS_WANTED, gasPrice)
+                        signer.sign(makeNativeOfferRequest({ readiness, price, expiresAt, rpcUrl, chainId: session.network.chainId,
+                            estimatedGasFeeUgnot, onSettled: refresh }))
+                    }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare this offer."))
+                        .finally(() => setPreparing(false))
+                }}>{preparing ? "Preparing review…" : "Review funded offer"}</button>
+            </>}
+        </div>}
+    </section>
 }
 
 function OfferExitAction({ offer, session, rpcUrl, refresh, toast, now }: {

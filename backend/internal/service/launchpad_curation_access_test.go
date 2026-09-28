@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -20,7 +21,10 @@ func accessRPCServer(t *testing.T, network string, view string, queryCount *int)
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/status" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"node_info": map[string]string{"network": network}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+				"node_info": map[string]string{"network": network},
+				"sync_info": map[string]any{"latest_block_height": "100", "latest_block_time": time.Now().UTC().Format(time.RFC3339Nano), "catching_up": false},
+			}})
 			return
 		}
 		if r.Method != http.MethodPost || r.URL.Path != "/" {
@@ -97,6 +101,20 @@ func TestLaunchpadCurationAccessFailsClosed(t *testing.T) {
 	w = accessRequest(HandleLaunchpadCurationAccess(rpc3.URL, "gnoland-1", false))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("disabled access status %d", w.Code)
+	}
+	stale := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/status" {
+			t.Error("stale node must be rejected before role query")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"node_info": map[string]string{"network": "gnoland-1"},
+			"sync_info": map[string]any{"latest_block_height": "100", "latest_block_time": time.Now().Add(-3 * time.Minute).UTC().Format(time.RFC3339Nano), "catching_up": false},
+		}})
+	}))
+	defer stale.Close()
+	w = accessRequest(HandleLaunchpadCurationAccess(stale.URL, "gnoland-1", true))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("stale RPC must not authorize a removed manager, status %d", w.Code)
 	}
 }
 

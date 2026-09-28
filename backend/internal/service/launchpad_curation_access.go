@@ -88,10 +88,22 @@ func readLaunchpadReviewAccess(ctx context.Context, rpcURL, chainID, collection,
 			NodeInfo struct {
 				Network string `json:"network"`
 			} `json:"node_info"`
+			SyncInfo struct {
+				LatestBlockHeight string `json:"latest_block_height"`
+				LatestBlockTime   string `json:"latest_block_time"`
+				CatchingUp        bool   `json:"catching_up"`
+			} `json:"sync_info"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(statusBody, &status); err != nil || status.Result.NodeInfo.Network != chainID {
 		return nil, fmt.Errorf("curation RPC chain mismatch or invalid status")
+	}
+	height, heightErr := strconv.ParseInt(status.Result.SyncInfo.LatestBlockHeight, 10, 64)
+	blockTime, timeErr := time.Parse(time.RFC3339Nano, status.Result.SyncInfo.LatestBlockTime)
+	blockAge := time.Since(blockTime)
+	if heightErr != nil || height < 1 || timeErr != nil || status.Result.SyncInfo.CatchingUp ||
+		blockAge < -30*time.Second || blockAge > 2*time.Minute {
+		return nil, fmt.Errorf("curation RPC is not at a recent chain head")
 	}
 	expr := launchpadCurationPath + ".ReviewAccessJSON(" + strconv.Quote(collection) + "," + strconv.Quote(wallet) + ")"
 	request := abciQueryRequest{JSONRPC: "2.0", ID: 1, Method: "abci_query", Params: abciQueryParams{

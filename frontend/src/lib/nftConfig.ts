@@ -30,6 +30,10 @@ export const LAUNCHPAD_NFT_PATH = "gno.land/r/samcrew/launchpad/nft/v1"
 /** New Launchpad fixed-price market. Unpublished; never infer deployment from this constant. */
 export const LAUNCHPAD_MARKET_PATH = "gno.land/r/samcrew/launchpad/market/v1"
 
+/** Launchpad policy and proceeds paths; both must be allowlisted before native buying. */
+export const LAUNCHPAD_CONFIG_PATH = "gno.land/r/samcrew/launchpad/config/v1"
+export const LAUNCHPAD_FEES_PATH = "gno.land/r/samcrew/launchpad/fees/v1"
+
 /** Governed editorial receipts and manager seats. Unpublished until DAO handoff. */
 export const LAUNCHPAD_CURATION_PATH = "gno.land/r/samcrew/launchpad/curation/v1"
 

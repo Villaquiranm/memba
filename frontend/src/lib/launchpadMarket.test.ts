@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
-import { LAUNCHPAD_MARKET_PATH } from "./nftConfig"
-import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, listLaunchpadMarketListings, listLaunchpadMarketOffers, parseLaunchpadMarketListing, parseLaunchpadMarketOffer, parseLaunchpadMarketQuote, parseLaunchpadOfferQuote } from "./launchpadMarket"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "./nftConfig"
+import { getLaunchpadMarketListing, getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, parseLaunchpadMarketListing, parseLaunchpadMarketOffer, parseLaunchpadMarketQuote, parseLaunchpadOfferQuote } from "./launchpadMarket"
 
 const listing = {
     id: "L1", collection: "C4", number: "1", seller: "g1seller",
@@ -57,6 +57,32 @@ describe("Launchpad market reads", () => {
         expect(() => parseLaunchpadMarketQuote({ ...quote, protocolAmount: "51", sellerAmount: "9449" }, item)).toThrow("Inconsistent market quote")
         expect(() => parseLaunchpadMarketQuote({ ...quote, royalties: [] }, item)).toThrow("Inconsistent market quote")
         expect(() => parseLaunchpadMarketQuote({ ...quote, listing: "L2" }, item)).toThrow("Inconsistent market quote")
+    })
+
+    it("re-reads one exact listing and token owner for settlement verification", async () => {
+        const owner = `g1${"q".repeat(38)}`
+        const read = vi.spyOn(shared, "queryEval")
+            .mockResolvedValueOnce(qeval(listing))
+            .mockResolvedValueOnce(qeval({ collection: "C4", number: "1", owner, status: "active", uri: "ipfs://art", soulbound: false }))
+        await expect(getLaunchpadMarketListing("rpc", "L1")).resolves.toMatchObject({ id: "L1", price: 10000n })
+        await expect(getLaunchpadMarketTokenOwner("rpc", "C4", 1n)).resolves.toBe(owner)
+        expect(read).toHaveBeenNthCalledWith(1, "rpc", LAUNCHPAD_MARKET_PATH, 'ListingJSON("L1")', true)
+        expect(read).toHaveBeenNthCalledWith(2, "rpc", LAUNCHPAD_NFT_PATH, 'TokenJSON("C4", 1)', true)
+        read.mockResolvedValueOnce(qeval({ collection: "C4", number: "1", owner, status: "burned", uri: "ipfs://art", soulbound: false }))
+        await expect(getLaunchpadMarketTokenOwner("rpc", "C4", 1n)).resolves.toBeNull()
+    })
+
+    it("checks pause, immediate currency allowlist and configured lane terms before buying", async () => {
+        const read = vi.spyOn(shared, "queryEval")
+            .mockResolvedValueOnce("(false bool)")
+            .mockResolvedValueOnce("(true bool)")
+            .mockResolvedValueOnce("(true bool)")
+            .mockResolvedValueOnce("(true bool)")
+            .mockResolvedValueOnce("(true bool)")
+            .mockResolvedValueOnce("(true bool)")
+        await expect(isLaunchpadMarketPolicyReady("rpc", "ugnot")).resolves.toBe(true)
+        await expect(isLaunchpadMarketPolicyReady("rpc", "ugnot")).resolves.toBe(false)
+        expect(read).toHaveBeenNthCalledWith(1, "rpc", LAUNCHPAD_CONFIG_PATH, 'IsPaused("nft_market")', true)
     })
 
     it("reads funded offer records and reconciles a fee pinned before a DAO change", async () => {

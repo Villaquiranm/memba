@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: reviewed native NFT purchases (2026-09-28)
+
+- Prepare a native-currency Buy action in Market after the Launchpad ledger, market, policy and proceeds realms are deployed and allowlisted. The OS review shows the exact seller, DAO and creator payouts, rechecks the listing and active policy before Adena opens, and verifies token ownership after submission. The NFT flag remains off until publication and release checks.
+
 ### Memba OS: discoverable NFT collection rights (2026-09-28)
 
 - Read the Launchpad ledger's versioned collection capability record on demand in NFT. Show transfer, approval, Soulbound claim and revocation rights, native-market mode eligibility and the scope of royalty payments without implying a live sale.

@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
+import { clearGovernanceMemory, saveGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import MarketWindow from "./native"
 
-const availability = vi.hoisted(() => ({ enabled: false, ledger: false, market: false, curation: false, curationDao: false }))
+const availability = vi.hoisted(() => ({ enabled: false, ledger: false, market: false, config: false, fees: false, curation: false, curationDao: false }))
 const list = vi.hoisted(() => vi.fn())
 const getQuote = vi.hoisted(() => vi.fn())
+const policyReady = vi.hoisted(() => vi.fn())
 const listOffers = vi.hoisted(() => vi.fn())
 const getOfferQuote = vi.hoisted(() => vi.fn())
 const getCurationState = vi.hoisted(() => vi.fn())
@@ -13,15 +15,19 @@ const listCurationManagers = vi.hoisted(() => vi.fn())
 const listCurationApplications = vi.hoisted(() => vi.fn())
 const getCollectionCuration = vi.hoisted(() => vi.fn())
 const readCurationDaoSnapshot = vi.hoisted(() => vi.fn())
+const sign = vi.hoisted(() => vi.fn())
+const gasPrice = vi.hoisted(() => vi.fn(async () => ({ gas: 1000, ugnot: 1 })))
+vi.mock("../../../lib/grc20", async (original) => ({ ...(await original<typeof import("../../../lib/grc20")>()), networkGasPrice: gasPrice }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
-    isRealmValidOn: (_network: string, path: string) => path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === LAUNCHPAD_MARKET_PATH ? availability.market : path === LAUNCHPAD_CURATION_PATH ? availability.curation : path === LAUNCHPAD_CURATION_DAO_PATH ? availability.curationDao : false,
+    isRealmValidOn: (_network: string, path: string) => path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === LAUNCHPAD_MARKET_PATH ? availability.market : path === LAUNCHPAD_CONFIG_PATH ? availability.config : path === LAUNCHPAD_FEES_PATH ? availability.fees : path === LAUNCHPAD_CURATION_PATH ? availability.curation : path === LAUNCHPAD_CURATION_DAO_PATH ? availability.curationDao : false,
 }))
 vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: list, getLaunchpadMarketQuote: getQuote,
-    listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote }))
+    listLaunchpadMarketOffers: listOffers, getLaunchpadOfferQuote: getOfferQuote, isLaunchpadMarketPolicyReady: policyReady }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
 vi.mock("../../../lib/launchpadCurationDao", () => ({ readCurationDaoSnapshot }))
+vi.mock("../../sign/signerContext", () => ({ useSigner: () => ({ sign, version: 0 }) }))
 
 const item = { id: "L1", collection: "C4", number: 1n, seller: "g1seller", price: 10000n, currency: "ugnot",
     expiresAt: 1000n, createdAt: 500n, configVersion: 2n, protocolFeeBPS: 50n, royaltyBPS: 500n, status: "active" }
@@ -42,10 +48,14 @@ describe("native Market window", () => {
         availability.enabled = false
         availability.ledger = false
         availability.market = false
+        availability.config = false
+        availability.fees = false
         availability.curation = false
         availability.curationDao = false
         list.mockReset()
         getQuote.mockReset()
+        policyReady.mockReset()
+        policyReady.mockResolvedValue(true)
         listOffers.mockReset()
         getOfferQuote.mockReset()
         getCurationState.mockReset()
@@ -53,6 +63,10 @@ describe("native Market window", () => {
         listCurationApplications.mockReset()
         getCollectionCuration.mockReset()
         readCurationDaoSnapshot.mockReset()
+        sign.mockReset()
+        gasPrice.mockClear()
+        localStorage.clear()
+        clearGovernanceMemory()
     })
 
     it("keeps existing Market sections in their current lane", () => {
@@ -102,6 +116,54 @@ describe("native Market window", () => {
         render(<MarketWindow {...base} section="launchpad" open={vi.fn()} />)
         expect(await screen.findByRole("alert")).toHaveTextContent("Could not read sale records")
         expect(screen.queryByText("No Launchpad sale records have been created yet.")).toBeNull()
+    })
+
+    it("offers native purchase review to a member with current executable terms", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        const buyer = `g1${"q".repeat(38)}`
+        const live = { ...item, seller: `g1${"p".repeat(38)}`, expiresAt: 4102444800n }
+        const split = { ...quote, treasury: `g1${"z".repeat(38)}`, royalties: [{ account: `g1${"a".repeat(38)}`, amount: 500n }] }
+        list.mockResolvedValue([live])
+        getQuote.mockResolvedValue(split)
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: buyer, openConnect: vi.fn() } as never
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Review purchase" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        const request = sign.mock.calls[0][0]
+        expect(request.prepare(undefined).msgs[0]).toMatchObject({ value: { caller: buyer, send: "10000ugnot", func: "Buy", args: ["L1", "2"] } })
+        expect(request.lines(undefined)).toContainEqual(["Estimated gas fee", "60,000 ugnot"])
+    })
+
+    it("blocks wallet review while policy is paused or a previous outcome is unresolved", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        const buyer = `g1${"q".repeat(38)}`
+        const live = { ...item, seller: `g1${"p".repeat(38)}`, expiresAt: 4102444800n }
+        const split = { ...quote, treasury: `g1${"z".repeat(38)}`, royalties: [{ account: `g1${"a".repeat(38)}`, amount: 500n }] }
+        list.mockResolvedValue([live])
+        getQuote.mockResolvedValue(split)
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: buyer, openConnect: vi.fn() } as never
+        policyReady.mockResolvedValueOnce(false)
+        const view = render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        expect(await screen.findByText(/Buying is unavailable under the current/)).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: "Review purchase" })).toBeNull()
+        view.unmount()
+        saveGovernanceReceipt({ chainId: "test12", realmPath: LAUNCHPAD_MARKET_PATH, caller: buyer, operation: "buy:L1" },
+            { phase: "submitted", hash: "ab".repeat(32), label: "Buy C4 #1" })
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        expect(await screen.findByText("Previous purchase outcome needs review")).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: "Review purchase" })).toBeNull()
+        expect(sign).not.toHaveBeenCalled()
     })
 
     it("shows funded offers and a fresh split in a separate read-only tab", async () => {

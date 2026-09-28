@@ -1,6 +1,6 @@
 /** Strict reads for the unpublished Launchpad fixed-price NFT market. */
 import { queryEval, parseQevalJSON } from "./dao/shared"
-import { LAUNCHPAD_MARKET_PATH } from "./nftConfig"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "./nftConfig"
 
 const MAX_INT64 = 9223372036854775807n
 const LISTING_KEYS = ["id", "collection", "number", "seller", "price", "currency", "expiresAt", "createdAt", "configVersion", "protocolFeeBPS", "royaltyBPS", "status"] as const
@@ -142,6 +142,46 @@ export async function getLaunchpadMarketQuote(rpcUrl: string, listing: Launchpad
     const raw = await queryEval(rpcUrl, LAUNCHPAD_MARKET_PATH, `QuoteJSON(${JSON.stringify(listing.id)})`, true)
     if (raw === null) throw new Error("Could not read Launchpad market quote")
     return parseLaunchpadMarketQuote(parseQevalJSON(raw), listing)
+}
+
+/** Mirrors config.AssertNewAction's read-only pause, allowlist and term checks. */
+export async function isLaunchpadMarketPolicyReady(rpcUrl: string, currency: string): Promise<boolean> {
+    if (currency.length === 0 || currency.length > 200) throw new Error("Invalid market currency")
+    const queries = [
+        `IsPaused("nft_market")`,
+        `IsCurrencyAllowed(${JSON.stringify(currency)})`,
+        `IsLaneReady("nft_market", ${JSON.stringify(currency)})`,
+    ]
+    const values = await Promise.all(queries.map(async (expr) => {
+        const raw = await queryEval(rpcUrl, LAUNCHPAD_CONFIG_PATH, expr, true)
+        if (raw?.trim() === "(true bool)") return true
+        if (raw?.trim() === "(false bool)") return false
+        throw new Error("Could not verify Launchpad trading policy")
+    }))
+    return !values[0] && values[1] && values[2]
+}
+
+/** Read one record afresh before signing or reconciling a wallet outcome. */
+export async function getLaunchpadMarketListing(rpcUrl: string, id: string): Promise<LaunchpadMarketListing> {
+    const checkedId = listingId(id)
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_MARKET_PATH, `ListingJSON(${JSON.stringify(checkedId)})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad listing")
+    const listing = parseLaunchpadMarketListing(parseQevalJSON(raw))
+    if (listing.id !== checkedId) throw new Error("Listing identity changed")
+    return listing
+}
+
+/** A filled listing alone does not prove which wallet bought the token. */
+export async function getLaunchpadMarketTokenOwner(rpcUrl: string, collection: string, number: bigint): Promise<string | null> {
+    if (!/^C[1-9]\d*$/.test(collection) || number < 1n || number > MAX_INT64) throw new Error("Invalid token identity")
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_NFT_PATH, `TokenJSON(${JSON.stringify(collection)}, ${number.toString()})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad token")
+    const token = row(parseQevalJSON(raw), ["collection", "number", "owner", "status", "uri", "soulbound"], "token")
+    if (token.collection !== collection || amount(token.number, "token number") !== number ||
+        token.soulbound !== false || typeof token.uri !== "string" || token.status !== "active") return null
+    const owner = text(token.owner, "token owner")
+    if (!/^g1[02-9ac-hj-np-z]{38}$/.test(owner)) throw new Error("Invalid token owner")
+    return owner
 }
 
 export function parseLaunchpadMarketOffer(value: unknown): LaunchpadMarketOffer {

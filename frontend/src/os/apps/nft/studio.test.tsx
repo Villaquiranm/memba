@@ -64,4 +64,23 @@ describe("native Launchpad Creator Studio", () => {
         } })
         expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["DAO primary fee", "200 bps from the mint price"])
     })
+
+    it("reviews a creator's price change before the original stage begins", async () => {
+        const now = BigInt(Math.floor(Date.now() / 1000))
+        getCollection.mockResolvedValue({ id: "C1", name: "Founders", creator, mode: "open", minted: 0n, maxSupply: 100n })
+        readStages.mockResolvedValue([{ collection: "C1", index: 0, start: now + 7200n, end: now + 14400n,
+            price: 1_000_000n, currency: "ugnot", supplyCap: 100n, perWallet: 2n, minted: 0n }])
+        readTerms.mockResolvedValue(terms)
+        render(<LaunchpadCreatorStudio rpcUrl="rpc" session={session} available toast={vi.fn()} />)
+        fireEvent.change(screen.getByLabelText("Collection ID"), { target: { value: "C1" } })
+        fireEvent.click(screen.getByRole("button", { name: "Load collection and stages" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Review or edit stage 1" }))
+        fireEvent.change(screen.getByLabelText("Mint price in GNOT"), { target: { value: "2" } })
+        fireEvent.click(screen.getByRole("button", { name: "Review stage changes" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: creator, send: "", func: "EditFixedStage",
+            args: ["C1", "0", expect.any(String), expect.any(String), "2000000", "100", "2", "ugnot", "3"],
+        } })
+    })
 })

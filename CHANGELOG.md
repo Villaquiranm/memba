@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: edit scheduled primary drop stages (2026-09-28)
+
+- Let collection creators review and edit a fixed-price stage only before its original start. Studio shows the original and proposed schedule, price, limits and DAO fee; the signer rechecks the entire stage list and creator authority, sends no payment, verifies the replacement and preserves uncertain outcomes for chain review.
+
 ### Memba OS: reviewed primary NFT minting (2026-09-28)
 
 - Add a gated native drop mint view for Open and Soulbound collections. The connected recipient checks an exact fixed stage, wallet limit, current DAO policy and creator/DAO price split before one native payment. The signer rechecks chain state, verifies the new token owner and counters, and holds uncertain outcomes for chain review.

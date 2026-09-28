@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { readActionTerms, type LaunchpadActionTerms } from "../../../lib/launchpadActionTerms"
-import { addFixedDropStageRequest, addFixedDropStageScope, parseFreeOrGnotPrice, readFixedDropStages,
+import { addFixedDropStageRequest, addFixedDropStageScope, editFixedStageRequest, editFixedStageScope,
+    parseFreeOrGnotPrice, readFixedDropStages,
     ADD_FIXED_STAGE_GAS_WANTED, type FixedDropStage } from "../../../lib/launchpadDropStages"
 import { formatGnotPrice } from "../../../lib/launchpadListing"
 import { getLaunchpadNftCollection, type LaunchpadNftCollection } from "../../../lib/launchpadNft"
@@ -33,6 +34,13 @@ function whole(text: string, label: string): bigint {
     return BigInt(text)
 }
 
+function localInput(seconds: bigint): string {
+    const date = new Date(Number(seconds) * 1000)
+    if (!Number.isFinite(date.valueOf())) return ""
+    const pad = (value: number) => String(value).padStart(2, "0")
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 export default function LaunchpadCreatorStudio({ rpcUrl, session, available, toast }: {
     rpcUrl: string; session: NativeViewProps["session"]; available: boolean; toast: (message: string) => void
 }) {
@@ -51,6 +59,8 @@ export default function LaunchpadCreatorStudio({ rpcUrl, session, available, toa
     const [price, setPrice] = useState("")
     const [supplyCap, setSupplyCap] = useState("")
     const [perWallet, setPerWallet] = useState("")
+    const [editingIndex, setEditingIndex] = useState<number | null>(null)
+    const [editingAllowed, setEditingAllowed] = useState(false)
     useEffect(() => {
         if (!available || !/^C[1-9]\d*$/.test(selected)) return
         let cancelled = false
@@ -68,14 +78,16 @@ export default function LaunchpadCreatorStudio({ rpcUrl, session, available, toa
     const draft = () => ({ collection: selected, creator: session.address, start: localSeconds(start), end: localSeconds(end),
         price: price === "0" ? 0n : parseFreeOrGnotPrice(price), supplyCap: whole(supplyCap, "stage supply cap"),
         perWallet: whole(perWallet, "per-wallet limit") })
-    const scope = addFixedDropStageScope(session.network.chainId, { collection: selected, creator: session.address,
-        start: 0n, end: 0n, price: 0n, supplyCap: 0n, perWallet: 1n })
+    const emptyDraft = { collection: selected, creator: session.address, start: 0n, end: 0n, price: 0n, supplyCap: 0n, perWallet: 1n }
+    const scope = editingIndex === null ? addFixedDropStageScope(session.network.chainId, emptyDraft) :
+        editFixedStageScope(session.network.chainId, emptyDraft, editingIndex)
     const receipt = current && isCreator ? readGovernanceReceipt(scope) : null
     return <section className="os-stack" aria-label="Launchpad Creator Studio">
         <div><h1>Creator Studio</h1><p className="os-sub">Schedule a fixed-price primary drop for a collection you created. Dates are entered in your local time and reviewed in UTC before signing.</p></div>
         <label>Collection ID <input value={collectionID} onChange={(event) => setCollectionID(event.target.value.trim())} placeholder="C1" /></label>
         <button type="button" className="os-btn os-quiet" disabled={!/^C[1-9]\d*$/.test(collectionID) || loading} onClick={() => {
-            setLoaded(null); setError(false); setLoading(true); setSelected(collectionID); setRevision((value) => value + 1)
+            setLoaded(null); setError(false); setLoading(true); setEditingIndex(null); setEditingAllowed(false);
+            setSelected(collectionID); setRevision((value) => value + 1)
         }}>Load collection and stages</button>
         {loading && <Loading label="Reading collection and drop policy…" />}
         {error && <ErrorState message="Could not verify this collection, its stages or drop policy." onRetry={refresh} />}
@@ -93,17 +105,29 @@ export default function LaunchpadCreatorStudio({ rpcUrl, session, available, toa
                 <strong>Stage {stage.index + 1} · {stage.currency === "ugnot" ? stage.price === 0n ? "Free" : formatGnotPrice(stage.price) : `${stage.price.toString()} ${stage.currency}`}</strong>
                 <span>{utc(stage.start)} → {utc(stage.end)}</span>
                 <span>{stage.minted.toString()} minted · {stage.supplyCap === 0n ? "collection supply cap" : `${stage.supplyCap.toString()} stage cap`} · {stage.perWallet.toString()} per wallet</span>
+                {isCreator && stage.currency === "ugnot" &&
+                    <button type="button" className="os-btn os-quiet" onClick={() => {
+                        setEditingAllowed(stage.start > BigInt(Math.floor(Date.now() / 1000)) && stage.minted === 0n)
+                        setEditingIndex(stage.index); setStart(localInput(stage.start)); setEnd(localInput(stage.end))
+                        setPrice(formatGnotPrice(stage.price).replaceAll(",", "").replace(" GNOT", ""))
+                        setSupplyCap(stage.supplyCap.toString()); setPerWallet(stage.perWallet.toString())
+                        setCheckedOutcome(false)
+                    }}>Review or edit stage {stage.index + 1}</button>}
             </div>)}
         </div>}
         {current && !isCreator && <p className="os-note os-warn" role="note">This wallet is not the on-chain creator. Connect the creator wallet to schedule stages.</p>}
-        {current && isCreator && <div className="os-stack"><h2>Schedule a fixed-price stage</h2>
+        {current && isCreator && <div className="os-stack"><h2>{editingIndex === null ? "Schedule a fixed-price stage" : `Edit scheduled stage ${editingIndex + 1}`}</h2>
             <p className="os-sub">Up to ten stages can be scheduled. Windows cannot overlap. A stage can be edited only before it begins.</p>
+            {editingIndex !== null && !editingAllowed && <p className="os-note os-warn" role="note">This stage has started or minted. Its terms can no longer be edited; a pending edit can still be reviewed below.</p>}
+            {editingIndex !== null && <button type="button" className="os-btn os-quiet" onClick={() => {
+                setEditingIndex(null); setEditingAllowed(false); setStart(""); setEnd(""); setPrice(""); setSupplyCap(""); setPerWallet(""); setCheckedOutcome(false)
+            }}>Add a new stage instead</button>}
             <label>Start · local time <input type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} /></label>
             <label>End · local time <input type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
             <label>Mint price in GNOT <input value={price} inputMode="decimal" onChange={(event) => setPrice(event.target.value.trim())} placeholder="0 for free; 1.25 for paid" /></label>
             <label>Stage supply cap <input value={supplyCap} inputMode="numeric" onChange={(event) => setSupplyCap(event.target.value.trim())} placeholder="0 uses collection cap" /></label>
             <label>Per-wallet limit <input value={perWallet} inputMode="numeric" onChange={(event) => setPerWallet(event.target.value.trim())} placeholder="1" /></label>
-            {receipt ? <div className="os-stack os-note os-warn" role="status"><strong>Previous stage creation needs review</strong>
+            {receipt ? <div className="os-stack os-note os-warn" role="status"><strong>Previous stage action needs review</strong>
                 <span>Check the transaction and stage list before another attempt.</span>
                 {receipt.hash && (txExplorerUrl(receipt.hash, session.network.chainId) ?
                     <a href={txExplorerUrl(receipt.hash, session.network.chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
@@ -111,16 +135,20 @@ export default function LaunchpadCreatorStudio({ rpcUrl, session, available, toa
                 <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
                     try { clearGovernanceReceipt(scope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
                     catch { /* in-flight wallet action remains locked */ }
-                }}>Review a new stage</button>
-            </div> : <button type="button" className="os-btn" disabled={preparing || loading || !current.terms.actionReady || current.stages.length >= 10} onClick={() => {
+                }}>Review another stage action</button>
+            </div> : <button type="button" className="os-btn" disabled={preparing || loading || !current.terms.actionReady ||
+                (editingIndex !== null && !editingAllowed) ||
+                (editingIndex === null && current.stages.length >= 10)} onClick={() => {
                 setPreparing(true)
                 void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => {
-                    signer.sign(addFixedDropStageRequest({ draft: draft(), terms: current.terms, collection: current.collection, stages: current.stages,
+                    const common = { draft: draft(), terms: current.terms, collection: current.collection, stages: current.stages,
                         rpcUrl, chainId: session.network.chainId,
-                        estimatedGasFeeUgnot: feeForGasWanted(ADD_FIXED_STAGE_GAS_WANTED, gasPrice), onSettled: refresh }))
+                        estimatedGasFeeUgnot: feeForGasWanted(ADD_FIXED_STAGE_GAS_WANTED, gasPrice), onSettled: refresh }
+                    signer.sign(editingIndex === null ? addFixedDropStageRequest(common) :
+                        editFixedStageRequest({ ...common, index: editingIndex }))
                 }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare drop stage."))
                     .finally(() => setPreparing(false))
-            }}>{preparing ? "Preparing review…" : "Review fixed-price stage"}</button>}
+            }}>{preparing ? "Preparing review…" : editingIndex === null ? "Review fixed-price stage" : "Review stage changes"}</button>}
         </div>}
     </section>
 }

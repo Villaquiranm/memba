@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { queryEval } from "./dao/shared"
 import { readActionTerms } from "./launchpadActionTerms"
-import { addFixedDropStageRequest, buildAddFixedDropStageMsg, parseFixedDropStages, readFixedDropStages,
+import { addFixedDropStageRequest, buildAddFixedDropStageMsg, buildEditFixedStageMsg, editFixedStageRequest,
+    parseFixedDropStages, readFixedDropStages,
     validateFixedDropStage } from "./launchpadDropStages"
 import { getLaunchpadNftCollection } from "./launchpadNft"
 
@@ -59,5 +60,25 @@ describe("native fixed drop stages", () => {
         await expect(request.verify?.(undefined, "hash", undefined)).resolves.toBe(true)
         vi.mocked(queryEval).mockResolvedValueOnce(qeval([{ ...rawStage, price: "1250001" }]))
         await expect(request.verify?.(undefined, "hash", undefined)).resolves.toBe(false)
+    })
+
+    it("edits only before the original start and verifies the replacement", async () => {
+        const original = parseFixedDropStages([rawStage], "C1")
+        const collection = { id: "C1", creator, maxSupply: 100n, minted: 0n } as never
+        const replacement = { ...draft, start: now + 14400n, end: now + 18000n, price: 2_000_000n }
+        expect(buildEditFixedStageMsg(replacement, 0, terms, collection, original, now).value).toMatchObject({
+            send: "", func: "EditFixedStage", args: ["C1", "0", replacement.start.toString(),
+                replacement.end.toString(), "2000000", "100", "2", "ugnot", "3"],
+        })
+        expect(() => buildEditFixedStageMsg(replacement, 0, terms, collection, original, draft.start)).toThrow("original start")
+        vi.mocked(readActionTerms).mockResolvedValue(terms)
+        vi.mocked(getLaunchpadNftCollection).mockResolvedValue(collection)
+        vi.mocked(queryEval).mockResolvedValue(qeval([rawStage]))
+        const request = editFixedStageRequest({ draft: replacement, index: 0, terms, collection,
+            stages: original, rpcUrl: "rpc", chainId: "gnoland1", estimatedGasFeeUgnot: 50000 })
+        await expect(request.recheck?.(undefined)).resolves.toBeUndefined()
+        vi.mocked(queryEval).mockResolvedValue(qeval([{ ...rawStage, start: replacement.start.toString(),
+            end: replacement.end.toString(), price: "2000000" }]))
+        await expect(request.verify?.(undefined, "hash", undefined)).resolves.toBe(true)
     })
 })

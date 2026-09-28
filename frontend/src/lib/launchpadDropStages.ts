@@ -120,6 +120,11 @@ function sameStage(a: FixedDropStage, b: FixedDropStage): boolean {
         a.perWallet === b.perWallet && a.minted === b.minted
 }
 
+function utc(seconds: bigint): string {
+    const date = new Date(Number(seconds) * 1000)
+    return Number.isFinite(date.valueOf()) ? date.toISOString() : `${seconds.toString()} Unix seconds`
+}
+
 export function addFixedDropStageRequest(input: { draft: FixedDropStageDraft; terms: LaunchpadActionTerms;
     collection: LaunchpadNftCollection; stages: FixedDropStage[]; rpcUrl: string; chainId: string;
     estimatedGasFeeUgnot: number; onSettled?: () => void }): SignRequest {
@@ -176,3 +181,74 @@ export function addFixedDropStageRequest(input: { draft: FixedDropStageDraft; te
 }
 
 export function parseFreeOrGnotPrice(text: string): bigint { return text === "0" ? 0n : parseGnotPrice(text) }
+
+export function editFixedStageScope(chainId: string, draft: FixedDropStageDraft, index: number): GovernanceScope {
+    return { chainId, realmPath: LAUNCHPAD_DROPS_PATH, caller: draft.creator,
+        operation: `edit-fixed-stage:${draft.collection}:${index}` }
+}
+
+export function buildEditFixedStageMsg(draft: FixedDropStageDraft, index: number, terms: LaunchpadActionTerms,
+    collection: LaunchpadNftCollection, stages: FixedDropStage[], now = BigInt(Math.floor(Date.now() / 1000))): AminoMsg {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= stages.length || stages[index].start <= now ||
+        stages[index].minted !== 0n) throw new Error("Only a stage before its original start can be edited.")
+    validateFixedDropStage(draft, terms, stages.filter((stage) => stage.index !== index), now, collection)
+    return { type: "vm/MsgCall", value: { caller: draft.creator, send: "", pkg_path: LAUNCHPAD_DROPS_PATH,
+        func: "EditFixedStage", args: [draft.collection, index.toString(), draft.start.toString(), draft.end.toString(),
+            draft.price.toString(), draft.supplyCap.toString(), draft.perWallet.toString(), "ugnot", terms.version.toString()],
+        max_deposit: `${STORAGE_CAP}ugnot` } }
+}
+
+export function editFixedStageRequest(input: { draft: FixedDropStageDraft; index: number; terms: LaunchpadActionTerms;
+    collection: LaunchpadNftCollection; stages: FixedDropStage[]; rpcUrl: string; chainId: string;
+    estimatedGasFeeUgnot: number; onSettled?: () => void }): SignRequest {
+    const { draft, index, terms, collection, stages, rpcUrl, chainId, estimatedGasFeeUgnot } = input
+    if (!Number.isSafeInteger(estimatedGasFeeUgnot) || estimatedGasFeeUgnot <= 0) throw new Error("Could not estimate the network fee.")
+    const original = stages[index]
+    const msg = buildEditFixedStageMsg(draft, index, terms, collection, stages)
+    const scope = editFixedStageScope(chainId, draft, index)
+    return {
+        title: "Edit scheduled NFT drop", summary: `${draft.collection} · stage ${index + 1}`,
+        lines: () => [["Collection", draft.collection], ["Creator", draft.creator], ["Stage", (index + 1).toString()],
+            ["Original start", utc(original.start)],
+            ["Original price", original.price === 0n ? "Free" : formatGnotPrice(original.price)],
+            ["New start", utc(draft.start)],
+            ["New end", utc(draft.end)],
+            ["New mint price", draft.price === 0n ? "Free" : formatGnotPrice(draft.price)],
+            ["New stage cap", draft.supplyCap === 0n ? "Collection cap only" : draft.supplyCap.toLocaleString()],
+            ["New per-wallet limit", draft.perWallet.toLocaleString()],
+            ["DAO primary fee", `${terms.primaryFeeBPS.toString()} bps from each mint price`],
+            ["DAO treasury", terms.treasury], ["Policy version", terms.version.toString()],
+            ["Realm", LAUNCHPAD_DROPS_PATH], ["Network", chainId], ["Gas limit", ADD_FIXED_STAGE_GAS_WANTED.toLocaleString()],
+            ["Estimated gas fee", `${estimatedGasFeeUgnot.toLocaleString()} ugnot`],
+            ["Storage deposit cap", `${STORAGE_CAP.toLocaleString()} ugnot`]],
+        warns: ["This edit is permitted only before the original stage start. Once it begins, price, dates and limits cannot be changed.",
+            "Collectors should be notified of changes to a published drop schedule."],
+        acks: ["I checked the original stage and the new UTC schedule, price, limits, DAO fee and network."],
+        label: () => `Edit ${draft.collection} stage ${index + 1}`, receipt: scope, prepare: () => ({ msgs: [msg] }),
+        recheck: async () => {
+            const [freshTerms, freshCollection, freshStages] = await Promise.all([
+                readActionTerms(rpcUrl, "drops", "ugnot"), getLaunchpadNftCollection(rpcUrl, draft.collection),
+                readFixedDropStages(rpcUrl, draft.collection),
+            ])
+            if (!sameTerms(terms, freshTerms) || freshCollection.creator !== collection.creator ||
+                freshStages.length !== stages.length || freshStages.some((stage, offset) => !sameStage(stage, stages[offset]))) {
+                throw new Error("Drop stage or DAO policy changed. Refresh before signing.")
+            }
+            buildEditFixedStageMsg(draft, index, freshTerms, freshCollection, freshStages)
+        },
+        send: (_choice, beforeSign) => doContractBroadcast([msg], `Edit ${draft.collection} stage ${index + 1}`,
+            { gasWanted: ADD_FIXED_STAGE_GAS_WANTED, retry: false, beforeSign }),
+        verify: async () => {
+            const fresh = await readFixedDropStages(rpcUrl, draft.collection)
+            if (fresh.length !== stages.length || fresh.some((stage, offset) => offset !== index && !sameStage(stage, stages[offset]))) return false
+            const edited = fresh[index]
+            return edited.start === draft.start && edited.end === draft.end && edited.price === draft.price &&
+                edited.supplyCap === draft.supplyCap && edited.perWallet === draft.perWallet && edited.currency === "ugnot" &&
+                edited.minted === 0n
+        },
+        onSettled: (outcome) => {
+            if (outcome === "confirmed") { try { clearGovernanceReceipt(scope) } catch { /* retain conservative lock */ } }
+            input.onSettled?.()
+        },
+    }
+}

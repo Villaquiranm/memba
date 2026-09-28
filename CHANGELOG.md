@@ -22,7 +22,7 @@ Full changelogs are split by version range for easier navigation:
 
 ### Token Launchpad: creation event identity validation (2026-09-28)
 
-- Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. The validator does not publish tokens or infer launch times.
+- Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 
 ### Memba OS: native Settings
 

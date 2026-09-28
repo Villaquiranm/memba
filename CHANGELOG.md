@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: Token Launchpad config gate reader (2026-09-28)
+
+- Prepare an exact, network-bound read of current Launchpad config version, pause, allowlist and lane readiness. This read does not activate a realm or enable a transaction.
+
 ### Memba OS: Token Launchpad locked-pool reads (2026-09-28)
 
 - Show exact recorded reserves for a graduated Launchpad token when its pool realm is allowlisted. Check the pool's token, creator, quote currency and pinned version before showing its reserves; keep the unpublished realm gated on mainnet.

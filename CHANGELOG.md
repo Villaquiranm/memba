@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: native fixed-price drop scheduling (2026-09-28)
+
+- Add a gated Creator Studio for on-chain fixed-price primary stages. It reads the collection, stage list and DAO drop policy; only the collection creator can review a native-price stage. The review shows local-time dates in UTC, price, supply and wallet limits, DAO fee and treasury, then rechecks chain state before signing and verifies the new stage. Uncertain outcomes remain locked for manual chain review.
+
 ### Memba OS: creator royalties and reveal commitments (2026-09-28)
 
 - Let creators choose static or committed reveal metadata and set up to ten permanent royalty receivers for Open collections. Compute the future URI and manifest SHA-256 hashes in the browser, review the exact DAO fee and rights before signing, recheck policy, and verify the resulting collection. Soulbound collections remain royalty-free.

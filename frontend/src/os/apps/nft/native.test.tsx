@@ -11,6 +11,7 @@ const getLaunchpadNftCapabilities = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/launchpadNft", () => ({ listLaunchpadNftCollections: listCollections }))
 vi.mock("../../../lib/launchpadNftCapabilities", () => ({ getLaunchpadNftCapabilities }))
 vi.mock("./create", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native creator ready" : "native creator gated"}</p> }))
+vi.mock("./studio", () => ({ default: ({ available }: { available: boolean }) => <p>{available ? "native studio ready" : "native studio gated"}</p> }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
@@ -125,6 +126,16 @@ describe("NFT window", () => {
         availability.drops = true; availability.config = true; availability.fees = true
         view.rerender(<NftWindow {...base} section="create" session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
         expect(screen.getByText("native creator ready")).toBeInTheDocument()
+    })
+
+    it("routes the Launchpad Creator Studio only behind the ledger and realm gates", () => {
+        availability.enabled = true
+        availability.ledger = true
+        const view = render(<NftWindow {...base} section="studio" session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
+        expect(screen.getByText("native studio gated")).toBeInTheDocument()
+        availability.drops = true; availability.config = true; availability.fees = true
+        view.rerender(<NftWindow {...base} section="studio" session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
+        expect(screen.getByText("native studio ready")).toBeInTheDocument()
     })
 
     it("renders the fallback for every section other than the home, on any network", () => {

@@ -34,6 +34,7 @@ describe("versioned NFT capability reads", () => {
         expect(() => parseLaunchpadNftCapabilities({ ...open, schema: "launchpad-nft-capabilities/v2" })).toThrow()
         expect(() => parseLaunchpadNftCapabilities({ ...open, arbitraryCall: true })).toThrow()
         expect(() => parseLaunchpadNftCapabilities({ ...open, minted: "1); Transfer(7" })).toThrow("Invalid capability")
+        expect(() => parseLaunchpadNftCapabilities({ ...open, minted: "9999999999999999999" })).toThrow("Invalid capability")
     })
 
     it("binds capability facts to the selected collection and fails closed on missing RPC data", async () => {

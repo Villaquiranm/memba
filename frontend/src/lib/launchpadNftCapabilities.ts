@@ -21,7 +21,9 @@ export type LaunchpadNftCapabilities = Omit<z.infer<typeof schema>, "maxSupply" 
 
 function decimal(value: string, label: string): bigint {
     if (!/^(0|[1-9][0-9]{0,18})$/.test(value)) throw new Error(`Invalid capability ${label}`)
-    return BigInt(value)
+    const parsed = BigInt(value)
+    if (parsed > 9223372036854775807n) throw new Error(`Invalid capability ${label}`)
+    return parsed
 }
 
 export function parseLaunchpadNftCapabilities(value: unknown): LaunchpadNftCapabilities {

@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: public Market Operations records (2026-09-28)
+
+- Add a guarded Market Operations view for the DAO appointed manager roster, founder application statuses and public curation receipts. Keep manager actions and private founder conversations gated until the DAO adapter and role checked inbox are ready.
+
 ### Memba OS: funded NFT offer records (2026-09-28)
 
 - Add a guarded, read-only Offers tab to native Market. Show chain-backed buyer, escrow status, expiry and the seller/DAO/royalty split without enabling offer signing before the contract and wallet release gates pass.

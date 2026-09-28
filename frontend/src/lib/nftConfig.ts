@@ -30,6 +30,9 @@ export const LAUNCHPAD_NFT_PATH = "gno.land/r/samcrew/launchpad/nft/v1"
 /** New Launchpad fixed-price market. Unpublished; never infer deployment from this constant. */
 export const LAUNCHPAD_MARKET_PATH = "gno.land/r/samcrew/launchpad/market/v1"
 
+/** Governed editorial receipts and manager seats. Unpublished until DAO handoff. */
+export const LAUNCHPAD_CURATION_PATH = "gno.land/r/samcrew/launchpad/curation/v1"
+
 /**
  * Bech32 address of the marketplace realm.
  * Used as `operator` in SetApprovalForAll / Approve calls on the collection.

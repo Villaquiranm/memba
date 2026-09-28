@@ -3,21 +3,31 @@ import { useEffect, useState } from "react"
 import type { NativeViewProps } from "../../native/types"
 import { GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
 import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
 import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
 import { Empty, ErrorState, Loading, Pill } from "../../kit"
 import { specForTarget } from "../../shell/windows"
+import MarketOperations from "./operations"
 import "./native.css"
 
 const PAGE_SIZE = 20
 
 export default function MarketWindow({ section, session, open, fallback }: NativeViewProps) {
-    if (section !== null && section !== "launchpad") return <>{fallback}</>
+    if (section !== null && section !== "launchpad" && section !== "operations") return <>{fallback}</>
 
     const network = session.network.key
     const rpcUrl = NETWORKS[network]?.rpcUrl ?? GNO_RPC_URL
     const available = isNftEnabled() && isRealmValidOn(network, LAUNCHPAD_NFT_PATH) && isRealmValidOn(network, LAUNCHPAD_MARKET_PATH)
+    const curationAvailable = isNftEnabled() && isRealmValidOn(network, LAUNCHPAD_NFT_PATH) && isRealmValidOn(network, LAUNCHPAD_CURATION_PATH)
     const openServices = () => open(specForTarget({ kind: "app", app: "market", section: "services" })!)
     const openLaunchpad = () => open(specForTarget({ kind: "app", app: "market", section: "launchpad" })!)
+    const openOperations = () => open(specForTarget({ kind: "app", app: "market", section: "operations" })!)
+
+    if (section === "operations") {
+        return curationAvailable
+            ? <MarketOperations key={network} rpcUrl={rpcUrl} />
+            : <div className="os-stack"><div className="os-note os-warn" role="note">Market Operations is awaiting the governed curation realm on this network.</div><button type="button" className="os-btn os-quiet" onClick={openServices}>Open services</button></div>
+    }
 
     if (section === "launchpad") {
         return available
@@ -42,6 +52,13 @@ export default function MarketWindow({ section, session, open, fallback }: Nativ
                 {available
                     ? <button type="button" className="os-btn" onClick={openLaunchpad}>Explore NFT records</button>
                     : <Pill tone="neutral">Awaiting Launchpad publication</Pill>}
+            </div>
+            <div className="os-market-lane os-market-lane-ops">
+                <span className="os-market-lane-name">Market Operations</span>
+                <span>See the DAO appointed review team, founder applications and public curation decisions.</span>
+                {curationAvailable
+                    ? <button type="button" className="os-btn" onClick={openOperations}>Open operations</button>
+                    : <Pill tone="neutral">Awaiting DAO handoff</Pill>}
             </div>
         </div>
         <p className="os-sub os-market-footnote">Launchpad listings appear only after this network enables the NFT ledger and market realm. Existing NFT trading remains in its current Market lane.</p>

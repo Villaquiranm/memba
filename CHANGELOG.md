@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: Token Launchpad sale identity guard (2026-09-28)
+
+- Withhold sale, claim and locked-pool details when the token list, embedded sale token or launch terms disagree on identity. Show a clear mismatch state for the selected token.
+
 ### Memba OS: Token Launchpad config gate reader (2026-09-28)
 
 - Prepare an exact, network-bound read of current Launchpad config version, pause, allowlist and lane readiness. This read does not activate a realm or enable a transaction.

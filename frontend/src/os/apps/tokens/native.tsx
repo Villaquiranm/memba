@@ -3,8 +3,8 @@ import { useState } from "react"
 import type { ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { GNO_CHAIN_ID, GRC20_FACTORY_PATH, NETWORKS, isRealmValidOn } from "../../../lib/config"
-import { TokenLaunchpadClient, TOKEN_LAUNCHPAD_PATH } from "../../../lib/tokenLaunchpadClient"
-import { TokenLaunchpadSalesClient, TOKEN_LAUNCHPAD_SALES_PATH } from "../../../lib/tokenLaunchpadSalesClient"
+import { TokenLaunchpadClient, TOKEN_LAUNCHPAD_PATH, type LaunchpadToken } from "../../../lib/tokenLaunchpadClient"
+import { TokenLaunchpadSalesClient, TOKEN_LAUNCHPAD_SALES_PATH, type LaunchpadSaleView } from "../../../lib/tokenLaunchpadSalesClient"
 import { TokenLaunchpadPoolClient, TOKEN_LAUNCHPAD_POOL_PATH } from "../../../lib/tokenLaunchpadPoolClient"
 import { Pill } from "../../kit"
 import type { NativeViewProps } from "../../native/types"
@@ -15,6 +15,21 @@ function tokenAmount(amount: bigint, decimals: number): string {
     const digits = amount.toString().padStart(decimals + 1, "0")
     const fraction = digits.slice(-decimals).replace(/0+$/, "")
     return digits.slice(0, -decimals) + (fraction ? `.${fraction}` : "")
+}
+
+function saleIdentityMatches(token: LaunchpadToken | undefined, sale: LaunchpadSaleView | undefined): boolean {
+    if (!token || !sale) return false
+    const embedded = sale.token
+    return token.id === embedded.id && token.registryKey === embedded.registryKey &&
+        token.grc20Id === embedded.grc20Id && token.creator === embedded.creator &&
+        token.mode === embedded.mode && token.name === embedded.name &&
+        token.ticker === embedded.ticker && token.decimals === embedded.decimals &&
+        token.initialSupply === embedded.initialSupply && token.maxSupply === embedded.maxSupply &&
+        token.currencyKey === embedded.currencyKey && token.configVersion === embedded.configVersion &&
+        (!sale.curve || (token.mode === "curve" && sale.curve.creator === token.creator &&
+            sale.curve.quoteCurrency === token.currencyKey && sale.curve.configVersion === token.configVersion)) &&
+        (!sale.fairSale || (sale.fairSale.creator === token.creator &&
+            sale.fairSale.quoteCurrency === token.currencyKey && sale.fairSale.configVersion === token.configVersion))
 }
 
 export default function TokensWindow({ section, session, fallback }: NativeViewProps) {
@@ -56,16 +71,18 @@ function LaunchpadTokens({ network, address, salesAvailable, poolAvailable, lega
         enabled: salesAvailable && selected !== null,
         retry: false,
     })
+    const selectedToken = tokens.data?.find(token => token.id === selected)
+    const saleMatches = saleIdentityMatches(selectedToken, launch.data)
     const buyer = useQuery({
         queryKey: ["token-launchpad", network, "buyer", selected, address],
         queryFn: () => salesClient.fairBuyer(selected!, address!),
-        enabled: salesAvailable && !!selected && !!address && !!launch.data?.fairSale,
+        enabled: salesAvailable && saleMatches && !!selected && !!address && !!launch.data?.fairSale,
         retry: false,
     })
     const pool = useQuery({
         queryKey: ["token-launchpad", network, "pool", selected],
         queryFn: () => poolClient.pool(selected!),
-        enabled: poolAvailable && !!selected && launch.data?.curve?.status === "graduated",
+        enabled: poolAvailable && saleMatches && !!selected && launch.data?.curve?.status === "graduated",
         retry: false,
     })
     const balance = useQuery({
@@ -77,20 +94,10 @@ function LaunchpadTokens({ network, address, salesAvailable, poolAvailable, lega
     const vesting = useQuery({
         queryKey: ["token-launchpad", network, "vesting", selected, vestingIndex],
         queryFn: () => salesClient.vesting(selected!, vestingIndex),
-        enabled: salesAvailable && !!selected && vestingIndex < (launch.data?.vestingCount ?? 0),
+        enabled: salesAvailable && saleMatches && !!selected && vestingIndex < (launch.data?.vestingCount ?? 0),
         retry: false,
     })
-    const selectedToken = tokens.data?.find(token => token.id === selected)
-    const salesToken = launch.data?.token
-    const poolMatches = !!pool.data && !!selectedToken && !!salesToken && !!launch.data?.curve &&
-        selectedToken.mode === "curve" && selectedToken.id === salesToken.id &&
-        selectedToken.registryKey === salesToken.registryKey &&
-        selectedToken.grc20Id === salesToken.grc20Id &&
-        selectedToken.creator === salesToken.creator &&
-        selectedToken.ticker === salesToken.ticker &&
-        selectedToken.decimals === salesToken.decimals &&
-        selectedToken.currencyKey === salesToken.currencyKey &&
-        selectedToken.configVersion === salesToken.configVersion &&
+    const poolMatches = saleMatches && !!pool.data && !!selectedToken && !!launch.data?.curve &&
         pool.data.id === selectedToken.id && pool.data.creator === selectedToken.creator &&
         pool.data.creator === launch.data.curve.creator &&
         pool.data.quoteCurrency === selectedToken.currencyKey &&
@@ -139,7 +146,8 @@ function LaunchpadTokens({ network, address, salesAvailable, poolAvailable, lega
             {!salesAvailable && <p className="os-note" role="status">Sales details are unavailable on this network.</p>}
             {salesAvailable && launch.isPending && <p role="status">Loading sale details…</p>}
             {salesAvailable && launch.isError && <p className="os-note os-err" role="alert">Sale details could not be loaded. <button type="button" className="os-btn os-quiet" onClick={() => void launch.refetch()}>Retry</button></p>}
-            {launch.data && <div className="os-token-launchpad__sections">
+            {launch.data && !saleMatches && <p className="os-note os-err" role="alert">Sale identity does not match this token.</p>}
+            {launch.data && saleMatches && <div className="os-token-launchpad__sections">
                 {launch.data.curve && <div>
                     <h4>Bonding curve</h4>
                     <p>Status: {launch.data.curve.status}. Raised {launch.data.curve.raised.toString()} of {launch.data.curve.graduationTarget.toString()} base units of {launch.data.curve.quoteCurrency}; {tokenAmount(launch.data.curve.sold, selectedToken.decimals)} {selectedToken.ticker} sold.</p>

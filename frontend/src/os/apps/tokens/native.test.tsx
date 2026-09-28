@@ -30,8 +30,10 @@ vi.mock("../../../lib/config", async (original) => ({
 const session = (key: string, address?: string) => ({ network: { key }, status: address ? "member" : "guest", address }) as never
 const fallback = <p>classic token page</p>
 const props = (key: string, address?: string) => ({ session: session(key, address), fallback, section: null }) as never
-const curveToken = () => ({ id: "T1", name: "Example", ticker: "EX", mode: "curve", creator: "g1creator", totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot", configVersion: 3n, registryKey: "gno.land/r/samcrew/launchpad/tokens/v1.T1", grc20Id: "gno.land/r/samcrew/launchpad/tokens/v1.T1.0000001" })
+const curveToken = () => ({ id: "T1", name: "Example", ticker: "EX", mode: "curve", creator: "g1creator", initialSupply: 1000000n, maxSupply: 1000000n, totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot", configVersion: 3n, registryKey: "gno.land/r/samcrew/launchpad/tokens/v1.T1", grc20Id: "gno.land/r/samcrew/launchpad/tokens/v1.T1.0000001" })
+const directToken = (supply = 1000000n) => ({ ...curveToken(), mode: "direct_fixed", initialSupply: supply, maxSupply: supply, totalSupply: supply })
 const graduated = () => ({ token: curveToken(), curve: { status: "graduated", creator: "g1creator", quoteCurrency: "ugnot", configVersion: 3n, raised: 1000n, graduationTarget: 1000n, sold: 500000n }, fairSale: null, airdrop: null, vestingCount: 0 })
+const fairLaunch = (token = directToken(), proceedsReleased = true) => ({ token, fairSale: { creator: "g1creator", configVersion: 3n, cancelled: false, settled: true, succeeded: true, totalLots: 5n, hardCapLots: 10n, closePrice: 8n, quoteCurrency: "ugnot", proceedsReleased }, curve: null, airdrop: null, vestingCount: 0 })
 
 describe("Tokens window", () => {
     beforeEach(() => {
@@ -41,6 +43,7 @@ describe("Tokens window", () => {
         availability.pool = false
         listPage.mockReset()
         balanceOf.mockReset()
+        balanceOf.mockResolvedValue(0n)
         launch.mockReset()
         fairBuyer.mockReset()
         vesting.mockReset()
@@ -69,8 +72,8 @@ describe("Tokens window", () => {
     it("shows an existing direct token's fair sale when both source realms are available", async () => {
         availability.launchpad = true
         availability.sales = true
-        listPage.mockResolvedValue([{ id: "T1", name: "Example", ticker: "EX", mode: "direct_fixed", creator: "g1creator", totalSupply: 1000n, decimals: 6, currencyKey: "ugnot" }])
-        launch.mockResolvedValue({ fairSale: { cancelled: false, settled: true, succeeded: true, totalLots: 5n, hardCapLots: 10n, closePrice: 8n, quoteCurrency: "ugnot", proceedsReleased: true }, curve: null, airdrop: null, vestingCount: 0 })
+        listPage.mockResolvedValue([directToken(1000n)])
+        launch.mockResolvedValue(fairLaunch(directToken(1000n)))
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
         fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
@@ -89,6 +92,32 @@ describe("Tokens window", () => {
         render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
         expect(await screen.findByText("No tokens on this page.")).toBeInTheDocument()
         expect(launch).not.toHaveBeenCalled()
+    })
+
+    it("withholds sale state and personal claims when embedded token identity disagrees", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        listPage.mockResolvedValue([directToken()])
+        launch.mockResolvedValue(fairLaunch({ ...directToken(), grc20Id: "another-ledger" }))
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet", "first")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByText("Sale identity does not match this token.")).toBeInTheDocument()
+        expect(screen.queryByText("Fair sale")).toBeNull()
+        expect(screen.queryByText(/Your claim:/)).toBeNull()
+        expect(fairBuyer).not.toHaveBeenCalled()
+    })
+
+    it("withholds sale state when campaign terms disagree with the listed token", async () => {
+        availability.launchpad = true
+        availability.sales = true
+        listPage.mockResolvedValue([directToken()])
+        launch.mockResolvedValue({ ...fairLaunch(), fairSale: { ...fairLaunch().fairSale, creator: "g1other" } })
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
+        fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
+        expect(await screen.findByRole("alert")).toHaveTextContent("Sale identity does not match")
+        expect(screen.queryByText("Fair sale")).toBeNull()
     })
 
     it("shows exact locked-pool reserves only when its realm and launch identity match", async () => {
@@ -130,7 +159,8 @@ describe("Tokens window", () => {
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
         fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
-        expect(await screen.findByRole("alert")).toHaveTextContent("Pool identity does not match")
+        expect(await screen.findByRole("alert")).toHaveTextContent("Sale identity does not match")
+        expect(pool).not.toHaveBeenCalled()
         expect(screen.queryByText(/Recorded reserves:/)).toBeNull()
     })
 
@@ -144,7 +174,8 @@ describe("Tokens window", () => {
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         render(<QueryClientProvider client={client}><TokensWindow {...props("mainnet")} /></QueryClientProvider>)
         fireEvent.click(await screen.findByRole("button", { name: /Example EX/ }))
-        expect(await screen.findByRole("alert")).toHaveTextContent("Pool identity does not match")
+        expect(await screen.findByRole("alert")).toHaveTextContent("Sale identity does not match")
+        expect(pool).not.toHaveBeenCalled()
         expect(screen.queryByText(/Recorded reserves:/)).toBeNull()
     })
 
@@ -161,8 +192,8 @@ describe("Tokens window", () => {
     it("separates each member's personal fair claim after an address switch", async () => {
         availability.launchpad = true
         availability.sales = true
-        listPage.mockResolvedValue([{ id: "T1", name: "Example", ticker: "EX", mode: "direct_fixed", creator: "g1creator", totalSupply: 1000000n, decimals: 6, currencyKey: "ugnot", registryKey: "gno.land/r/samcrew/launchpad/tokens/v1.T1", grc20Id: "gno.land/r/samcrew/launchpad/tokens/v1.T1.0000001" }])
-        launch.mockResolvedValue({ fairSale: { cancelled: false, settled: true, succeeded: true, totalLots: 5n, hardCapLots: 10n, closePrice: 8n, quoteCurrency: "ugnot", proceedsReleased: false }, curve: null, airdrop: null, vestingCount: 0 })
+        listPage.mockResolvedValue([directToken()])
+        launch.mockResolvedValue(fairLaunch(directToken(), false))
         fairBuyer.mockImplementation(async (_id: string, address: string) => ({ claimableTokens: address === "first" ? 1000000n : 2000000n, claimableRefund: 3n, claimed: false }))
         balanceOf.mockImplementation(async (_id: string, address: string) => address === "first" ? 2000000n : 3000000n)
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

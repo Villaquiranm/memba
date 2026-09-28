@@ -478,6 +478,10 @@ func main() {
 		database, os.Getenv("GNO_CHAIN_ID"), os.Getenv("LAUNCHPAD_NFT_INDEXER_ENABLED") == "1" &&
 			int64Or("LAUNCHPAD_NFT_START_BLOCK", 0) > 0,
 		func() bool { return launchpadIndexStatus != nil && launchpadIndexStatus.Ready() })))
+	mux.Handle("/api/nft/curation-access", rateLimitMiddleware("nft", launchpadCurationAccessHandler(
+		svc, os.Getenv("GNO_CHAIN_ID"), service.HandleLaunchpadCurationAccess(
+			os.Getenv("LAUNCHPAD_CURATION_RPC_URL"), os.Getenv("GNO_CHAIN_ID"),
+			os.Getenv("LAUNCHPAD_CURATION_ACCESS_ENABLED") == "1"))))
 	// Membas Genesis mint plumbing — both endpoints are OFF (404) until their
 	// envs are set at ceremony time (brief §8): the allowlist proofs file and
 	// the mint-ticket collection config.
@@ -853,6 +857,33 @@ func requireAuthMiddleware(svc *service.MultisigService, next http.Handler) http
 // requireAuthAddressMiddleware needs.
 type restTokenAddressValidator interface {
 	ValidateRESTTokenAddress(tokenJSON string) (string, error)
+}
+
+type restTokenIdentityValidator interface {
+	ValidateRESTTokenIdentity(tokenJSON string) (string, string, error)
+}
+
+// Private curation requests require a token explicitly signed for the active
+// chain. General REST auth still permits legacy chainless tokens during grace;
+// those must never unlock a chain-scoped founder inbox.
+func launchpadCurationAccessHandler(v restTokenIdentityValidator, chainID string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if chainID == "" {
+			http.Error(w, `{"error":"curation access unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			http.Error(w, `{"error":"authorization required"}`, http.StatusUnauthorized)
+			return
+		}
+		addr, tokenChain, err := v.ValidateRESTTokenIdentity(strings.TrimPrefix(authHeader, "Bearer "))
+		if err != nil || addr == "" || tokenChain != chainID {
+			http.Error(w, `{"error":"invalid or wrong-chain token"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(service.WithAuthAddress(r.Context(), addr)))
+	})
 }
 
 // requireAuthAddressMiddleware is requireAuthMiddleware that also passes the

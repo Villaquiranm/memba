@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: chain-backed founder inbox permissions (2026-09-28)
+
+- Add an opt-in, authenticated curation access probe for the unpublished founder inbox. It requires a wallet token signed for the exact chain, verifies a single configured RPC's network, and checks the current founder or unconflicted manager snapshot from the curation realm before any private workflow can be enabled.
+
 ### Memba OS: confirmed Launchpad NFT collectibles (2026-09-28)
 
 - Show a connected wallet's confirmed Launchpad NFTs in a native, paged collectibles view. The backend keeps the query on one chain and one block snapshot, rejects pages after a chain reorganization, excludes transferred or retired tokens, and refuses to serve while the indexer is stalled or far behind; each card opens token management for a fresh chain check before any action.

@@ -298,6 +298,14 @@ func (s *MultisigService) ValidateRESTToken(tokenJSON string) error {
 // address on success — for REST callers that need the authenticated identity (e.g.
 // the per-wallet image-upload cap). Same validation contract as ValidateRESTToken.
 func (s *MultisigService) ValidateRESTTokenAddress(tokenJSON string) (string, error) {
+	address, _, err := s.ValidateRESTTokenIdentity(tokenJSON)
+	return address, err
+}
+
+// ValidateRESTTokenIdentity also returns the signed token's chain. Private
+// chain-scoped endpoints must require an exact nonempty chain match: general
+// REST auth still accepts legacy chainless tokens during its grace window.
+func (s *MultisigService) ValidateRESTTokenIdentity(tokenJSON string) (string, string, error) {
 	// protojson, not encoding/json: it accepts both the proto field names
 	// (user_address) and their JSON names (userAddress). The frontend stores
 	// the session token camelCase (useAuth.saveToken) and sends that string as
@@ -305,12 +313,12 @@ func (s *MultisigService) ValidateRESTTokenAddress(tokenJSON string) (string, er
 	// signature — every upload / arcade-submit request failed with 401.
 	var token membav1.Token
 	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(tokenJSON), &token); err != nil {
-		return "", fmt.Errorf("invalid token format: %w", err)
+		return "", "", fmt.Errorf("invalid token format: %w", err)
 	}
 	if err := auth.ValidateToken(s.publicKey, &token, s.acceptedChainIDs...); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return token.UserAddress, nil
+	return token.UserAddress, token.ChainId, nil
 }
 
 // AllowUpload applies the per-authenticated-wallet App Store media-upload cap using

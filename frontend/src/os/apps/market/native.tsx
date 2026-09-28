@@ -5,7 +5,7 @@ import { GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../li
 import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
 import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "../../../lib/nftConfig"
 import { getLaunchpadMarketQuote, getLaunchpadOfferQuote, isLaunchpadMarketPolicyReady, listLaunchpadMarketListings, listLaunchpadMarketOffers, type LaunchpadMarketListing, type LaunchpadMarketOffer, type LaunchpadMarketQuote, type LaunchpadOfferQuote } from "../../../lib/launchpadMarket"
-import { BUY_GAS_WANTED, buyLaunchpadNativeRequest, buyScope } from "../../../lib/launchpadTrade"
+import { BUY_GAS_WANTED, CANCEL_GAS_WANTED, buyLaunchpadNativeRequest, buyScope, cancelLaunchpadListingRequest, cancelListingScope } from "../../../lib/launchpadTrade"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
@@ -78,7 +78,7 @@ function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toas
             <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
             <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
         </header>
-        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying is available for active listings after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Listing creation, token payments and offers remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
+        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying is available for active listings after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel their active listings, including during a market pause. Listing creation, token payments and offers remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
         <div className="os-market-tabs" role="tablist" aria-label="Collectible market records">
             <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
             <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
@@ -146,6 +146,8 @@ function LaunchpadListings({ rpcUrl, session, tradingAvailable, toast }: { rpcUr
                 <span>Seller <code>{item.seller}</code></span>
                 <span>Currency <code>{item.currency}</code></span>
                 <span>Listing {item.id} · Fee fixed at config version {item.configVersion.toString()}</span>
+                {session.status === "member" && session.address === item.seller && item.status === "active" &&
+                    <CancelListingAction listing={item} session={session} rpcUrl={rpcUrl} refresh={refresh} toast={toast} />}
                 {!quote || quote.id !== item.id || (!quote.value && !quote.error) ? <Loading label="Reading sale split…" /> : quote.error ? <span role="alert">Could not verify the current sale split.</span> : <>
                     <span>Seller receives {quote.value!.sellerAmount.toLocaleString()} · DAO receives {quote.value!.protocolAmount.toLocaleString()} · Creator royalties {quote.value!.royaltyTotal.toLocaleString()}</span>
                     <span>DAO treasury <code>{quote.value!.treasury}</code></span>
@@ -190,6 +192,47 @@ function LaunchpadListings({ rpcUrl, session, tradingAvailable, toast }: { rpcUr
         {loading && items.length > 0 && <Loading label="Loading more sale records…" />}
         {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more records</button>}
     </div>
+}
+
+function CancelListingAction({ listing, session, rpcUrl, refresh, toast }: {
+    listing: LaunchpadMarketListing
+    session: NativeViewProps["session"]
+    rpcUrl: string
+    refresh: () => void
+    toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [preparing, setPreparing] = useState(false)
+    const [checkedOutcome, setCheckedOutcome] = useState(false)
+    const [, refreshReceipt] = useState(0)
+    if (session.status !== "member" || session.address !== listing.seller) return null
+    const scope = cancelListingScope(session.network.chainId, session.address, listing.id)
+    const receipt = readGovernanceReceipt(scope)
+    if (receipt) {
+        const link = receipt.hash ? txExplorerUrl(receipt.hash, session.network.chainId) : null
+        return <div className="os-stack os-tight os-note os-warn" role="status">
+            <strong>Previous cancellation outcome needs review</strong>
+            <span>Check the transaction and listing status before another attempt.</span>
+            {receipt.hash && (link ? <a href={link} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
+            <button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh record</button>
+            <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and this cancellation did not execute.</label>
+            <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
+                try { clearGovernanceReceipt(scope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
+                catch { /* an in-flight wallet request keeps the receipt locked */ }
+            }}>Review a new cancellation</button>
+        </div>
+    }
+    return <button type="button" className="os-btn os-quiet" disabled={preparing} onClick={() => {
+        setPreparing(true)
+        void networkGasPrice(session.network.chainId, [rpcUrl]).then((price) => {
+            const estimatedGasFeeUgnot = feeForGasWanted(CANCEL_GAS_WANTED, price)
+            signer.sign(cancelLaunchpadListingRequest({ listing, caller: session.address, rpcUrl,
+                chainId: session.network.chainId, estimatedGasFeeUgnot, onSettled: refresh }))
+        }).catch((error) => {
+            toast(error instanceof Error ? error.message : "Could not prepare this cancellation.")
+            refresh()
+        }).finally(() => setPreparing(false))
+    }}>{preparing ? "Preparing cancellation…" : "Review cancellation"}</button>
 }
 
 function LaunchpadOffers({ rpcUrl }: { rpcUrl: string }) {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as grc20 from "./grc20"
 import { getLaunchpadMarketListing, getLaunchpadMarketQuote, getLaunchpadMarketTokenOwner, isLaunchpadMarketPolicyReady, type LaunchpadMarketListing, type LaunchpadMarketQuote } from "./launchpadMarket"
-import { buildLaunchpadBuyNativeMsg, buyLaunchpadNativeRequest } from "./launchpadTrade"
+import { buildLaunchpadBuyNativeMsg, buyLaunchpadNativeRequest, buildLaunchpadCancelListingMsg, cancelLaunchpadListingRequest } from "./launchpadTrade"
 
 vi.mock("./launchpadMarket", () => ({
     getLaunchpadMarketListing: vi.fn(), getLaunchpadMarketQuote: vi.fn(), getLaunchpadMarketTokenOwner: vi.fn(), isLaunchpadMarketPolicyReady: vi.fn(),
@@ -68,6 +68,43 @@ describe("Launchpad native purchase review", () => {
         const req = buyLaunchpadNativeRequest({ listing, quote, caller: buyer, rpcUrl: "rpc", chainId: "gnoland1", estimatedGasFeeUgnot: 60000 })
         await req.send(undefined, beforeSign)
         expect(broadcast).toHaveBeenCalledWith([req.prepare(undefined).msgs[0]], expect.stringContaining("Buy C3 #2"),
+            { gasWanted: 50_000_000, retry: false, beforeSign })
+    })
+})
+
+describe("Launchpad seller cancellation review", () => {
+    beforeEach(() => vi.resetAllMocks())
+
+    it("creates a no-payment Cancel call only for the active seller", () => {
+        const msg = buildLaunchpadCancelListingMsg(listing, seller)
+        expect(msg).toEqual({ type: "vm/MsgCall", value: {
+            caller: seller, send: "", pkg_path: "gno.land/r/samcrew/launchpad/market/v1",
+            func: "Cancel", args: ["L7"], max_deposit: "1000000ugnot",
+        } })
+        expect(grc20.toAdenaMessages([msg])[0]).toMatchObject({ type: "/vm.m_call", value: { send: "", func: "Cancel", args: ["L7"] } })
+        expect(() => buildLaunchpadCancelListingMsg(listing, buyer)).toThrow("seller")
+        expect(() => buildLaunchpadCancelListingMsg({ ...listing, status: "filled" }, seller)).toThrow("active")
+    })
+
+    it("rechecks the exact listing and verifies a cancelled status before clearing uncertainty", async () => {
+        const req = cancelLaunchpadListingRequest({ listing, caller: seller, rpcUrl: "rpc", chainId: "gnoland1", estimatedGasFeeUgnot: 60000 })
+        vi.mocked(getLaunchpadMarketListing).mockResolvedValueOnce({ ...listing, price: listing.price + 1n })
+        await expect(req.recheck?.(undefined)).rejects.toThrow("changed")
+        vi.mocked(getLaunchpadMarketListing).mockResolvedValueOnce(listing)
+        await expect(req.recheck?.(undefined)).resolves.toBeUndefined()
+        vi.mocked(getLaunchpadMarketListing).mockResolvedValueOnce({ ...listing, status: "filled" })
+        await expect(req.verify?.(undefined, "hash", undefined)).resolves.toBe(false)
+        vi.mocked(getLaunchpadMarketListing).mockResolvedValueOnce({ ...listing, status: "cancelled" })
+        await expect(req.verify?.(undefined, "hash", undefined)).resolves.toBe(true)
+        expect(req.lines(undefined)).toContainEqual(["Effect", "This listing stops accepting purchases. The NFT stays in your wallet."])
+    })
+
+    it("uses a single non-retrying broadcast", async () => {
+        const broadcast = vi.spyOn(grc20, "doContractBroadcast").mockResolvedValue({ hash: "hash" })
+        const beforeSign = vi.fn()
+        const req = cancelLaunchpadListingRequest({ listing, caller: seller, rpcUrl: "rpc", chainId: "gnoland1", estimatedGasFeeUgnot: 60000 })
+        await req.send(undefined, beforeSign)
+        expect(broadcast).toHaveBeenCalledWith([req.prepare(undefined).msgs[0]], "Cancel listing L7",
             { gasWanted: 50_000_000, retry: false, beforeSign })
     })
 })

@@ -166,6 +166,30 @@ describe("native Market window", () => {
         expect(sign).not.toHaveBeenCalled()
     })
 
+    it("lets the seller review cancellation during a pause and locks an uncertain attempt", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        const seller = `g1${"p".repeat(38)}`
+        const live = { ...item, seller, expiresAt: 4102444800n }
+        list.mockResolvedValue([live])
+        getQuote.mockRejectedValue(new Error("quote unavailable"))
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: seller, openConnect: vi.fn() } as never
+        const view = render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Review cancellation" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        const request = sign.mock.calls[0][0]
+        expect(request.prepare(undefined).msgs[0]).toMatchObject({ value: { caller: seller, send: "", func: "Cancel", args: ["L1"] } })
+        view.unmount()
+        saveGovernanceReceipt({ chainId: "test12", realmPath: LAUNCHPAD_MARKET_PATH, caller: seller, operation: "cancel-listing:L1" },
+            { phase: "submitted", hash: "ab".repeat(32), label: "Cancel listing L1" })
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        expect(await screen.findByText("Previous cancellation outcome needs review")).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: "Review cancellation" })).toBeNull()
+    })
+
     it("shows funded offers and a fresh split in a separate read-only tab", async () => {
         availability.enabled = true
         availability.ledger = true

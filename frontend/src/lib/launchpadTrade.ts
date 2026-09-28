@@ -12,9 +12,79 @@ import type { SignRequest } from "../os/sign/signer"
 const ADDRESS = /^g1[02-9ac-hj-np-z]{38}$/
 export const BUY_GAS_WANTED = 50_000_000
 const BUY_STORAGE_CAP_UGNOT = 5_000_000
+export const CANCEL_GAS_WANTED = 50_000_000
+const CANCEL_STORAGE_CAP_UGNOT = 1_000_000
 
 export function buyScope(chainId: string, caller: string, id: string): GovernanceScope {
     return { chainId, realmPath: LAUNCHPAD_MARKET_PATH, caller, operation: `buy:${id}` }
+}
+
+export function cancelListingScope(chainId: string, caller: string, id: string): GovernanceScope {
+    return { chainId, realmPath: LAUNCHPAD_MARKET_PATH, caller, operation: `cancel-listing:${id}` }
+}
+
+export function buildLaunchpadCancelListingMsg(listing: LaunchpadMarketListing, caller: string): AminoMsg {
+    if (!ADDRESS.test(caller) || !/^L[1-9]\d*$/.test(listing.id) ||
+        listing.seller !== caller || listing.status !== "active") {
+        throw new Error("Only the seller can cancel an active listing.")
+    }
+    return { type: "vm/MsgCall", value: {
+        caller, send: "", pkg_path: LAUNCHPAD_MARKET_PATH,
+        func: "Cancel", args: [listing.id], max_deposit: `${CANCEL_STORAGE_CAP_UGNOT}ugnot`,
+    } }
+}
+
+export function cancelLaunchpadListingRequest(input: {
+    listing: LaunchpadMarketListing
+    caller: string
+    rpcUrl: string
+    chainId: string
+    estimatedGasFeeUgnot: number
+    onSettled?: () => void
+}): SignRequest {
+    const { listing, caller, rpcUrl, chainId, estimatedGasFeeUgnot } = input
+    if (!Number.isSafeInteger(estimatedGasFeeUgnot) || estimatedGasFeeUgnot <= 0) throw new Error("Could not estimate the network fee.")
+    const msg = buildLaunchpadCancelListingMsg(listing, caller)
+    const scope = cancelListingScope(chainId, caller, listing.id)
+    const label = `Cancel listing ${listing.id}`
+    return {
+        title: "Cancel listing",
+        summary: `Withdraw ${listing.collection} #${listing.number.toString()} from sale`,
+        sub: `Listing ${listing.id}`,
+        lines: () => [
+            ["Token", `${listing.collection} #${listing.number.toString()}`],
+            ["Listed price", `${listing.price.toLocaleString()} ${listing.currency}`],
+            ["Effect", "This listing stops accepting purchases. The NFT stays in your wallet."],
+            ["Realm", LAUNCHPAD_MARKET_PATH],
+            ["Network", chainId],
+            ["Gas limit", CANCEL_GAS_WANTED.toLocaleString()],
+            ["Estimated gas fee", `${estimatedGasFeeUgnot.toLocaleString()} ugnot`],
+            ["Storage deposit cap", `${CANCEL_STORAGE_CAP_UGNOT.toLocaleString()} ugnot`],
+        ],
+        warns: ["A purchase may settle before this cancellation reaches the chain. Check the result before another attempt."],
+        acks: ["I checked the listing and chain before opening Adena."],
+        label: () => label,
+        receipt: scope,
+        prepare: () => ({ msgs: [msg] }),
+        recheck: async () => {
+            const fresh = await getLaunchpadMarketListing(rpcUrl, listing.id)
+            if (!sameListing(listing, fresh)) throw new Error("Listing changed. Refresh before signing.")
+            buildLaunchpadCancelListingMsg(fresh, caller)
+        },
+        send: (_choice, beforeSign) => doContractBroadcast([msg], label,
+            { gasWanted: CANCEL_GAS_WANTED, retry: false, beforeSign }),
+        verify: async () => {
+            const fresh = await getLaunchpadMarketListing(rpcUrl, listing.id)
+            return fresh.status === "cancelled" && fresh.seller === caller &&
+                fresh.collection === listing.collection && fresh.number === listing.number
+        },
+        onSettled: (outcome) => {
+            if (outcome === "confirmed") {
+                try { clearGovernanceReceipt(scope) } catch { /* retain the conservative lock */ }
+            }
+            input.onSettled?.()
+        },
+    }
 }
 
 function saleReady(listing: LaunchpadMarketListing, quote: LaunchpadMarketQuote, caller: string, now: number): void {

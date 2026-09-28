@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 )
 
 const accessTestWallet = "g1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -94,5 +97,31 @@ func TestLaunchpadCurationAccessFailsClosed(t *testing.T) {
 	w = accessRequest(HandleLaunchpadCurationAccess(rpc3.URL, "gnoland-1", false))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("disabled access status %d", w.Code)
+	}
+}
+
+func TestCurationTokenIdentityReturnsTheSignedChain(t *testing.T) {
+	h := setup(t)
+	h.svc.acceptedChainIDs = []string{"gnoland-1", "pearl-1"}
+	token := h.makeToken(t, accessTestWallet)
+	token.ServerSignature = ""
+	token.ChainId = "gnoland-1"
+	toSign, err := proto.Marshal(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token.ServerSignature = base64.StdEncoding.EncodeToString(ed25519.Sign(h.svc.privateKey, toSign))
+	raw, err := json.Marshal(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet, chainID, err := h.svc.ValidateRESTTokenIdentity(string(raw))
+	if err != nil || wallet != accessTestWallet || chainID != "gnoland-1" {
+		t.Fatalf("signed identity wallet=%q chain=%q err=%v", wallet, chainID, err)
+	}
+	token.ChainId = "pearl-1" // a different accepted chain still needs its own signature
+	tampered, _ := json.Marshal(token)
+	if _, _, err := h.svc.ValidateRESTTokenIdentity(string(tampered)); err == nil {
+		t.Fatal("tampering the token's chain must break its signature")
 	}
 }

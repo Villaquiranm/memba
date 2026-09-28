@@ -11,6 +11,7 @@ import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferEx
 import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
 import { ACCEPT_OFFER_GAS_WANTED, acceptOfferRequest, acceptOfferScope } from "../../../lib/launchpadOfferAccept"
 import { PROCEEDS_CLAIM_GAS_WANTED, claimNativeProceedsRequest, proceedsClaimScope, readNativeProceeds, type NativeProceeds } from "../../../lib/launchpadProceeds"
+import { APPROVE_WUGNOT_GAS_WANTED, BUY_WUGNOT_GAS_WANTED, WUGNOT_KEY, approveWugnotRequest, approveWugnotScope, buyWugnotRequest, readWugnotSpend, type WugnotSpend } from "../../../lib/launchpadTokenTrade"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
@@ -83,7 +84,7 @@ function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toas
             <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
             <button type="button" className="os-btn os-quiet" onClick={openServices}>Services</button>
         </header>
-        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying, listing and funded offers are available after wallet review." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings and buyers can exit funded offers during a market pause. Owners can accept active offers after payout review. Token payments remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
+        <div className="os-note" role="note">{tradingAvailable ? "Native-currency buying, listing and funded offers are available after wallet review. Eligible WUGNOT listings require a verified balance and exact market approval." : "Trading awaits the reviewed policy and proceeds realms on this network."} Sellers can cancel active listings and buyers can exit funded offers during a market pause. Owners can accept active offers after payout review. Other registered-token payment adapters remain in preparation. Ownership, approval and policy are checked again before settlement.</div>
         <div className="os-market-tabs" role="tablist" aria-label="Collectible market records">
             <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
             <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
@@ -318,10 +319,12 @@ function LaunchpadListings({ rpcUrl, session, tradingAvailable, toast }: { rpcUr
                     <span>{quote.value!.executable ? "Token and approval currently match the listing." : "Listing is not executable now."} Trading policy is checked again when buying.</span>
                     {(() => {
                         const current = quote.value!
-                        if (item.currency !== "ugnot" || item.status !== "active") return null
+                        if ((item.currency !== "ugnot" && item.currency !== WUGNOT_KEY) || item.status !== "active") return null
                         if (!current.executable || !quote.policyReady || item.expiresAt <= BigInt(Math.floor(Date.now() / 1000))) return <span>Buying is unavailable under the current token or trading policy. Refresh its terms.</span>
                         if (session.status === "member" && session.address === item.seller) return <span>You own this listing.</span>
                         if (session.status !== "member") return <button type="button" className="os-btn" onClick={session.openConnect}>Connect to buy</button>
+                        if (item.currency === WUGNOT_KEY) return <WugnotListingActions key={`${session.address}:${item.id}`} listing={item} quote={current}
+                            buyer={session.address} chainId={session.network.chainId} rpcUrl={rpcUrl} refresh={refresh} toast={toast} />
                         const scope = buyScope(session.network.chainId, session.address, item.id)
                         const receipt = readGovernanceReceipt(scope)
                         if (receipt) {
@@ -354,6 +357,68 @@ function LaunchpadListings({ rpcUrl, session, tradingAvailable, toast }: { rpcUr
         </article>)}</div>}
         {loading && items.length > 0 && <Loading label="Loading more sale records…" />}
         {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more records</button>}
+    </div>
+}
+
+function WugnotListingActions({ listing, quote, buyer, chainId, rpcUrl, refresh, toast }: {
+    listing: LaunchpadMarketListing; quote: LaunchpadMarketQuote; buyer: string; chainId: string; rpcUrl: string;
+    refresh: () => void; toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [revision, setRevision] = useState(0)
+    const [state, setState] = useState<{ loading: boolean; error: boolean; spend: WugnotSpend | null }>({ loading: true, error: false, spend: null })
+    const [preparing, setPreparing] = useState<"approve" | "buy" | null>(null)
+    const [checkedOutcome, setCheckedOutcome] = useState(false)
+    const [, refreshReceipt] = useState(0)
+    useEffect(() => {
+        let cancelled = false
+        void readWugnotSpend(rpcUrl, buyer).then((spend) => {
+            if (!cancelled) setState({ loading: false, error: false, spend })
+        }).catch(() => { if (!cancelled) setState({ loading: false, error: true, spend: null }) })
+        return () => { cancelled = true }
+    }, [rpcUrl, buyer, revision])
+    const refreshSpend = () => { setState((previous) => ({ ...previous, loading: true })); setRevision((value) => value + 1); refresh() }
+    const approveScope = approveWugnotScope(chainId, buyer, listing.id)
+    const approvalReceipt = readGovernanceReceipt(approveScope)
+    const purchaseScope = buyScope(chainId, buyer, listing.id)
+    const purchaseReceipt = readGovernanceReceipt(purchaseScope)
+    const receipt = approvalReceipt || purchaseReceipt
+    const receiptScope = approvalReceipt ? approveScope : purchaseScope
+    if (state.loading) return <Loading label="Reading WUGNOT balance and market allowance…" />
+    if (state.error || !state.spend) return <ErrorState message="Could not verify WUGNOT balance and allowance." onRetry={refreshSpend} />
+    const spend = state.spend
+    return <div className="os-stack os-tight os-note">
+        <strong>WUGNOT payment</strong>
+        <span>Balance: {spend.balance.toLocaleString()} · Market allowance: {spend.allowance.toLocaleString()} wugnot</span>
+        <span>Registered token <code>{spend.currency}</code> · Spender <code>{spend.spender}</code></span>
+        {receipt ? <div className="os-stack os-tight os-note os-warn" role="status">
+            <strong>Previous {approvalReceipt ? "approval" : "purchase"} outcome needs review</strong>
+            <span>Check the transaction, allowance and NFT owner before another attempt.</span>
+            {receipt.hash && (txExplorerUrl(receipt.hash, chainId)
+                ? <a href={txExplorerUrl(receipt.hash, chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
+            <button type="button" className="os-btn os-quiet" onClick={refreshSpend}>Refresh chain state</button>
+            <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and this action did not execute.</label>
+            <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
+                try { clearGovernanceReceipt(receiptScope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refreshSpend() }
+                catch { /* an in-flight wallet request keeps the receipt locked */ }
+            }}>Review a new attempt</button>
+        </div> : spend.balance < listing.price ? <span role="alert">Your WUGNOT balance is below this listing's price.</span> :
+            spend.allowance < listing.price ? <button type="button" className="os-btn" disabled={preparing !== null} onClick={() => {
+                setPreparing("approve")
+                void networkGasPrice(chainId, [rpcUrl]).then((gasPrice) => {
+                    const estimatedGasFeeUgnot = feeForGasWanted(APPROVE_WUGNOT_GAS_WANTED, gasPrice)
+                    signer.sign(approveWugnotRequest({ listing, spend, rpcUrl, chainId, estimatedGasFeeUgnot, onSettled: refreshSpend }))
+                }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare WUGNOT approval."))
+                    .finally(() => setPreparing(null))
+            }}>{preparing === "approve" ? "Preparing approval…" : "Review exact WUGNOT approval"}</button> :
+                <button type="button" className="os-btn" disabled={preparing !== null} onClick={() => {
+                    setPreparing("buy")
+                    void networkGasPrice(chainId, [rpcUrl]).then((gasPrice) => {
+                        const estimatedGasFeeUgnot = feeForGasWanted(BUY_WUGNOT_GAS_WANTED, gasPrice)
+                        signer.sign(buyWugnotRequest({ listing, quote, spend, rpcUrl, chainId, estimatedGasFeeUgnot, onSettled: refreshSpend }))
+                    }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare WUGNOT purchase."))
+                        .finally(() => setPreparing(null))
+                }}>{preparing === "buy" ? "Preparing review…" : "Review WUGNOT purchase"}</button>}
     </div>
 }
 

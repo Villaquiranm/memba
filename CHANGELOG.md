@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: reviewed WUGNOT NFT purchases (2026-09-28)
+
+- Let collectors inspect a registered WUGNOT listing, approve only its exact price for the verified market spender, then review a separate token-funded Buy. Both actions recheck listing and policy; Buy rechecks balance, allowance and the full seller, DAO and creator split before signing and confirms the buyer owns the NFT afterward.
+
 ### Memba OS: native marketplace proceeds (2026-09-28)
 
 - Show chain-backed DAO treasury and connected wallet claimable native proceeds in Market. A personal receiver can review a direct no-payment claim with a fresh amount check and uncertain-outcome lock. The DAO reserve is displayed separately because its credit requires threshold multisig signing.

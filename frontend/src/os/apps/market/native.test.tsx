@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "../../../lib/nftConfig"
+import { MARKET_SPENDER, WUGNOT_KEY } from "../../../lib/launchpadTokenTrade"
 import { clearGovernanceMemory, saveGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import MarketWindow from "./native"
 
@@ -21,6 +22,7 @@ const gasPrice = vi.hoisted(() => vi.fn(async () => ({ gas: 1000, ugnot: 1 })))
 const readListingReadiness = vi.hoisted(() => vi.fn())
 const readOfferReadiness = vi.hoisted(() => vi.fn())
 const readNativeProceeds = vi.hoisted(() => vi.fn())
+const readWugnotSpend = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/grc20", async (original) => ({ ...(await original<typeof import("../../../lib/grc20")>()), networkGasPrice: gasPrice }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
@@ -33,6 +35,7 @@ vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: li
 vi.mock("../../../lib/launchpadListing", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadListing")>()), readListingReadiness }))
 vi.mock("../../../lib/launchpadOfferTrade", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadOfferTrade")>()), readOfferReadiness }))
 vi.mock("../../../lib/launchpadProceeds", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadProceeds")>()), readNativeProceeds }))
+vi.mock("../../../lib/launchpadTokenTrade", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadTokenTrade")>()), readWugnotSpend }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
 vi.mock("../../../lib/launchpadCurationDao", () => ({ readCurationDaoSnapshot }))
 vi.mock("../../sign/signerContext", () => ({ useSigner: () => ({ sign, version: 0 }) }))
@@ -78,6 +81,7 @@ describe("native Market window", () => {
         readListingReadiness.mockReset()
         readOfferReadiness.mockReset()
         readNativeProceeds.mockReset()
+        readWugnotSpend.mockReset()
         localStorage.clear()
         clearGovernanceMemory()
     })
@@ -150,6 +154,42 @@ describe("native Market window", () => {
         const request = sign.mock.calls[0][0]
         expect(request.prepare(undefined).msgs[0]).toMatchObject({ value: { caller: buyer, send: "10000ugnot", func: "Buy", args: ["L1", "2"] } })
         expect(request.lines(undefined)).toContainEqual(["Estimated gas fee", "60,000 ugnot"])
+    })
+
+    it("reviews exact WUGNOT approval separately from token-funded purchase", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        const buyer = `g1${"q".repeat(38)}`
+        const seller = `g1${"p".repeat(38)}`
+        const live = { ...item, seller, currency: WUGNOT_KEY, price: 1000n, expiresAt: 4102444800n }
+        const split = { ...quote, currency: WUGNOT_KEY, price: 1000n, sellerAmount: 945n,
+            protocolAmount: 5n, royaltyTotal: 50n, treasury: `g1${"t".repeat(38)}`,
+            royalties: [{ account: `g1${"a".repeat(38)}`, amount: 50n }] }
+        list.mockResolvedValue([live])
+        getQuote.mockResolvedValue(split)
+        const baseSpend = { currency: WUGNOT_KEY, owner: buyer, spender: MARKET_SPENDER, name: "wrapped GNOT",
+            symbol: "wugnot", decimals: 0, balance: 1000n, allowance: 0n }
+        readWugnotSpend.mockResolvedValue(baseSpend)
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: buyer, openConnect: vi.fn() } as never
+        const view = render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Review exact WUGNOT approval" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: buyer, send: "", func: "Approve", args: [MARKET_SPENDER, "1000"] } })
+        view.unmount()
+        sign.mockClear()
+        readWugnotSpend.mockResolvedValue({ ...baseSpend, allowance: 1000n })
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Inspect terms" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Review WUGNOT purchase" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: buyer, send: "", func: "Buy", args: ["L1", "2"] } })
+        expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["DAO treasury", split.treasury])
     })
 
     it("blocks wallet review while policy is paused or a previous outcome is unresolved", async () => {

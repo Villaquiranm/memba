@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: native marketplace proceeds (2026-09-28)
+
+- Show chain-backed DAO treasury and connected wallet claimable native proceeds in Market. A personal receiver can review a direct no-payment claim with a fresh amount check and uncertain-outcome lock. The DAO reserve is displayed separately because its credit requires threshold multisig signing.
+
 ### Memba OS: accept funded NFT offers (2026-09-28)
 
 - Let the current NFT owner review a funded offer's buyer, seller credit, DAO treasury and creator payouts before accepting. Recheck ownership, approval, active policy and the exact quote before signing; verify the buyer owns the NFT afterward and hold uncertain outcomes for chain review.

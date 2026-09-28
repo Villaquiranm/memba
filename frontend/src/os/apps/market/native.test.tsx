@@ -20,6 +20,7 @@ const sign = vi.hoisted(() => vi.fn())
 const gasPrice = vi.hoisted(() => vi.fn(async () => ({ gas: 1000, ugnot: 1 })))
 const readListingReadiness = vi.hoisted(() => vi.fn())
 const readOfferReadiness = vi.hoisted(() => vi.fn())
+const readNativeProceeds = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/grc20", async (original) => ({ ...(await original<typeof import("../../../lib/grc20")>()), networkGasPrice: gasPrice }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
@@ -31,6 +32,7 @@ vi.mock("../../../lib/launchpadMarket", () => ({ listLaunchpadMarketListings: li
     isLaunchpadMarketPolicyReady: policyReady }))
 vi.mock("../../../lib/launchpadListing", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadListing")>()), readListingReadiness }))
 vi.mock("../../../lib/launchpadOfferTrade", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadOfferTrade")>()), readOfferReadiness }))
+vi.mock("../../../lib/launchpadProceeds", async (original) => ({ ...(await original<typeof import("../../../lib/launchpadProceeds")>()), readNativeProceeds }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState, listCurationManagers, listCurationApplications, getCollectionCuration }))
 vi.mock("../../../lib/launchpadCurationDao", () => ({ readCurationDaoSnapshot }))
 vi.mock("../../sign/signerContext", () => ({ useSigner: () => ({ sign, version: 0 }) }))
@@ -75,6 +77,7 @@ describe("native Market window", () => {
         gasPrice.mockClear()
         readListingReadiness.mockReset()
         readOfferReadiness.mockReset()
+        readNativeProceeds.mockReset()
         localStorage.clear()
         clearGovernanceMemory()
     })
@@ -374,6 +377,46 @@ describe("native Market window", () => {
         expect(request.prepare(undefined).msgs[0]).toMatchObject({ value: { caller: buyer, send: "1250000ugnot",
             func: "MakeOffer", args: ["C7", "3", "1250000", expect.any(String), "ugnot", "4"] } })
         expect(request.lines(undefined)).toContainEqual(["Escrow deposit", "1.25 GNOT (1,250,000 ugnot)"])
+    })
+
+    it("shows DAO proceeds and reviews only a personal receiver's claim", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        const treasury = `g1${"t".repeat(38)}`
+        const member = `g1${"p".repeat(38)}`
+        readNativeProceeds.mockResolvedValue({ configVersion: 4n, treasury, treasuryClaimable: 500n,
+            member, memberClaimable: 100n, totalLiability: 900n })
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: member, openConnect: vi.fn() } as never
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Proceeds" }))
+        expect(await screen.findByText(/DAO treasury: 500 ugnot claimable/)).toBeInTheDocument()
+        expect(screen.getByText(/Your claimable proceeds: 100 ugnot/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Review proceeds claim" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: member, send: "", func: "Claim", args: ["ugnot"] } })
+        expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["Receiver and signer", member])
+    })
+
+    it("does not offer a single-wallet claim for the DAO reserve", async () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.market = true
+        availability.config = true
+        availability.fees = true
+        list.mockResolvedValue([])
+        const treasury = `g1${"t".repeat(38)}`
+        readNativeProceeds.mockResolvedValue({ configVersion: 4n, treasury, treasuryClaimable: 500n,
+            member: treasury, memberClaimable: 500n, totalLiability: 900n })
+        const session = { network: { key: "testnet12", chainId: "test12" }, status: "member", address: treasury, openConnect: vi.fn() } as never
+        render(<MarketWindow {...base} session={session} section="launchpad" open={vi.fn()} />)
+        fireEvent.click(screen.getByRole("tab", { name: "Proceeds" }))
+        expect(await screen.findByText(/Use the reserve signing ceremony/)).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: "Review proceeds claim" })).toBeNull()
     })
 
     it("gates direct Operations links until the curation realm is allowlisted", () => {

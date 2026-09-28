@@ -10,6 +10,7 @@ import { APPROVE_GAS_WANTED, LIST_GAS_WANTED, approveListingRequest, approveList
 import { OFFER_REFUND_GAS_WANTED, offerExitRequest, offerExitScope, type OfferExit } from "../../../lib/launchpadOfferExit"
 import { MAKE_OFFER_GAS_WANTED, makeNativeOfferRequest, makeOfferScope, readOfferReadiness, type OfferReadiness } from "../../../lib/launchpadOfferTrade"
 import { ACCEPT_OFFER_GAS_WANTED, acceptOfferRequest, acceptOfferScope } from "../../../lib/launchpadOfferAccept"
+import { PROCEEDS_CLAIM_GAS_WANTED, claimNativeProceedsRequest, proceedsClaimScope, readNativeProceeds, type NativeProceeds } from "../../../lib/launchpadProceeds"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
@@ -76,7 +77,7 @@ export default function MarketWindow({ section, session, open, toast, fallback }
 }
 
 function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toast }: { rpcUrl: string; openServices: () => void; session: NativeViewProps["session"]; tradingAvailable: boolean; toast: (message: string) => void }) {
-    const [tab, setTab] = useState<"listings" | "offers" | "sell">("listings")
+    const [tab, setTab] = useState<"listings" | "offers" | "sell" | "proceeds">("listings")
     return <div className="os-stack os-market-records">
         <header className="os-market-records-head">
             <div><h1>Collectibles</h1><p className="os-sub">Listings and funded offers from the Launchpad market realm. Prices are raw currency units; quotes come from chain.</p></div>
@@ -87,11 +88,75 @@ function LaunchpadMarket({ rpcUrl, openServices, session, tradingAvailable, toas
             <button type="button" role="tab" aria-selected={tab === "listings"} onClick={() => setTab("listings")}>Listings</button>
             <button type="button" role="tab" aria-selected={tab === "offers"} onClick={() => setTab("offers")}>Offers</button>
             <button type="button" role="tab" aria-selected={tab === "sell"} onClick={() => setTab("sell")}>Sell</button>
+            <button type="button" role="tab" aria-selected={tab === "proceeds"} onClick={() => setTab("proceeds")}>Proceeds</button>
         </div>
         {tab === "listings" ? <LaunchpadListings rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> :
             tab === "offers" ? <LaunchpadOffers rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> :
-                <ListingComposer key={session.status === "member" ? session.address : "visitor"} rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} />}
+                tab === "sell" ? <ListingComposer key={session.status === "member" ? session.address : "visitor"} rpcUrl={rpcUrl} session={session} tradingAvailable={tradingAvailable} toast={toast} /> :
+                    <LaunchpadProceeds key={session.status === "member" ? session.address : "visitor"} rpcUrl={rpcUrl} session={session} available={tradingAvailable} toast={toast} />}
     </div>
+}
+
+function LaunchpadProceeds({ rpcUrl, session, available, toast }: {
+    rpcUrl: string; session: NativeViewProps["session"]; available: boolean; toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [revision, setRevision] = useState(0)
+    const [state, setState] = useState<{ loading: boolean; error: boolean; value: NativeProceeds | null }>({ loading: true, error: false, value: null })
+    const [preparing, setPreparing] = useState(false)
+    const [checkedOutcome, setCheckedOutcome] = useState(false)
+    const [, refreshReceipt] = useState(0)
+    const member = session.status === "member" ? session.address : null
+    useEffect(() => {
+        if (!available) return
+        let cancelled = false
+        void readNativeProceeds(rpcUrl, member).then((value) => {
+            if (!cancelled) setState({ loading: false, error: false, value })
+        }).catch(() => { if (!cancelled) setState({ loading: false, error: true, value: null }) })
+        return () => { cancelled = true }
+    }, [available, rpcUrl, member, revision])
+    const refresh = () => { setState((previous) => ({ ...previous, loading: true })); setRevision((value) => value + 1) }
+    if (!available) return <div className="os-note os-warn" role="note">Proceeds are available after the reviewed config and fees realms are published on this network.</div>
+    const snapshot = state.value
+    const scope = member && proceedsClaimScope(session.network.chainId, member)
+    const receipt = scope && readGovernanceReceipt(scope)
+    return <section className="os-stack" aria-label="Launchpad proceeds">
+        <div className="os-ops-section-head"><h2>Native proceeds</h2><button type="button" className="os-btn os-quiet" onClick={refresh}>Refresh</button></div>
+        <p className="os-sub">Completed sales create claimable credits. These figures come from the fees realm in raw ugnot units.</p>
+        {state.loading && <Loading label="Reading proceeds…" />}
+        {state.error && <ErrorState message="Could not verify native proceeds from this network." onRetry={refresh} />}
+        {!state.loading && !state.error && snapshot && <div className="os-stack os-note">
+            <strong>DAO treasury: {snapshot.treasuryClaimable.toLocaleString()} ugnot claimable</strong>
+            <span>Reserve address <code>{snapshot.treasury}</code></span>
+            <span>Total outstanding native proceeds: {snapshot.totalLiability.toLocaleString()} ugnot · Config version {snapshot.configVersion.toString()}</span>
+            <span>The DAO reserve must sign its own Claim transaction with the reviewed multisig threshold. A member wallet cannot claim its credit.</span>
+            {member && <>
+                <strong>Your claimable proceeds: {snapshot.memberClaimable?.toLocaleString() ?? "unavailable"} ugnot</strong>
+                <span>Receiver <code>{member}</code></span>
+                {member === snapshot.treasury ? <span>This address is the DAO reserve. Use the reserve signing ceremony.</span> :
+                    receipt && scope ? <div className="os-stack os-tight os-note os-warn" role="status">
+                        <strong>Previous proceeds claim needs review</strong>
+                        <span>Check the transaction and receiver balance before another claim.</span>
+                        {receipt.hash && (txExplorerUrl(receipt.hash, session.network.chainId)
+                            ? <a href={txExplorerUrl(receipt.hash, session.network.chainId)!} target="_blank" rel="noopener noreferrer">View transaction</a> : <code>{receipt.hash}</code>)}
+                        <label className="os-ack"><input type="checkbox" checked={checkedOutcome} onChange={(event) => setCheckedOutcome(event.target.checked)} /> I checked the chain and this claim did not execute.</label>
+                        <button type="button" className="os-btn os-quiet" disabled={!checkedOutcome} onClick={() => {
+                            try { clearGovernanceReceipt(scope); setCheckedOutcome(false); refreshReceipt((value) => value + 1); refresh() }
+                            catch { /* an in-flight wallet request keeps the receipt locked */ }
+                        }}>Review claim again</button>
+                    </div> : snapshot.memberClaimable && snapshot.memberClaimable > 0n ?
+                        <button type="button" className="os-btn" disabled={preparing} onClick={() => {
+                            setPreparing(true)
+                            void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => {
+                                const estimatedGasFeeUgnot = feeForGasWanted(PROCEEDS_CLAIM_GAS_WANTED, gasPrice)
+                                signer.sign(claimNativeProceedsRequest({ caller: member, amount: snapshot.memberClaimable!, rpcUrl,
+                                    chainId: session.network.chainId, estimatedGasFeeUgnot, onSettled: refresh }))
+                            }).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare proceeds claim."))
+                                .finally(() => setPreparing(false))
+                        }}>{preparing ? "Preparing claim…" : "Review proceeds claim"}</button> : null}
+            </>}
+        </div>}
+    </section>
 }
 
 function ListingComposer({ rpcUrl, session, tradingAvailable, toast }: {

@@ -56,7 +56,7 @@ export function Field({ label, htmlFor, hint, error, count, children }: {
                 {count && <span className="os-sub">{count}</span>}
             </span>
             {children}
-            {error ? <span className="os-fe" role="alert">{error}</span> : hint ? <span className="os-fh">{hint}</span> : null}
+            {error ? <span id={htmlFor ? `${htmlFor}-detail` : undefined} className="os-fe" role="alert">{error}</span> : hint ? <span id={htmlFor ? `${htmlFor}-detail` : undefined} className="os-fh">{hint}</span> : null}
         </div>
     )
 }

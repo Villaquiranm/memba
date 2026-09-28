@@ -34,6 +34,12 @@ Full changelogs are split by version range for easier navigation:
 - Clear account-scoped window layouts when Settings resets local UI data, while retaining drafts and send locks.
 - Record the cross-perspective production QA findings and feature-by-feature audit queue.
 
+### Memba OS: Wallet and Send production QA (2026-09-27)
+
+- Keep balances tied to the active wallet and mark unavailable RPC results as unknown, so Send cannot use stale funds.
+- Hold each transfer's recovery record across tabs until its transaction is confirmed, and show a direct status check for submitted or uncertain outcomes.
+- Recheck the network fee before signing, reject ambiguous amounts, clarify recipient storage and copy actions, and improve form accessibility and mobile wallet guidance.
+
 ### Memba OS: bounded guest access (2026-09-27)
 
 - Keep public App Store browsing open while requiring a signed-in OS member session for publisher and curator windows. Check that session again immediately before any OS wallet broadcast, including actions in public classic pages, and stop queued signing reviews if it ends. Describe guest access without promising private account reads.

@@ -60,7 +60,8 @@ export function parseLaunchpadNftCollection(value: unknown): LaunchpadNftCollect
     const maxSupply = decimal(row.maxSupply, "max supply")
     const minted = decimal(row.minted, "minted count")
     const totalSupply = decimal(row.totalSupply, "total supply")
-    if (maxSupply === 0n || minted > maxSupply || totalSupply > minted) throw new Error("Inconsistent collection supply")
+    // Zero is the ledger's explicit uncapped open-edition sentinel.
+    if ((maxSupply > 0n && minted > maxSupply) || totalSupply > minted) throw new Error("Inconsistent collection supply")
     return {
         id,
         grc721Id: string(row.grc721Id, "GRC721 ID"),

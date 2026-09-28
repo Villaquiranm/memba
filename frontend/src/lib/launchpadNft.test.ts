@@ -37,5 +37,6 @@ describe("Launchpad NFT reads", () => {
         expect(() => parseLaunchpadNftCollection({ ...row, tradable: true })).toThrow("Inconsistent collection mode")
         expect(() => parseLaunchpadNftCollection({ ...row, minted: "101" })).toThrow("Inconsistent collection supply")
         expect(() => parseLaunchpadNftCollection({ ...row, totalSupply: 1 })).toThrow("Invalid total supply")
+        expect(parseLaunchpadNftCollection({ ...row, maxSupply: "0" }).maxSupply).toBe(0n)
     })
 })

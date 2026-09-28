@@ -110,7 +110,7 @@ function LaunchpadCollections({ rpcUrl }: { rpcUrl: string }) {
             <span className="os-grow">
                 <b>{item.name}</b>
                 <span className="os-sub os-block">{item.symbol} · {item.id} · {item.creator.slice(0, 10)}…</span>
-                <span className="os-sub os-block">{item.totalSupply.toString()} active · {item.minted.toString()} minted · {item.maxSupply.toString()} maximum</span>
+                <span className="os-sub os-block">{item.totalSupply.toString()} active · {item.minted.toString()} minted · {item.maxSupply === 0n ? "uncapped edition" : `${item.maxSupply.toString()} maximum`}</span>
                 <Pill tone={item.mode === "soulbound" ? "neutral" : "ok"}>{item.mode === "soulbound" ? "SoulBound" : item.mode === "royalty_protected" ? "Royalty protected" : "Open"}</Pill>
                 {item.mode === "soulbound" && item.revocable && <span className="os-sub os-block">Creator revocable</span>}
             </span>

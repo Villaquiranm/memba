@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Token Launchpad: creation event identity validation (2026-09-28)
+
+- Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. The validator does not publish tokens or infer launch times.
+
 ### Memba OS: native Settings
 
 - Give Settings a native OS window with desktop appearance, wallpaper and icon size controls, honest notification availability, read-only network details, local gas defaults, account status and About access. Reset only disposable local UI data after confirmation, preserving unsent drafts, saved recipients and send locks.

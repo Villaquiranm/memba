@@ -42,6 +42,12 @@ function mediaURI(text: string): boolean {
     return text === "" || (text.length <= 200 && /^(ipfs:\/\/|https:\/\/).+/.test(text) && safeURIChars(text))
 }
 
+export function validateBaseURI(baseURI: string): void {
+    if (baseURI.length < 8 || baseURI.length > 200 ||
+        !(baseURI.startsWith("ipfs://") || baseURI.startsWith("https://")) ||
+        !baseURI.endsWith("/") || !safeURIChars(baseURI)) throw new Error("Enter an IPFS or HTTPS base URI ending in /.")
+}
+
 export function validateStaticCollection(draft: StaticCollectionDraft): void {
     if (!ADDRESS.test(draft.creator) || draft.mode !== "open" && draft.mode !== "soulbound" ||
         (draft.revocable && draft.mode !== "soulbound") || draft.maxSupply < 0n || draft.maxSupply > MAX_INT64 ||
@@ -49,13 +55,11 @@ export function validateStaticCollection(draft: StaticCollectionDraft): void {
         [...draft.name].some((character) => "[]()*#<>`|\\".includes(character)) || !/^([A-Z0-9]){1,10}$/.test(draft.symbol) ||
         utf8Length(draft.description) > 280 || !printable(draft.description) || [...draft.description].some((character) => "[]()<>".includes(character)) ||
         !mediaURI(draft.image) || !mediaURI(draft.banner) ||
-        !(draft.website === "" || draft.website.length <= 200 && /^https:\/\/.+/.test(draft.website) && safeURIChars(draft.website)) ||
-        draft.baseURI.length < 8 || draft.baseURI.length > 200 ||
-        !(draft.baseURI.startsWith("ipfs://") || draft.baseURI.startsWith("https://")) ||
-        !draft.baseURI.endsWith("/") || !safeURIChars(draft.baseURI)) throw new Error("Check the permanent collection details and metadata URI.")
+        !(draft.website === "" || draft.website.length <= 200 && /^https:\/\/.+/.test(draft.website) && safeURIChars(draft.website))) throw new Error("Check the permanent collection details and metadata URI.")
+    validateBaseURI(draft.baseURI)
 }
 
-function validTerms(terms: LaunchpadActionTerms): void {
+export function validateCollectionTerms(terms: LaunchpadActionTerms): void {
     if (terms.lane !== "collection" || terms.currency !== "ugnot" || !terms.actionReady ||
         terms.collectionFee < 0n || terms.collectionFee > MAX_INT64 || terms.version < 1n || !ADDRESS.test(terms.treasury)) {
         throw new Error("Collection creation is unavailable under the current DAO policy.")
@@ -64,7 +68,7 @@ function validTerms(terms: LaunchpadActionTerms): void {
 
 export function buildCreateCollectionMsg(draft: StaticCollectionDraft, terms: LaunchpadActionTerms): AminoMsg {
     validateStaticCollection(draft)
-    validTerms(terms)
+    validateCollectionTerms(terms)
     return { type: "vm/MsgCall", value: { caller: draft.creator,
         send: terms.collectionFee === 0n ? "" : `${terms.collectionFee.toString()}ugnot`, pkg_path: LAUNCHPAD_DROPS_PATH,
         func: "CreateCollection", args: [draft.name, draft.symbol, draft.description, draft.image, draft.banner,
@@ -72,14 +76,14 @@ export function buildCreateCollectionMsg(draft: StaticCollectionDraft, terms: La
             "ugnot", terms.version.toString()], max_deposit: `${CREATE_STORAGE_CAP}ugnot` } }
 }
 
-function sameTerms(a: LaunchpadActionTerms, b: LaunchpadActionTerms): boolean {
+export function sameCollectionTerms(a: LaunchpadActionTerms, b: LaunchpadActionTerms): boolean {
     return a.lane === b.lane && a.currency === b.currency && a.version === b.version && a.treasury === b.treasury &&
         a.collectionFee === b.collectionFee && a.primaryFeeBPS === b.primaryFeeBPS &&
         a.currencyConfigured === b.currencyConfigured && a.currencyAllowed === b.currencyAllowed &&
         a.paused === b.paused && a.laneReady === b.laneReady && a.actionReady === b.actionReady
 }
 
-async function collectionCount(rpcUrl: string): Promise<bigint> {
+export async function readCollectionCount(rpcUrl: string): Promise<bigint> {
     const raw = await queryEval(rpcUrl, LAUNCHPAD_NFT_PATH, "Count()", true)
     const match = /^\((0|[1-9]\d*) int64\)$/.exec(raw?.trim() ?? "")
     if (!match) throw new Error("Could not verify collection count")
@@ -87,6 +91,7 @@ async function collectionCount(rpcUrl: string): Promise<bigint> {
 }
 
 export function createCollectionScope(chainId: string, creator: string): GovernanceScope {
+    // Keep the original receipt key so a pending static creation still locks every variant.
     return { chainId, realmPath: LAUNCHPAD_DROPS_PATH, caller: creator, operation: "create-static-collection" }
 }
 
@@ -119,14 +124,14 @@ export function createStaticCollectionRequest(input: {
         label: () => label, receipt: scope, prepare: () => ({ msgs: [msg] }),
         recheck: async () => {
             const fresh = await readActionTerms(rpcUrl, "collection", "ugnot")
-            if (!sameTerms(terms, fresh)) throw new Error("DAO collection policy changed. Refresh before signing.")
+            if (!sameCollectionTerms(terms, fresh)) throw new Error("DAO collection policy changed. Refresh before signing.")
             buildCreateCollectionMsg(draft, fresh)
-            baselineCount = await collectionCount(rpcUrl)
+            baselineCount = await readCollectionCount(rpcUrl)
         },
         send: (_choice, beforeSign) => doContractBroadcast([msg], label,
             { gasWanted: CREATE_COLLECTION_GAS_WANTED, retry: false, beforeSign }),
         verify: async () => {
-            if (baselineCount === null || await collectionCount(rpcUrl) !== baselineCount + 1n) return false
+            if (baselineCount === null || await readCollectionCount(rpcUrl) !== baselineCount + 1n) return false
             const created = await getLaunchpadNftCollection(rpcUrl, `C${(baselineCount + 1n).toString()}`)
             return created.creator === draft.creator && created.name === draft.name && created.symbol === draft.symbol &&
                 created.description === draft.description && created.image === draft.image && created.banner === draft.banner &&

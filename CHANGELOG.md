@@ -20,9 +20,13 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: creator royalties and reveal commitments (2026-09-28)
+
+- Let creators choose static or committed reveal metadata and set up to ten permanent royalty receivers for Open collections. Compute the future URI and manifest SHA-256 hashes in the browser, review the exact DAO fee and rights before signing, recheck policy, and verify the resulting collection. Soulbound collections remain royalty-free.
+
 ### Memba OS: native static NFT collection creation (2026-09-28)
 
-- Add a gated native NFT creator form for Open and Soulbound static collections. It reads the versioned DAO creation fee and treasury, reviews permanent supply, transfer, revocation and metadata terms, rechecks policy before signing, and confirms the exact new collection record. Reveal, royalties, uploads and drop stages remain separate creator work.
+- Add a gated native NFT creator form for Open and Soulbound static collections. It reads the versioned DAO creation fee and treasury, reviews permanent supply, transfer, revocation and metadata terms, rechecks policy before signing, and confirms the exact new collection record.
 
 ### Memba OS: WUGNOT funded NFT offers (2026-09-28)
 

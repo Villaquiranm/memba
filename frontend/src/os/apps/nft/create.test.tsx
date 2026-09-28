@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { packageAddress } from "../../../lib/dao/weightedApplications"
 import CreateLaunchpadCollection from "./create"
 
 const readActionTerms = vi.hoisted(() => vi.fn())
@@ -42,5 +43,31 @@ describe("native Launchpad creator form", () => {
             args: ["Founders", "FND", "Participation badge", "", "", "", "soulbound", "true", "100", "ipfs://founders/", "ugnot", "2"],
         } })
         expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["DAO treasury", treasury])
+    })
+
+    it("reviews an Open reveal commitment with an immutable creator share", async () => {
+        readActionTerms.mockResolvedValue(terms)
+        render(<CreateLaunchpadCollection rpcUrl="rpc" session={session} available toast={vi.fn()} />)
+        await screen.findByText(/DAO creation fee: 40 ugnot/)
+        fireEvent.change(screen.getByLabelText("Collection name"), { target: { value: "Revealed Art" } })
+        fireEvent.change(screen.getByLabelText("Symbol"), { target: { value: "RART" } })
+        fireEvent.change(screen.getByLabelText("Maximum supply"), { target: { value: "10" } })
+        fireEvent.change(screen.getByLabelText("Metadata plan"), { target: { value: "reveal" } })
+        fireEvent.change(screen.getByLabelText("Placeholder JSON URI"), { target: { value: "ipfs://art/placeholder.json" } })
+        fireEvent.change(screen.getByLabelText("Base URI SHA-256 commitment"), { target: { value: "a".repeat(64) } })
+        fireEvent.change(screen.getByLabelText("Provenance manifest SHA-256"), { target: { value: "b".repeat(64) } })
+        fireEvent.click(screen.getByRole("button", { name: "Add royalty receiver" }))
+        const receiver = packageAddress("gno.land/r/samcrew/creator/artist")
+        fireEvent.change(screen.getByLabelText("Royalty receiver 1"), { target: { value: receiver } })
+        fireEvent.change(screen.getByLabelText("Receiver 1 basis points"), { target: { value: "500" } })
+        expect(screen.getByText("500 of 1,000 basis points assigned")).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Review collection creation" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledTimes(1))
+        expect(sign.mock.calls[0][0].prepare(undefined).msgs[0]).toMatchObject({ value: {
+            caller: creator, send: "40ugnot", func: "CreateCollectionWithRevealAndRoyalties",
+            args: ["Revealed Art", "RART", "", "", "", "", "open", "false", "10", "ipfs://art/placeholder.json",
+                "a".repeat(64), "b".repeat(64), `${receiver}:500`, "ugnot", "2"],
+        } })
+        expect(sign.mock.calls[0][0].lines(undefined)).toContainEqual(["Creator royalty", "500 bps · fixed at creation"])
     })
 })

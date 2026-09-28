@@ -29,7 +29,7 @@ describe("static Launchpad collection creation", () => {
         const soulbound = { ...draft, mode: "soulbound" as const, revocable: true }
         expect(buildCreateCollectionMsg(soulbound, terms).value.args).toContain("true")
         expect(() => validateStaticCollection({ ...draft, mode: "open", revocable: true })).toThrow("permanent")
-        expect(() => validateStaticCollection({ ...draft, baseURI: "https://example.org/no-slash" })).toThrow("permanent")
+        expect(() => validateStaticCollection({ ...draft, baseURI: "https://example.org/no-slash" })).toThrow("ending in /")
         expect(() => validateStaticCollection({ ...draft, symbol: "not-uppercase" })).toThrow("permanent")
         expect(() => buildCreateCollectionMsg(draft, { ...terms, paused: true, actionReady: false })).toThrow("unavailable")
     })

@@ -113,6 +113,14 @@ function LaunchpadCollections({ rpcUrl }: { rpcUrl: string }) {
                 <span className="os-sub os-block">{item.totalSupply.toString()} active · {item.minted.toString()} minted · {item.maxSupply === 0n ? "uncapped edition" : `${item.maxSupply.toString()} maximum`}</span>
                 <Pill tone={item.mode === "soulbound" ? "neutral" : "ok"}>{item.mode === "soulbound" ? "SoulBound" : item.mode === "royalty_protected" ? "Royalty protected" : "Open"}</Pill>
                 {item.mode === "soulbound" && item.revocable && <span className="os-sub os-block">Creator revocable</span>}
+                <span className="os-sub os-block">Metadata: {item.revealed ? "revealed" : "hidden behind a placeholder"} · {item.metadataFrozen ? "frozen" : "not frozen"}</span>
+                <details>
+                    <summary>Metadata record</summary>
+                    <span className="os-sub os-block">URI commitment is recorded on chain. File contents and provenance have not been verified by Memba.</span>
+                    <span className="os-sub os-block">Base URI SHA-256: <code style={{ overflowWrap: "anywhere" }}>{item.baseURICommitment}</code></span>
+                    {item.provenanceHash && <span className="os-sub os-block">Creator provenance hash: <code style={{ overflowWrap: "anywhere" }}>{item.provenanceHash}</code></span>}
+                    {!item.revealed && <span className="os-sub os-block">Placeholder: <code style={{ overflowWrap: "anywhere" }}>{item.placeholderURI}</code></span>}
+                </details>
             </span>
         </Card>)}</CardGrid>}
         {loading && items.length > 0 && <Loading label="Loading more collections…" />}

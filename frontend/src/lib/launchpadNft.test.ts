@@ -7,7 +7,9 @@ const row = {
     id: "C1", grc721Id: "1", creator: "g1creator", name: "Founders", symbol: "FND",
     description: "", image: "", banner: "", website: "", mode: "soulbound",
     revocable: true, tradable: false, maxSupply: "100", minted: "2", totalSupply: "1",
-    configVersion: "1", profileFrozen: false, baseURI: "ipfs://metadata/",
+    configVersion: "1", profileFrozen: false, metadataMode: "static_base",
+    revealed: true, metadataFrozen: true, placeholderURI: "",
+    baseURICommitment: "a".repeat(64), provenanceHash: "", baseURI: "ipfs://metadata/",
 }
 
 const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
@@ -38,5 +40,15 @@ describe("Launchpad NFT reads", () => {
         expect(() => parseLaunchpadNftCollection({ ...row, minted: "101" })).toThrow("Inconsistent collection supply")
         expect(() => parseLaunchpadNftCollection({ ...row, totalSupply: 1 })).toThrow("Invalid total supply")
         expect(parseLaunchpadNftCollection({ ...row, maxSupply: "0" }).maxSupply).toBe(0n)
+    })
+
+    it("keeps hidden metadata distinct from a verified provenance claim", () => {
+        const hidden = { ...row, metadataMode: "reveal_base", revealed: false, metadataFrozen: false,
+            placeholderURI: "ipfs://placeholder/placeholder.json", provenanceHash: "b".repeat(64), baseURI: "" }
+        expect(parseLaunchpadNftCollection(hidden)).toMatchObject({ revealed: false, metadataFrozen: false, provenanceHash: "b".repeat(64) })
+        expect(() => parseLaunchpadNftCollection({ ...hidden, metadataFrozen: true })).toThrow("Inconsistent collection metadata")
+        expect(() => parseLaunchpadNftCollection({ ...hidden, baseURI: "ipfs://unrevealed/" })).toThrow("Inconsistent collection metadata")
+        expect(() => parseLaunchpadNftCollection({ ...hidden, provenanceHash: "not-a-hash" })).toThrow("Inconsistent collection metadata")
+        expect(parseLaunchpadNftCollection({ ...hidden, revealed: true, baseURI: "ipfs://revealed/" }).baseURI).toBe("ipfs://revealed/")
     })
 })

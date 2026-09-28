@@ -3,6 +3,7 @@ import { queryEval, parseQevalJSON } from "./dao/shared"
 import { LAUNCHPAD_NFT_PATH } from "./nftConfig"
 
 export type LaunchpadNftMode = "open" | "soulbound" | "royalty_protected"
+export type LaunchpadNftMetadataMode = "static_base" | "reveal_base"
 
 export interface LaunchpadNftCollection {
     id: string
@@ -22,10 +23,16 @@ export interface LaunchpadNftCollection {
     totalSupply: bigint
     configVersion: bigint
     profileFrozen: boolean
+    metadataMode: LaunchpadNftMetadataMode
+    revealed: boolean
+    metadataFrozen: boolean
+    placeholderURI: string
+    baseURICommitment: string
+    provenanceHash: string
     baseURI: string
 }
 
-const COLLECTION_KEYS = ["id", "grc721Id", "creator", "name", "symbol", "description", "image", "banner", "website", "mode", "revocable", "tradable", "maxSupply", "minted", "totalSupply", "configVersion", "profileFrozen", "baseURI"] as const
+const COLLECTION_KEYS = ["id", "grc721Id", "creator", "name", "symbol", "description", "image", "banner", "website", "mode", "revocable", "tradable", "maxSupply", "minted", "totalSupply", "configVersion", "profileFrozen", "metadataMode", "revealed", "metadataFrozen", "placeholderURI", "baseURICommitment", "provenanceHash", "baseURI"] as const
 
 function record(value: unknown, what: string): Record<string, unknown> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid ${what} response`)
@@ -62,6 +69,20 @@ export function parseLaunchpadNftCollection(value: unknown): LaunchpadNftCollect
     const totalSupply = decimal(row.totalSupply, "total supply")
     // Zero is the ledger's explicit uncapped open-edition sentinel.
     if ((maxSupply > 0n && minted > maxSupply) || totalSupply > minted) throw new Error("Inconsistent collection supply")
+    const metadataMode = string(row.metadataMode, "metadata mode")
+    const revealed = boolean(row.revealed, "revealed")
+    const metadataFrozen = boolean(row.metadataFrozen, "metadata frozen")
+    const placeholderURI = string(row.placeholderURI, "placeholder URI")
+    const baseURI = string(row.baseURI, "base URI")
+    const baseURICommitment = string(row.baseURICommitment, "base URI commitment")
+    const provenanceHash = string(row.provenanceHash, "provenance hash")
+    const hash = /^[0-9a-f]{64}$/
+    if (!hash.test(baseURICommitment) ||
+        (metadataMode === "static_base" && (!revealed || !metadataFrozen || placeholderURI !== "" || provenanceHash !== "" || baseURI === "")) ||
+        (metadataMode === "reveal_base" && (!hash.test(provenanceHash) || !placeholderURI.startsWith("ipfs://") || (revealed ? baseURI === "" : baseURI !== "") || (metadataFrozen && !revealed))) ||
+        (metadataMode !== "static_base" && metadataMode !== "reveal_base")) {
+        throw new Error("Inconsistent collection metadata")
+    }
     return {
         id,
         grc721Id: string(row.grc721Id, "GRC721 ID"),
@@ -80,7 +101,13 @@ export function parseLaunchpadNftCollection(value: unknown): LaunchpadNftCollect
         totalSupply,
         configVersion: decimal(row.configVersion, "config version"),
         profileFrozen: boolean(row.profileFrozen, "profile frozen"),
-        baseURI: string(row.baseURI, "base URI"),
+        metadataMode,
+        revealed,
+        metadataFrozen,
+        placeholderURI,
+        baseURICommitment,
+        provenanceHash,
+        baseURI,
     }
 }
 

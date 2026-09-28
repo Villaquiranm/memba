@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,11 +14,23 @@ import (
 )
 
 func testScope(chain, publication string) Scope {
-	return Scope{
+	scope := Scope{
 		ChainID: chain, RealmPath: TokenRealmPath,
-		PublicationHeight: 100, PublicationHash: [32]byte{1},
+		PublicationHeight: 101, PublicationHash: [32]byte{2},
+		PublicationParentHash: [32]byte{1}, ActivationTxIndex: 0,
+		ActivationMode: "enable_package", SubmissionTxHash: [32]byte{11},
+		ActivationTxHash: [32]byte{12}, SourceDigest: [32]byte{15},
 		PublicationIdentity: publication,
 	}
+	if chain == "gnoland-1" {
+		scope.PublicationHash = [32]byte{7}
+	}
+	if publication == "publication-b" {
+		scope.PublicationHash = [32]byte{8}
+		scope.SubmissionTxHash = [32]byte{13}
+		scope.ActivationTxHash = [32]byte{14}
+	}
+	return scope
 }
 
 func testHeader(height int64, hash, parent byte) BlockHeader {
@@ -47,9 +60,11 @@ func testStore(t *testing.T) (*Store, *sql.DB) {
 func testCreation(t *testing.T, height int64, id string) ObservedCreation {
 	t.Helper()
 	attrs := validEvent(t, id)
-	if id == "T2" {
-		attrs[2].Value = TokenRealmPath + ".T2.0000002"
+	number, err := strconv.ParseUint(id[1:], 10, 64)
+	if err != nil {
+		t.Fatal(err)
 	}
+	attrs[2].Value = registeredLedgerID(id, number)
 	created, err := ParseTokenCreated(TokenRealmPath, TokenCreatedType, attrs)
 	if err != nil {
 		t.Fatal(err)
@@ -119,6 +134,7 @@ func TestStoreAppendReplayRollbackAndIsolation(t *testing.T) {
 	}
 	otherEvent := created
 	otherEvent.BlockHeight = 101
+	otherEvent.TxIndex = 1
 	otherBlock := testHeader(101, 7, 1)
 	otherBlock.ChainID = "gnoland-1"
 	if err := other.AppendBlock(ctx, otherBlock, []ObservedCreation{otherEvent}); err != nil {
@@ -137,6 +153,7 @@ func TestStoreAppendAtomicOnDuplicateAndMalformedEvidence(t *testing.T) {
 	ctx := context.Background()
 	store, database := testStore(t)
 	first := testCreation(t, 101, "T1")
+	first.TxIndex = 1
 	if err := store.AppendBlock(ctx, testHeader(101, 2, 1), []ObservedCreation{first}); err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +188,7 @@ func TestStoreRejectsAlteredReplayEvidence(t *testing.T) {
 	store, database := testStore(t)
 	header := testHeader(101, 2, 1)
 	event := testCreation(t, 101, "T1")
+	event.TxIndex = 1
 	if err := store.AppendBlock(ctx, header, []ObservedCreation{event}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +199,7 @@ func TestStoreRejectsAlteredReplayEvidence(t *testing.T) {
 		t.Fatalf("raw attribute reorder accepted: %v", err)
 	}
 	changed := testCreation(t, 101, "T2")
+	changed.TxIndex = 1
 	if err := store.AppendBlock(ctx, header, []ObservedCreation{changed}); !errors.Is(err, ErrStoreConflict) {
 		t.Fatalf("changed event identity accepted: %v", err)
 	}
@@ -201,7 +220,9 @@ func TestStoreRejectsAlteredReplayEvidence(t *testing.T) {
 func TestStoreRollbackToPublicationAnchor(t *testing.T) {
 	ctx := context.Background()
 	store, database := testStore(t)
-	if err := store.AppendBlock(ctx, testHeader(101, 2, 1), []ObservedCreation{testCreation(t, 101, "T1")}); err != nil {
+	activationEvent := testCreation(t, 101, "T1")
+	activationEvent.TxIndex = 1
+	if err := store.AppendBlock(ctx, testHeader(101, 2, 1), []ObservedCreation{activationEvent}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.AppendBlock(ctx, testHeader(102, 3, 2), nil); err != nil {
@@ -220,13 +241,75 @@ func TestStoreRollbackToPublicationAnchor(t *testing.T) {
 	if blocks != 0 || events != 0 {
 		t.Fatalf("anchor rollback kept descendants: blocks=%d events=%d", blocks, events)
 	}
-	replacement := testHeader(101, 4, 1)
-	if err := store.AppendBlock(ctx, replacement, []ObservedCreation{testCreation(t, 101, "T1")}); err != nil {
+	replacement := testHeader(101, 2, 1)
+	if err := store.AppendBlock(ctx, replacement, []ObservedCreation{activationEvent}); err != nil {
 		t.Fatalf("append replacement above anchor: %v", err)
 	}
 	cursor, err := store.Cursor(ctx)
 	if err != nil || cursor.Height != 101 || cursor.Hash != replacement.Hash {
 		t.Fatalf("replacement cursor: %+v %v", cursor, err)
+	}
+}
+
+func TestStoreScansOnlyPostActivationEventsInActivationBlock(t *testing.T) {
+	for _, mode := range []string{"enable_package", "add_package"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			database, err := db.Open(filepath.Join(t.TempDir(), "memba.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = database.Close() })
+			if err := MigrateStore(ctx, database); err != nil {
+				t.Fatal(err)
+			}
+			scope := testScope("test-13", mode)
+			scope.ActivationMode = mode
+			scope.ActivationTxIndex = 1
+			if mode == "add_package" {
+				scope.SubmissionTxHash = scope.ActivationTxHash
+			}
+			store, err := OpenStore(ctx, database, scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := testCreation(t, 101, "T1")
+			before.TxIndex = 0
+			atActivation := testCreation(t, 101, "T2")
+			atActivation.TxIndex = 1
+			after := testCreation(t, 101, "T3")
+			after.TxIndex = 2
+			if err := store.AppendBlock(ctx, testHeader(101, 2, 1), []ObservedCreation{before, atActivation, after}); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := database.QueryContext(ctx, `SELECT token_id FROM launchpad_creation_events WHERE scope_key = ? ORDER BY tx_index`, store.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, id)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if err := rows.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if len(ids) != 2 || ids[0] != "T2" || ids[1] != "T3" {
+				t.Fatalf("activation boundary kept wrong events: %v", ids)
+			}
+			if err := store.AppendBlock(ctx, testHeader(101, 3, 1), nil); !errors.Is(err, ErrStoreConflict) {
+				t.Fatalf("changed activation hash accepted: %v", err)
+			}
+			if err := store.AppendBlock(ctx, testHeader(101, 2, 9), nil); !errors.Is(err, ErrStoreConflict) {
+				t.Fatalf("changed activation parent accepted: %v", err)
+			}
+		})
 	}
 }
 
@@ -254,7 +337,9 @@ func TestStoreSchemaCoexistsWithBackedUpMembaDatabase(t *testing.T) {
 	if err != nil || cursor.Height != 100 || cursor.Hash != ([32]byte{1}) {
 		t.Fatalf("initial cursor: %+v, %v", cursor, err)
 	}
-	if err := store.AppendBlock(ctx, testHeader(101, 2, 1), []ObservedCreation{testCreation(t, 101, "T1")}); err != nil {
+	activationEvent := testCreation(t, 101, "T1")
+	activationEvent.TxIndex = 1
+	if err := store.AppendBlock(ctx, testHeader(101, 2, 1), []ObservedCreation{activationEvent}); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Close(); err != nil {
@@ -326,5 +411,35 @@ func TestStoreScopeIsolationAndSchemaDrift(t *testing.T) {
 	}
 	if err := MigrateStore(ctx, database); !errors.Is(err, ErrStoreSchema) {
 		t.Fatalf("schema drift accepted: %v", err)
+	}
+}
+
+func TestStoreSameActivationTransactionOnDifferentForks(t *testing.T) {
+	ctx := context.Background()
+	_, database := testStore(t)
+	oldScope := testScope("test-13", "publication-a")
+	old, err := OpenStore(ctx, database, oldScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkScope := oldScope
+	forkScope.PublicationHash = [32]byte{9}
+	fork, err := OpenStore(ctx, database, forkScope)
+	if err != nil {
+		t.Fatalf("same tx hash in different fork must have separate scope: %v", err)
+	}
+	if old.key == fork.key {
+		t.Fatal("forked activation reused scope key")
+	}
+	if err := fork.AppendBlock(ctx, testHeader(101, 9, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	oldCursor, err := old.Cursor(ctx)
+	if err != nil || oldCursor.Height != 100 || oldCursor.Hash != ([32]byte{1}) {
+		t.Fatalf("old fork cursor changed: %+v %v", oldCursor, err)
+	}
+	newCursor, err := fork.Cursor(ctx)
+	if err != nil || newCursor.Height != 101 || newCursor.Hash != ([32]byte{9}) {
+		t.Fatalf("new fork cursor not isolated: %+v %v", newCursor, err)
 	}
 }

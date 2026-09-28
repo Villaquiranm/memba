@@ -1,17 +1,28 @@
 -- Launchpad-only tables in the existing backed-up Memba SQLite database.
--- The scope key includes chain, realm and separately verified publication
--- identity. Nothing here makes a publication claim or starts an indexer.
+-- The scope key includes chain, realm and separately verified executable
+-- publication identity. The cursor starts at the verified parent of the
+-- activation block, so creations later in that block can be indexed.
+-- Nothing here proves activation.
 
 CREATE TABLE launchpad_scopes (
     scope_key            TEXT PRIMARY KEY,
     chain_id             TEXT NOT NULL,
     realm_path           TEXT NOT NULL,
-    publication_height   INTEGER NOT NULL CHECK (publication_height > 0),
+    publication_height   INTEGER NOT NULL CHECK (publication_height > 1),
     publication_hash     BLOB NOT NULL CHECK (length(publication_hash) = 32),
+    publication_parent_hash BLOB NOT NULL CHECK (length(publication_parent_hash) = 32),
+    activation_tx_index  INTEGER NOT NULL CHECK (activation_tx_index >= 0),
+    activation_mode      TEXT NOT NULL CHECK (activation_mode IN ('add_package', 'enable_package')),
+    submission_tx_hash   BLOB NOT NULL CHECK (length(submission_tx_hash) = 32),
+    activation_tx_hash   BLOB NOT NULL CHECK (length(activation_tx_hash) = 32),
+    source_digest        BLOB NOT NULL CHECK (length(source_digest) = 32),
     publication_identity TEXT NOT NULL,
-    cursor_height        INTEGER NOT NULL CHECK (cursor_height >= publication_height),
+    cursor_height        INTEGER NOT NULL CHECK (cursor_height >= publication_height - 1),
     cursor_hash          BLOB NOT NULL CHECK (length(cursor_hash) = 32),
-    UNIQUE (chain_id, realm_path, publication_height, publication_hash, publication_identity)
+    CHECK ((activation_mode = 'add_package' AND submission_tx_hash = activation_tx_hash)
+        OR (activation_mode = 'enable_package' AND submission_tx_hash <> activation_tx_hash)),
+    UNIQUE (chain_id, realm_path, publication_height, publication_hash,
+            activation_tx_hash, activation_tx_index)
 );
 
 CREATE TABLE launchpad_blocks (

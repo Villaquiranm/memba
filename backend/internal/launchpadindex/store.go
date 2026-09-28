@@ -15,15 +15,24 @@ var (
 	ErrStoreConflict = errors.New("conflicting Launchpad stored evidence")
 )
 
-// Scope isolates one publication generation of tokens/v1 on one chain. The
-// publication identity and anchor must come from a separately verified
-// AddPackage transaction; this package does not infer or verify publication.
+// Scope isolates one executable publication generation of tokens/v1 on one
+// chain. PublicationHeight/Hash identify the successful activation block:
+// MsgEnablePackage on inert-policy chains, MsgAddPackage otherwise. The
+// cursor starts at its verified parent so the activation block is scanned.
+// The caller must independently verify the receipt(s), source digest and
+// parent hash; this package does not prove activation.
 type Scope struct {
-	ChainID             string
-	RealmPath           string
-	PublicationHeight   int64
-	PublicationHash     [32]byte
-	PublicationIdentity string
+	ChainID               string
+	RealmPath             string
+	PublicationHeight     int64
+	PublicationHash       [32]byte
+	PublicationParentHash [32]byte
+	ActivationTxIndex     int
+	ActivationMode        string
+	SubmissionTxHash      [32]byte
+	ActivationTxHash      [32]byte
+	SourceDigest          [32]byte
+	PublicationIdentity   string
 }
 
 // Cursor is the last durably recorded height and its RPC-reported block hash.
@@ -40,8 +49,14 @@ type Store struct {
 }
 
 func validScope(s Scope) bool {
-	if s.RealmPath != TokenRealmPath || s.PublicationHeight <= 0 ||
-		s.PublicationHash == ([32]byte{}) || !printableKey(s.ChainID, 128) ||
+	if s.RealmPath != TokenRealmPath || s.PublicationHeight <= 1 ||
+		s.PublicationHash == ([32]byte{}) || s.PublicationParentHash == ([32]byte{}) ||
+		s.SubmissionTxHash == ([32]byte{}) || s.ActivationTxHash == ([32]byte{}) ||
+		s.SourceDigest == ([32]byte{}) || s.ActivationTxIndex < 0 ||
+		(s.ActivationMode != "enable_package" && s.ActivationMode != "add_package") ||
+		(s.ActivationMode == "add_package" && s.SubmissionTxHash != s.ActivationTxHash) ||
+		(s.ActivationMode == "enable_package" && s.SubmissionTxHash == s.ActivationTxHash) ||
+		!printableKey(s.ChainID, 128) ||
 		!printableKey(s.PublicationIdentity, 128) {
 		return false
 	}
@@ -62,12 +77,20 @@ func printableKey(s string, max int) bool {
 
 func scopeKey(s Scope) string {
 	encoded, _ := json.Marshal(struct {
-		ChainID             string
-		RealmPath           string
-		PublicationHeight   int64
-		PublicationHash     [32]byte
-		PublicationIdentity string
-	}{s.ChainID, s.RealmPath, s.PublicationHeight, s.PublicationHash, s.PublicationIdentity})
+		ChainID               string
+		RealmPath             string
+		PublicationHeight     int64
+		PublicationHash       [32]byte
+		PublicationParentHash [32]byte
+		ActivationTxIndex     int
+		ActivationMode        string
+		SubmissionTxHash      [32]byte
+		ActivationTxHash      [32]byte
+		SourceDigest          [32]byte
+		PublicationIdentity   string
+	}{s.ChainID, s.RealmPath, s.PublicationHeight, s.PublicationHash,
+		s.PublicationParentHash, s.ActivationTxIndex, s.ActivationMode,
+		s.SubmissionTxHash, s.ActivationTxHash, s.SourceDigest, s.PublicationIdentity})
 	hash := sha256.Sum256(append([]byte("memba-launchpad-scope-v1\x00"), encoded...))
 	return hex.EncodeToString(hash[:])
 }
@@ -84,20 +107,29 @@ func OpenStore(ctx context.Context, db *sql.DB, scope Scope) (*Store, error) {
 		return nil, fmt.Errorf("begin launchpad scope: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var chainID, realmPath, publicationIdentity string
+	var chainID, realmPath, publicationIdentity, activationMode string
 	var publicationHeight int64
-	var publicationHash []byte
+	var activationTxIndex int
+	var publicationHash, parentHash, submissionHash, activationHash, sourceDigest []byte
 	err = tx.QueryRowContext(ctx, `SELECT chain_id, realm_path, publication_height,
-		publication_hash, publication_identity FROM launchpad_scopes WHERE scope_key = ?`, key).
-		Scan(&chainID, &realmPath, &publicationHeight, &publicationHash, &publicationIdentity)
+		publication_hash, publication_parent_hash, activation_tx_index, activation_mode,
+		submission_tx_hash, activation_tx_hash, source_digest, publication_identity
+		FROM launchpad_scopes WHERE scope_key = ?`, key).
+		Scan(&chainID, &realmPath, &publicationHeight, &publicationHash, &parentHash,
+			&activationTxIndex, &activationMode, &submissionHash, &activationHash,
+			&sourceDigest, &publicationIdentity)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		_, err = tx.ExecContext(ctx, `INSERT INTO launchpad_scopes
 			(scope_key, chain_id, realm_path, publication_height, publication_hash,
+			 publication_parent_hash, activation_tx_index, activation_mode,
+			 submission_tx_hash, activation_tx_hash, source_digest,
 			 publication_identity, cursor_height, cursor_hash)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, key, scope.ChainID, scope.RealmPath,
-			scope.PublicationHeight, scope.PublicationHash[:], scope.PublicationIdentity,
-			scope.PublicationHeight, scope.PublicationHash[:])
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, key, scope.ChainID, scope.RealmPath,
+			scope.PublicationHeight, scope.PublicationHash[:], scope.PublicationParentHash[:],
+			scope.ActivationTxIndex, scope.ActivationMode, scope.SubmissionTxHash[:],
+			scope.ActivationTxHash[:], scope.SourceDigest[:], scope.PublicationIdentity,
+			scope.PublicationHeight-1, scope.PublicationParentHash[:])
 		if err != nil {
 			return nil, fmt.Errorf("register launchpad scope: %w", err)
 		}
@@ -106,6 +138,11 @@ func OpenStore(ctx context.Context, db *sql.DB, scope Scope) (*Store, error) {
 	case chainID != scope.ChainID || realmPath != scope.RealmPath ||
 		publicationHeight != scope.PublicationHeight ||
 		string(publicationHash) != string(scope.PublicationHash[:]) ||
+		string(parentHash) != string(scope.PublicationParentHash[:]) ||
+		activationTxIndex != scope.ActivationTxIndex || activationMode != scope.ActivationMode ||
+		string(submissionHash) != string(scope.SubmissionTxHash[:]) ||
+		string(activationHash) != string(scope.ActivationTxHash[:]) ||
+		string(sourceDigest) != string(scope.SourceDigest[:]) ||
 		publicationIdentity != scope.PublicationIdentity:
 		return nil, ErrStoreConflict
 	}
@@ -126,7 +163,7 @@ func (s *Store) Cursor(ctx context.Context) (Cursor, error) {
 		Scan(&height, &rawHash); err != nil {
 		return Cursor{}, fmt.Errorf("read launchpad cursor: %w", err)
 	}
-	if height < s.scope.PublicationHeight || len(rawHash) != 32 {
+	if height < s.scope.PublicationHeight-1 || len(rawHash) != 32 {
 		return Cursor{}, ErrStoreConflict
 	}
 	var hash [32]byte

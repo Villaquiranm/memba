@@ -17,9 +17,22 @@ var ErrInvalidBlock = errors.New("invalid Launchpad block evidence")
 // and enforce confirmation depth before calling this method.
 func (s *Store) AppendBlock(ctx context.Context, header BlockHeader, events []ObservedCreation) error {
 	if s == nil || s.db == nil || header.ChainID != s.scope.ChainID ||
-		header.Height <= s.scope.PublicationHeight || header.Hash == ([32]byte{}) ||
+		header.Height < s.scope.PublicationHeight || header.Hash == ([32]byte{}) ||
 		header.ParentHash == ([32]byte{}) || header.Time.Unix() <= 0 {
 		return ErrInvalidBlock
+	}
+	if header.Height == s.scope.PublicationHeight {
+		if header.Hash != s.scope.PublicationHash || header.ParentHash != s.scope.PublicationParentHash {
+			return ErrStoreConflict
+		}
+		// Earlier transactions belong to the pre-activation generation.
+		filtered := make([]ObservedCreation, 0, len(events))
+		for _, event := range events {
+			if event.TxIndex >= s.scope.ActivationTxIndex {
+				filtered = append(filtered, event)
+			}
+		}
+		events = filtered
 	}
 	raw := make([]string, len(events))
 	for i, event := range events {
@@ -86,7 +99,7 @@ func (s *Store) cursorTx(ctx context.Context, tx *sql.Tx) (Cursor, error) {
 		WHERE scope_key = ?`, s.key).Scan(&cursor.Height, &raw); err != nil {
 		return Cursor{}, fmt.Errorf("read launchpad cursor: %w", err)
 	}
-	if cursor.Height < s.scope.PublicationHeight || len(raw) != 32 {
+	if cursor.Height < s.scope.PublicationHeight-1 || len(raw) != 32 {
 		return Cursor{}, ErrStoreConflict
 	}
 	copy(cursor.Hash[:], raw)
@@ -143,7 +156,7 @@ func (s *Store) compareBlock(ctx context.Context, tx *sql.Tx, header BlockHeader
 // The publication anchor is immutable, including its hash. A caller must
 // establish the ancestor using the same endpoint before continuing to append.
 func (s *Store) RollbackTo(ctx context.Context, ancestor Cursor) error {
-	if s == nil || s.db == nil || ancestor.Height < s.scope.PublicationHeight ||
+	if s == nil || s.db == nil || ancestor.Height < s.scope.PublicationHeight-1 ||
 		ancestor.Hash == ([32]byte{}) {
 		return ErrStoreConflict
 	}
@@ -160,8 +173,8 @@ func (s *Store) RollbackTo(ctx context.Context, ancestor Cursor) error {
 		return ErrStoreConflict
 	}
 	var stored [32]byte
-	if ancestor.Height == s.scope.PublicationHeight {
-		stored = s.scope.PublicationHash
+	if ancestor.Height == s.scope.PublicationHeight-1 {
+		stored = s.scope.PublicationParentHash
 	} else {
 		var raw []byte
 		if err := tx.QueryRowContext(ctx, `SELECT hash FROM launchpad_blocks WHERE scope_key = ? AND height = ?`,

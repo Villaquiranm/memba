@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: chain-scoped Launchpad NFT ownership index (2026-09-28)
+
+- Add a dormant indexer for the new NFT ledger that follows confirmed mint, transfer, burn and revocation events from the exact deployment block. It verifies the RPC chain, keeps ownership separate from older market data, applies each block atomically and rolls back recent chain reorganizations before serving portfolio data.
+
 ### Memba OS: direct NFT holder and issuer controls (2026-09-28)
 
 - Add a gated native token-management view that reads the actual owner and status. Open holders can review a direct transfer, every active holder can review a permanent burn, and a Soulbound creator can review revocation only when the collection fixed that right at creation. Every action rechecks authority and token state, verifies the result, and locks uncertain outcomes for chain review.

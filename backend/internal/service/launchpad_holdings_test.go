@@ -68,7 +68,7 @@ func TestLaunchpadHoldingsLatestOwnerAndPagination(t *testing.T) {
 	addHoldingEvent(t, database, "gnoland-1", 21, 0, "C3", 1, "transferred", ownerA, ownerB)
 	addHoldingEvent(t, database, "gnoland-1", 21, 1, "C5", 1, "minted", "", ownerA)
 	addHoldingEvent(t, database, "pearl-1", 14, 0, "C4", 1, "minted", "", ownerA)
-	h := HandleLaunchpadHoldings(database, "gnoland-1", true)
+	h := HandleLaunchpadHoldings(database, "gnoland-1", true, func() bool { return true })
 	q := url.Values{"chain_id": {"gnoland-1"}, "owner": {ownerA}, "limit": {"1"}}
 	status, page := holdingsRequest(t, h, q)
 	if status != http.StatusOK || page.ChainID != "gnoland-1" || page.IndexedHeight != 20 ||
@@ -97,17 +97,21 @@ func TestLaunchpadHoldingsFailsClosed(t *testing.T) {
 	database := launchpadHoldingsDB(t)
 	owner := "g1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	q := url.Values{"chain_id": {"gnoland-1"}, "owner": {owner}}
-	status, _ := holdingsRequest(t, HandleLaunchpadHoldings(database, "gnoland-1", false), q)
+	status, _ := holdingsRequest(t, HandleLaunchpadHoldings(database, "gnoland-1", false, func() bool { return true }), q)
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("disabled endpoint status %d", status)
 	}
-	h := HandleLaunchpadHoldings(database, "gnoland-1", true)
+	h := HandleLaunchpadHoldings(database, "gnoland-1", true, func() bool { return true })
 	status, _ = holdingsRequest(t, h, q)
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("unindexed endpoint status %d", status)
 	}
 	if _, err := database.Exec(`INSERT INTO launchpad_nft_indexed_blocks (chain_id, height, hash) VALUES ('gnoland-1', 10, 'H10')`); err != nil {
 		t.Fatal(err)
+	}
+	status, _ = holdingsRequest(t, HandleLaunchpadHoldings(database, "gnoland-1", true, func() bool { return false }), q)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("stalled index endpoint status %d", status)
 	}
 	q.Set("chain_id", "pearl-1")
 	status, _ = holdingsRequest(t, h, q)

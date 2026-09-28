@@ -371,8 +371,9 @@ func main() {
 	// New Launchpad NFT ownership has its own chain-scoped ledger and cursor.
 	// It remains dormant until the realm is published and its exact deployment
 	// block is configured; the legacy NFT_INDEXER_DISABLED switch is unrelated.
+	var launchpadIndexStatus *indexer.LaunchpadTailerStatus
 	if os.Getenv("LAUNCHPAD_NFT_INDEXER_ENABLED") == "1" {
-		indexer.StartLaunchpadNFTTailer(ctx, database, indexer.LaunchpadTailerConfig{
+		launchpadIndexStatus = indexer.StartLaunchpadNFTTailer(ctx, database, indexer.LaunchpadTailerConfig{
 			RPCURL:        envOr("LAUNCHPAD_NFT_RPC_URL", nftRPCURL),
 			ChainID:       os.Getenv("GNO_CHAIN_ID"),
 			StartBlock:    int64Or("LAUNCHPAD_NFT_START_BLOCK", 0),
@@ -475,7 +476,8 @@ func main() {
 	mux.Handle("/api/nft/metadata", rateLimitMiddleware("nft", service.HandleNFTMetadata()))
 	mux.Handle("/api/nft/launchpad-holdings", rateLimitMiddleware("nft", service.HandleLaunchpadHoldings(
 		database, os.Getenv("GNO_CHAIN_ID"), os.Getenv("LAUNCHPAD_NFT_INDEXER_ENABLED") == "1" &&
-			int64Or("LAUNCHPAD_NFT_START_BLOCK", 0) > 0)))
+			int64Or("LAUNCHPAD_NFT_START_BLOCK", 0) > 0,
+		func() bool { return launchpadIndexStatus != nil && launchpadIndexStatus.Ready() })))
 	// Membas Genesis mint plumbing — both endpoints are OFF (404) until their
 	// envs are set at ceremony time (brief §8): the allowlist proofs file and
 	// the mint-ticket collection config.

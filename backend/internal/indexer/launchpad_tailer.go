@@ -9,10 +9,41 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/samouraiworld/memba/backend/internal/metrics"
 )
 
 const launchpadReorgLookback = int64(64)
+const launchpadMaxServingLag = int64(30)
+
+// LaunchpadTailerStatus is the runtime serving gate for the chain-scoped
+// holdings API. Persisted rows alone do not prove the tailer is currently
+// following the configured chain or that a backfill has reached the tip.
+type LaunchpadTailerStatus struct {
+	ready       atomic.Bool
+	lastSuccess atomic.Int64
+	maxAge      time.Duration
+}
+
+func (s *LaunchpadTailerStatus) Ready() bool {
+	if s == nil || !s.ready.Load() {
+		return false
+	}
+	last := s.lastSuccess.Load()
+	return last > 0 && time.Since(time.Unix(0, last)) <= s.maxAge
+}
+
+func (s *LaunchpadTailerStatus) record(latest, cursor, startBlock int64) {
+	lag := latest - cursor
+	metrics.IndexerChainHead.WithLabelValues("launchpad_nft").Set(float64(latest))
+	metrics.IndexerLag.WithLabelValues("launchpad_nft").Set(float64(lag))
+	s.lastSuccess.Store(time.Now().UnixNano())
+	s.ready.Store(cursor >= startBlock && lag >= 0 && lag <= launchpadMaxServingLag)
+}
+
+func (s *LaunchpadTailerStatus) fail() { s.ready.Store(false) }
 
 type LaunchpadTailerConfig struct {
 	RPCURL        string
@@ -108,19 +139,23 @@ func (s launchpadHTTPSource) BlockEvents(ctx context.Context, height int64) ([]G
 // StartLaunchpadNFTTailer is opt-in and fail-closed. It never shares the
 // legacy NFT cursor or its chain-agnostic tables. Operators must configure
 // the exact realm deployment height before enabling it.
-func StartLaunchpadNFTTailer(ctx context.Context, database *sql.DB, cfg LaunchpadTailerConfig) {
+func StartLaunchpadNFTTailer(ctx context.Context, database *sql.DB, cfg LaunchpadTailerConfig) *LaunchpadTailerStatus {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	status := &LaunchpadTailerStatus{maxAge: 30 * time.Second}
 	if strings.TrimSpace(cfg.ChainID) == "" || strings.TrimSpace(cfg.RPCURL) == "" || cfg.StartBlock <= 0 {
 		cfg.Logger.Error("launchpad nft tailer: chain ID, RPC URL and deployment block are required")
-		return
+		return status
 	}
 	if cfg.Confirmations < 1 {
 		cfg.Confirmations = 5
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 3 * time.Second
+	}
+	if 3*cfg.Interval > status.maxAge {
+		status.maxAge = 3 * cfg.Interval
 	}
 	src := launchpadHTTPSource{
 		client: &http.Client{Timeout: 15 * time.Second},
@@ -132,7 +167,8 @@ func StartLaunchpadNFTTailer(ctx context.Context, database *sql.DB, cfg Launchpa
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		for {
-			if err := launchpadTailOnce(ctx, database, cfg, src); err != nil && ctx.Err() == nil {
+			if err := launchpadTailOnce(ctx, database, cfg, src, status); err != nil && ctx.Err() == nil {
+				status.fail()
 				cfg.Logger.Warn("launchpad nft tailer: retrying", "error", err)
 			}
 			select {
@@ -142,9 +178,15 @@ func StartLaunchpadNFTTailer(ctx context.Context, database *sql.DB, cfg Launchpa
 			}
 		}
 	}()
+	return status
 }
 
-func launchpadTailOnce(ctx context.Context, db *sql.DB, cfg LaunchpadTailerConfig, src launchpadBlockSource) error {
+func launchpadTailOnce(ctx context.Context, db *sql.DB, cfg LaunchpadTailerConfig, src launchpadBlockSource, status ...*LaunchpadTailerStatus) (result error) {
+	defer func() {
+		if result != nil && len(status) > 0 && status[0] != nil {
+			status[0].fail()
+		}
+	}()
 	if cfg.ChainID == "" || cfg.StartBlock <= 0 {
 		return fmt.Errorf("launchpad nft tailer: missing chain ID or deployment block")
 	}
@@ -194,6 +236,9 @@ func launchpadTailOnce(ctx context.Context, db *sql.DB, cfg LaunchpadTailerConfi
 			ancestor = cfg.StartBlock - 1
 		}
 		if ancestor < cursor {
+			if len(status) > 0 && status[0] != nil {
+				status[0].fail()
+			}
 			if err := rollbackLaunchpadTailerFromHeight(ctx, db, cfg.ChainID, ancestor+1); err != nil {
 				return err
 			}
@@ -201,6 +246,9 @@ func launchpadTailOnce(ctx context.Context, db *sql.DB, cfg LaunchpadTailerConfi
 		}
 	}
 	end := confirmedEnd(latest, cfg.Confirmations, cursor, maxBlocksPerCycle)
+	if len(status) > 0 && status[0] != nil && latest-cursor > launchpadMaxServingLag {
+		status[0].fail()
+	}
 	for h := cursor + 1; h <= end; h++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -216,6 +264,14 @@ func launchpadTailOnce(ctx context.Context, db *sql.DB, cfg LaunchpadTailerConfi
 		if err := applyLaunchpadBlock(ctx, db, cfg.ChainID, h, hash, events); err != nil {
 			return err
 		}
+		metrics.IndexerLastBlock.WithLabelValues("launchpad_nft").Set(float64(h))
+	}
+	if len(status) > 0 && status[0] != nil {
+		position := cursor
+		if end > position {
+			position = end
+		}
+		status[0].record(latest, position, cfg.StartBlock)
 	}
 	return nil
 }

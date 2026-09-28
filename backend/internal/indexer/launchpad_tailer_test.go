@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type fakeLaunchpadSource struct {
@@ -13,6 +14,27 @@ type fakeLaunchpadSource struct {
 	hashes map[int64]string
 	events map[int64][]GnoEvent
 	chain  string
+}
+
+func TestLaunchpadTailerStatusRequiresFreshNearHeadPass(t *testing.T) {
+	status := &LaunchpadTailerStatus{maxAge: 30 * time.Second}
+	status.record(100, 69, 10)
+	if status.Ready() {
+		t.Fatal("31-block lag should not serve holdings")
+	}
+	status.record(100, 70, 10)
+	if !status.Ready() {
+		t.Fatal("30-block lag should serve confirmed holdings")
+	}
+	status.lastSuccess.Store(time.Now().Add(-31 * time.Second).UnixNano())
+	if status.Ready() {
+		t.Fatal("stale successful pass should not serve holdings")
+	}
+	status.record(100, 95, 10)
+	status.fail()
+	if status.Ready() {
+		t.Fatal("failed pass should not serve holdings")
+	}
 }
 
 func (f *fakeLaunchpadSource) LatestHeight(_ context.Context, expected string) (int64, error) {
@@ -37,6 +59,7 @@ func TestLaunchpadTailerReorgAndAtomicBlock(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
 	cfg := LaunchpadTailerConfig{ChainID: "gnoland-1", StartBlock: 10, Confirmations: 1}
+	status := &LaunchpadTailerStatus{maxAge: 30 * time.Second}
 	mint := ownershipEvent("LaunchpadNFTMinted", 10, 0, map[string]string{
 		"collection": "C1", "number": "1", "recipient": ownerA,
 	})
@@ -48,8 +71,11 @@ func TestLaunchpadTailerReorgAndAtomicBlock(t *testing.T) {
 		hashes: map[int64]string{10: "H10", 11: "H11", 12: "H12"},
 		events: map[int64][]GnoEvent{10: {mint}, 11: {transfer}},
 	}
-	if err := launchpadTailOnce(ctx, database, cfg, src); err != nil {
+	if err := launchpadTailOnce(ctx, database, cfg, src, status); err != nil {
 		t.Fatal(err)
+	}
+	if !status.Ready() {
+		t.Fatal("near-head confirmed index should be ready")
 	}
 	got, err := GetLaunchpadTokenOwnership(ctx, database, cfg.ChainID, "C1", 1)
 	if err != nil || got.Owner != ownerB {
@@ -61,7 +87,7 @@ func TestLaunchpadTailerReorgAndAtomicBlock(t *testing.T) {
 	src.events[11] = []GnoEvent{ownershipEvent("LaunchpadNFTTransferred", 11, 0, map[string]string{
 		"collection": "C1", "number": "1", "from": ownerA, "to": issuer, "actor": ownerA,
 	})}
-	if err := launchpadTailOnce(ctx, database, cfg, src); err != nil {
+	if err := launchpadTailOnce(ctx, database, cfg, src, status); err != nil {
 		t.Fatalf("reorg replay: %v", err)
 	}
 	got, err = GetLaunchpadTokenOwnership(ctx, database, cfg.ChainID, "C1", 1)
@@ -80,15 +106,21 @@ func TestLaunchpadTailerReorgAndAtomicBlock(t *testing.T) {
 			"collection": "C2", "number": "1", "from": ownerA, "to": issuer, "actor": ownerA,
 		}),
 	}
-	if err := launchpadTailOnce(ctx, database, cfg, src); err == nil {
+	if err := launchpadTailOnce(ctx, database, cfg, src, status); err == nil {
 		t.Fatal("invalid block accepted")
+	}
+	if status.Ready() {
+		t.Fatal("failed index pass must stop serving holdings")
 	}
 	if _, err := GetLaunchpadTokenOwnership(ctx, database, cfg.ChainID, "C2", 1); err == nil {
 		t.Fatal("partial block exposed a minted owner")
 	}
 	src.events[13] = src.events[13][:1]
-	if err := launchpadTailOnce(ctx, database, cfg, src); err != nil {
+	if err := launchpadTailOnce(ctx, database, cfg, src, status); err != nil {
 		t.Fatalf("block retry: %v", err)
+	}
+	if !status.Ready() {
+		t.Fatal("successful catch-up should restore holdings readiness")
 	}
 	got, err = GetLaunchpadTokenOwnership(ctx, database, cfg.ChainID, "C2", 1)
 	if err != nil || got.Owner != ownerB {

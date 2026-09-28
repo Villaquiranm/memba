@@ -31,7 +31,7 @@ type launchpadHoldingsResponse struct {
 // never combines rows from the legacy NFT portfolio. A client must specify
 // the chain it is displaying, and the endpoint is unavailable until indexing
 // has started from the realm's exact deployment block.
-func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool) http.Handler {
+func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool, indexReady func() bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -40,7 +40,7 @@ func HandleLaunchpadHoldings(db *sql.DB, expectedChainID string, enabled bool) h
 			writeHoldingsError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !enabled || expectedChainID == "" {
+		if !enabled || expectedChainID == "" || indexReady == nil || !indexReady() {
 			writeHoldingsError(w, http.StatusServiceUnavailable, "holdings index unavailable")
 			return
 		}

@@ -16,13 +16,19 @@ vi.mock("./config", async (load) => ({
     isRealmValidOn: (...args: unknown[]) => isRealmValidOn(...args),
 }))
 
-import { parseLaunchpadPool, TokenLaunchpadPoolClient, TOKEN_LAUNCHPAD_POOL_PATH } from "./tokenLaunchpadPoolClient"
+import { parseLaunchpadPool, parseLaunchpadPoolAdditionQuote, TokenLaunchpadPoolClient, TOKEN_LAUNCHPAD_POOL_PATH } from "./tokenLaunchpadPoolClient"
 
 const CREATOR = "g1x7k4628w93a7wzdhqc06atzx0v50rnshweuxu0"
 const record = () => ({
     schema: "launchpad-pool-v1", id: "T1", quoteCurrency: "ugnot",
     configVersion: "9007199254740993", creator: CREATOR,
     tokenReserve: "9223372036854775807", quoteReserve: "1002",
+})
+const addition = () => ({
+    ...record(), schema: "launchpad-pool-addition-quote-v1",
+    tokenReserve: "9007199254740993", quoteReserve: "9007199254740993",
+    tokenIn: "1", quoteIn: "1",
+    newTokenReserve: "9007199254740994", newQuoteReserve: "9007199254740994",
 })
 const qjson = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
 
@@ -39,6 +45,22 @@ describe("Token Launchpad pool reader", () => {
         expect(pool.tokenReserve).toBe(9223372036854775807n)
         expect(pool.configVersion).toBe(9007199254740993n)
         expect(pool.quoteReserve).toBe(1002n)
+    })
+
+    it("keeps addition quotes exact and checks the recorded ratio", () => {
+        const quote = parseLaunchpadPoolAdditionQuote(addition())
+        expect(quote.tokenReserve).toBe(9007199254740993n)
+        expect(quote.quoteIn).toBe(1n)
+        expect(quote.newQuoteReserve).toBe(9007199254740994n)
+        for (const bad of [
+            { ...addition(), schema: "launchpad-pool-v1" },
+            { ...addition(), tokenIn: "0" },
+            { ...addition(), tokenIn: "01" },
+            { ...addition(), tokenIn: "9".repeat(100000) },
+            { ...addition(), quoteIn: "2" },
+            { ...addition(), newTokenReserve: "9007199254740995" },
+            { ...addition(), newQuoteReserve: "9223372036854775808" },
+        ]) expect(() => parseLaunchpadPoolAdditionQuote(bad)).toThrow()
     })
 
     it("rejects malformed identity, amount and schema fields before BigInt parsing", () => {
@@ -66,6 +88,30 @@ describe("Token Launchpad pool reader", () => {
         await expect(client.pool("T1")).rejects.toMatchObject({ code: "invalid_response" })
         await expect(client.pool('T1");panic(1)//')).rejects.toMatchObject({ code: "invalid_response" })
         expect(queryEval).toHaveBeenCalledTimes(2)
+    })
+
+    it("quotes one exact amount on the guarded path and rejects swapped requests", async () => {
+        const client = new TokenLaunchpadPoolClient()
+        queryEval.mockResolvedValueOnce(qjson(addition()))
+        expect((await client.quoteAddition("T1", 1n)).quoteIn).toBe(1n)
+        expect(queryEval).toHaveBeenCalledWith("https://rpc.example", TOKEN_LAUNCHPAD_POOL_PATH, 'QuoteAdditionJSON("T1",1)', true)
+        queryEval.mockResolvedValueOnce(qjson({ ...addition(), id: "T2" }))
+        await expect(client.quoteAddition("T1", 1n)).rejects.toMatchObject({ code: "invalid_response" })
+        queryEval.mockResolvedValueOnce(qjson({ ...addition(), tokenIn: "2", quoteIn: "2", newTokenReserve: "9007199254740995", newQuoteReserve: "9007199254740995" }))
+        await expect(client.quoteAddition("T1", 1n)).rejects.toMatchObject({ code: "invalid_response" })
+        await expect(client.quoteAddition("T1", 0n)).rejects.toMatchObject({ code: "invalid_response" })
+        await expect(client.quoteAddition("T1", 9223372036854775808n)).rejects.toMatchObject({ code: "invalid_response" })
+        expect(queryEval).toHaveBeenCalledTimes(3)
+    })
+
+    it("guards quote reads across network changes and realm errors", async () => {
+        const client = new TokenLaunchpadPoolClient()
+        isRealmValidOn.mockReturnValueOnce(false)
+        await expect(client.quoteAddition("T1", 1n)).rejects.toMatchObject({ code: "unavailable" })
+        queryEval.mockRejectedValueOnce(new AbciQueryError("vm/qeval", "missing"))
+        await expect(client.quoteAddition("T1", 1n)).rejects.toMatchObject({ code: "realm_error" })
+        queryEval.mockImplementationOnce(async () => { currentNetworkKey.mockReturnValue("testnet"); return qjson(addition()) })
+        await expect(client.quoteAddition("T1", 1n)).rejects.toMatchObject({ code: "network_changed" })
     })
 
     it("keeps unavailable, network changes, realm errors and RPC errors distinct", async () => {

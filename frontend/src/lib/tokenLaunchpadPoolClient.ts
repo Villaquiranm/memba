@@ -16,6 +16,15 @@ export interface LaunchpadPoolView {
     quoteReserve: bigint
 }
 
+/** Read-only ratio snapshot. configVersion is the pool's historical version,
+ * not the current version required by AddLiquidity. */
+export interface LaunchpadPoolAdditionQuote extends LaunchpadPoolView {
+    tokenIn: bigint
+    quoteIn: bigint
+    newTokenReserve: bigint
+    newQuoteReserve: bigint
+}
+
 function invalid(message: string): never {
     throw new TokenLaunchpadReadError("invalid_response", `Launchpad pool response: ${message}`)
 }
@@ -34,10 +43,7 @@ function amount(row: Record<string, unknown>, key: string): bigint {
     return parsed
 }
 
-export function parseLaunchpadPool(value: unknown): LaunchpadPoolView {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) invalid("expected an object")
-    const row = value as Record<string, unknown>
-    if (row.schema !== "launchpad-pool-v1") invalid("unknown schema")
+function poolFields(row: Record<string, unknown>): LaunchpadPoolView {
     const id = field(row, "id")
     const quoteCurrency = field(row, "quoteCurrency")
     const creator = field(row, "creator")
@@ -48,6 +54,34 @@ export function parseLaunchpadPool(value: unknown): LaunchpadPoolView {
         !isValidGnoAddressChecksum(creator) || configVersion === 0n ||
         tokenReserve === 0n || quoteReserve === 0n) invalid("inconsistent pool")
     return { id, quoteCurrency, configVersion, creator, tokenReserve, quoteReserve }
+}
+
+function object(value: unknown): Record<string, unknown> {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) invalid("expected an object")
+    return value as Record<string, unknown>
+}
+
+export function parseLaunchpadPool(value: unknown): LaunchpadPoolView {
+    const row = object(value)
+    if (row.schema !== "launchpad-pool-v1") invalid("unknown schema")
+    return poolFields(row)
+}
+
+export function parseLaunchpadPoolAdditionQuote(value: unknown): LaunchpadPoolAdditionQuote {
+    const row = object(value)
+    if (row.schema !== "launchpad-pool-addition-quote-v1") invalid("unknown quote schema")
+    const pool = poolFields(row)
+    const tokenIn = amount(row, "tokenIn")
+    const quoteIn = amount(row, "quoteIn")
+    const newTokenReserve = amount(row, "newTokenReserve")
+    const newQuoteReserve = amount(row, "newQuoteReserve")
+    if (tokenIn === 0n || quoteIn === 0n ||
+        newTokenReserve !== pool.tokenReserve + tokenIn ||
+        newQuoteReserve !== pool.quoteReserve + quoteIn ||
+        quoteIn !== (tokenIn * pool.quoteReserve + pool.tokenReserve - 1n) / pool.tokenReserve) {
+        invalid("inconsistent addition quote")
+    }
+    return { ...pool, tokenIn, quoteIn, newTokenReserve, newQuoteReserve }
 }
 
 export class TokenLaunchpadPoolClient {
@@ -81,5 +115,26 @@ export class TokenLaunchpadPoolClient {
         const pool = parseLaunchpadPool(value)
         if (pool.id !== id) invalid("token id mismatch")
         return pool
+    }
+
+    async quoteAddition(id: string, tokenIn: bigint): Promise<LaunchpadPoolAdditionQuote> {
+        if (!/^T[1-9][0-9]{0,9}$/.test(id) || tokenIn <= 0n || tokenIn > MAX_INT64) invalid("invalid addition request")
+        this.assertNetwork()
+        let raw: string | null
+        try {
+            raw = await queryEval(GNO_RPC_URL, this.realmPath,
+                `QuoteAdditionJSON(${JSON.stringify(id)},${tokenIn.toString()})`, true)
+        } catch (error) {
+            this.assertNetwork()
+            if (error instanceof AbciQueryError) throw new TokenLaunchpadReadError("realm_error", "Launchpad pool realm rejected the quote", { cause: error })
+            throw new TokenLaunchpadReadError("rpc_error", "Launchpad pool quote RPC read failed", { cause: error })
+        }
+        this.assertNetwork()
+        if (!raw) throw new TokenLaunchpadReadError("unavailable", "Launchpad pool realm returned no quote")
+        const value = parseQevalJSON(raw)
+        if (value === null) invalid("malformed JSON quote")
+        const quote = parseLaunchpadPoolAdditionQuote(value)
+        if (quote.id !== id || quote.tokenIn !== tokenIn) invalid("quote request mismatch")
+        return quote
     }
 }

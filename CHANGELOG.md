@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: Token Launchpad pool addition quotes (2026-09-28)
+
+- Prepare an exact, read-only pool addition quote reader that checks the recorded ratio and current network. The pool's pinned version is historical; a future funding action must read the current config gate separately.
+
 ### Memba OS: Token Launchpad sale identity guard (2026-09-28)
 
 - Withhold sale, claim and locked-pool details when the token list, embedded sale token or launch terms disagree on identity. Show a clear mismatch state for the selected token.

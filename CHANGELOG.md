@@ -24,6 +24,7 @@ Full changelogs are split by version range for easier navigation:
 
 - Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
+- Add an inert, publication-scoped SQLite journal in the backed-up Memba database for confirmed block headers and validated token creation events. Preserve empty blocks, detect conflicting replays, and roll back only to a verified ancestor above the publication anchor.
 
 ### Memba OS: native Settings
 

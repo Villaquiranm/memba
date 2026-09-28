@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: discoverable NFT collection rights (2026-09-28)
+
+- Read the Launchpad ledger's versioned collection capability record on demand in NFT. Show transfer, approval, Soulbound claim and revocation rights, native-market mode eligibility and the scope of royalty payments without implying a live sale.
+
 ### Memba OS: weighted NFT curation proposals (2026-09-28)
 
 - Show read-only curation DAO proposals in Market Operations after the separate versioned DAO realm is deployed and allowlisted. Verify the target, action details and proposal state from chain; keep voting and manager changes gated until the authority and wallet release are reviewed.

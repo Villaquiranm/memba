@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: reviewed primary NFT minting (2026-09-28)
+
+- Add a gated native drop mint view for Open and Soulbound collections. The connected recipient checks an exact fixed stage, wallet limit, current DAO policy and creator/DAO price split before one native payment. The signer rechecks chain state, verifies the new token owner and counters, and holds uncertain outcomes for chain review.
+
 ### Memba OS: native fixed-price drop scheduling (2026-09-28)
 
 - Add a gated Creator Studio for on-chain fixed-price primary stages. It reads the collection, stage list and DAO drop policy; only the collection creator can review a native-price stage. The review shows local-time dates in UTC, price, supply and wallet limits, DAO fee and treasury, then rechecks chain state before signing and verifies the new stage. Uncertain outcomes remain locked for manual chain review.

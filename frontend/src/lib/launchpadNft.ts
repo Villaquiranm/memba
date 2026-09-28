@@ -39,6 +39,15 @@ export interface LaunchpadNftCollection {
     baseURI: string
 }
 
+export interface LaunchpadNftToken {
+    collection: string
+    number: bigint
+    owner: string
+    status: "active" | "burned" | "revoked"
+    uri: string
+    soulbound: boolean
+}
+
 const COLLECTION_KEYS = ["id", "grc721Id", "creator", "name", "symbol", "description", "image", "banner", "website", "mode", "revocable", "tradable", "maxSupply", "minted", "totalSupply", "configVersion", "profileFrozen", "metadataMode", "revealed", "metadataFrozen", "placeholderURI", "baseURICommitment", "provenanceHash", "royaltyBPS", "royalties", "baseURI"] as const
 
 function record(value: unknown, what: string): Record<string, unknown> {
@@ -151,4 +160,19 @@ export async function getLaunchpadNftCollection(rpcUrl: string, id: string): Pro
     const collection = parseLaunchpadNftCollection(parseQevalJSON(raw))
     if (collection.id !== id) throw new Error("Collection identity changed")
     return collection
+}
+
+/** Read an issued token, including Soulbound ownership and retired status. */
+export async function getLaunchpadNftToken(rpcUrl: string, collection: string, number: bigint): Promise<LaunchpadNftToken> {
+    if (!/^C[1-9]\d*$/.test(collection) || number < 1n || number > 9223372036854775807n) throw new Error("Invalid token identity")
+    const raw = await queryEval(rpcUrl, LAUNCHPAD_NFT_PATH, `TokenJSON(${JSON.stringify(collection)}, ${number.toString()})`, true)
+    if (raw === null) throw new Error("Could not read Launchpad token")
+    const row = record(parseQevalJSON(raw), "token")
+    if (Object.keys(row).sort().join("|") !== "collection|number|owner|soulbound|status|uri" ||
+        row.collection !== collection || decimal(row.number, "token number") !== number ||
+        (row.status !== "active" && row.status !== "burned" && row.status !== "revoked") ||
+        typeof row.soulbound !== "boolean" || typeof row.uri !== "string") throw new Error("Token identity changed")
+    const owner = string(row.owner, "token owner")
+    if (row.status === "active" ? !/^g1[02-9ac-hj-np-z]{38}$/.test(owner) : owner !== "") throw new Error("Inconsistent token owner")
+    return { collection, number, owner, status: row.status, uri: row.uri, soulbound: row.soulbound }
 }

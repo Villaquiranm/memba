@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
 import { LAUNCHPAD_NFT_PATH } from "./nftConfig"
-import { listLaunchpadNftCollections, parseLaunchpadNftCollection } from "./launchpadNft"
+import { getLaunchpadNftToken, listLaunchpadNftCollections, parseLaunchpadNftCollection } from "./launchpadNft"
 
 const row = {
     id: "C1", grc721Id: "1", creator: "g1creator", name: "Founders", symbol: "FND",
@@ -60,5 +60,15 @@ describe("Launchpad NFT reads", () => {
         expect(() => parseLaunchpadNftCollection({ ...open, royaltyBPS: "501" })).toThrow("Inconsistent royalty terms")
         expect(() => parseLaunchpadNftCollection({ ...open, royalties: [{ account: "g1receiver", bps: "0" }] })).toThrow("Inconsistent royalty terms")
         expect(() => parseLaunchpadNftCollection({ ...open, mode: "soulbound", revocable: true, tradable: false })).toThrow("Inconsistent royalty terms")
+    })
+
+    it("reads an active Soulbound token owner and rejects mismatched token identities", async () => {
+        const owner = `g1${"p".repeat(38)}`
+        vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval({ collection: "C1", number: "3", owner,
+            status: "active", uri: "ipfs://metadata/3.json", soulbound: true }))
+        await expect(getLaunchpadNftToken("rpc", "C1", 3n)).resolves.toMatchObject({ owner, soulbound: true, status: "active" })
+        vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval({ collection: "C1", number: "4", owner,
+            status: "active", uri: "ipfs://metadata/4.json", soulbound: true }))
+        await expect(getLaunchpadNftToken("rpc", "C1", 3n)).rejects.toThrow("identity")
     })
 })

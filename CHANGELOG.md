@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: committed NFT metadata reveal and freeze (2026-09-28)
+
+- Add separate creator wallet reviews for a one-time IPFS base URI reveal and a permanent metadata freeze. Studio hashes the entered URI and checks it against the on-chain commitment, rechecks creator authority and metadata state before signing, verifies the resulting collection, and holds uncertain outcomes for chain review.
+
 ### Memba OS: edit scheduled primary drop stages (2026-09-28)
 
 - Let collection creators review and edit a fixed-price stage only before its original start. Studio shows the original and proposed schedule, price, limits and DAO fee; the signer rechecks the entire stage list and creator authority, sends no payment, verifies the replacement and preserves uncertain outcomes for chain review.

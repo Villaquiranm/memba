@@ -11,6 +11,7 @@ import { txExplorerUrl } from "../../../lib/txExplorerUrl"
 import type { NativeViewProps } from "../../native/types"
 import { useSigner } from "../../sign/signerContext"
 import { ErrorState, Loading } from "../../kit"
+import RevealCollectionPanel from "./reveal"
 
 interface StudioState { collection: LaunchpadNftCollection; stages: FixedDropStage[]; terms: LaunchpadActionTerms }
 
@@ -116,6 +117,8 @@ export default function LaunchpadCreatorStudio({ rpcUrl, session, available, toa
             </div>)}
         </div>}
         {current && !isCreator && <p className="os-note os-warn" role="note">This wallet is not the on-chain creator. Connect the creator wallet to schedule stages.</p>}
+        {current && isCreator && <RevealCollectionPanel collection={current.collection} creator={session.address}
+            rpcUrl={rpcUrl} chainId={session.network.chainId} toast={toast} refresh={refresh} />}
         {current && isCreator && <div className="os-stack"><h2>{editingIndex === null ? "Schedule a fixed-price stage" : `Edit scheduled stage ${editingIndex + 1}`}</h2>
             <p className="os-sub">Up to ten stages can be scheduled. Windows cannot overlap. A stage can be edited only before it begins.</p>
             {editingIndex !== null && !editingAllowed && <p className="os-note os-warn" role="note">This stage has started or minted. Its terms can no longer be edited; a pending edit can still be reviewed below.</p>}

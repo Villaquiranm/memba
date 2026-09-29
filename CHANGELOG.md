@@ -95,6 +95,42 @@ Full changelogs are split by version range for easier navigation:
 
 - Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
+### Memba OS: confirmed Launchpad NFT collectibles (2026-09-28)
+
+- Show a connected wallet's confirmed Launchpad NFTs in a native, paged collectibles view. The backend keeps the query on one chain and one block snapshot, rejects pages after a chain reorganization, excludes transferred or retired tokens, and refuses to serve while the indexer is stalled or far behind; each card opens token management for a fresh chain check before any action.
+
+### Memba OS: chain-scoped Launchpad NFT ownership index (2026-09-28)
+
+- Add a dormant indexer for the new NFT ledger that follows confirmed mint, transfer, burn and revocation events from the exact deployment block. It verifies the RPC chain, keeps ownership separate from older market data, applies each block atomically and rolls back recent chain reorganizations before serving portfolio data.
+
+### Memba OS: direct NFT holder and issuer controls (2026-09-28)
+
+- Add a gated native token-management view that reads the actual owner and status. Open holders can review a direct transfer, every active holder can review a permanent burn, and a Soulbound creator can review revocation only when the collection fixed that right at creation. Every action rechecks authority and token state, verifies the result, and locks uncertain outcomes for chain review.
+
+### Memba OS: committed NFT metadata reveal and freeze (2026-09-28)
+
+- Add separate creator wallet reviews for a one-time IPFS base URI reveal and a permanent metadata freeze. Studio hashes the entered URI and checks it against the on-chain commitment, rechecks creator authority and metadata state before signing, verifies the resulting collection, and holds uncertain outcomes for chain review.
+
+### Memba OS: edit scheduled primary drop stages (2026-09-28)
+
+- Let collection creators review and edit a fixed-price stage only before its original start. Studio shows the original and proposed schedule, price, limits and DAO fee; the signer rechecks the entire stage list and creator authority, sends no payment, verifies the replacement and preserves uncertain outcomes for chain review.
+
+### Memba OS: reviewed primary NFT minting (2026-09-28)
+
+- Add a gated native drop mint view for Open and Soulbound collections. The connected recipient checks an exact fixed stage, wallet limit, current DAO policy and creator/DAO price split before one native payment. The signer rechecks chain state, verifies the new token owner and counters, and holds uncertain outcomes for chain review.
+
+### Memba OS: native fixed-price drop scheduling (2026-09-28)
+
+- Add a gated Creator Studio for on-chain fixed-price primary stages. It reads the collection, stage list and DAO drop policy; only the collection creator can review a native-price stage. The review shows local-time dates in UTC, price, supply and wallet limits, DAO fee and treasury, then rechecks chain state before signing and verifies the new stage. Uncertain outcomes remain locked for manual chain review.
+
+### Memba OS: creator royalties and reveal commitments (2026-09-28)
+
+- Let creators choose static or committed reveal metadata and set up to ten permanent royalty receivers for Open collections. Compute the future URI and manifest SHA-256 hashes in the browser, review the exact DAO fee and rights before signing, recheck policy, and verify the resulting collection. Soulbound collections remain royalty-free.
+
+### Memba OS: native static NFT collection creation (2026-09-28)
+
+- Add a gated native NFT creator form for Open and Soulbound static collections. It reads the versioned DAO creation fee and treasury, reviews permanent supply, transfer, revocation and metadata terms, rechecks policy before signing, and confirms the exact new collection record.
+
 ### Memba OS: WUGNOT funded NFT offers (2026-09-28)
 
 - Let buyers choose WUGNOT for token-specific funded offers. Market reads the exact balance and allowance, separates a price-bounded approval from the offer escrow transaction, rechecks owner, policy and token spend before signing, and confirms the exact funded offer record afterward.

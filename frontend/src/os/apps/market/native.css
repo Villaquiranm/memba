@@ -69,6 +69,12 @@
 .memba-os .os-curation-compose textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: 12px; border: 1px solid var(--os-line); border-radius: 9px; background: var(--os-card); color: var(--os-ink); font: inherit; line-height: 1.5; }
 .memba-os .os-curation-compose textarea:focus-visible { outline: 2px solid var(--os-acc); outline-offset: 2px; }
 .memba-os .os-curation-compose > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.memba-os .os-curation-evidence { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--os-line); border-radius: 9px; background: var(--os-card); }
+.memba-os .os-curation-evidence > div:first-child { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.memba-os .os-curation-evidence code { overflow-wrap: anywhere; }
+.memba-os .os-curation-evidence-body { display: grid; gap: 8px; }
+.memba-os .os-curation-evidence-body > span { color: var(--os-acc); font-weight: 700; }
+.memba-os .os-curation-evidence-body pre { max-height: 320px; margin: 0; overflow: auto; padding: 12px; border-radius: 7px; background: var(--os-hover); color: var(--os-ink); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 @container os-window (max-width: 620px) {
   .memba-os .os-market-lanes { grid-template-columns: 1fr; }
   .memba-os .os-market-lane { min-height: 170px; padding: 18px; }

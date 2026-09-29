@@ -6,9 +6,10 @@ import { getCollectionCuration, getCurationState, listCurationApplications, list
 
 const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
 const digest = (c: string) => c.repeat(64)
+const cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e"
 const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
-const app = { collection: "C1", founder: addr(1), statementHash: digest("a"), revision: "1",
-    status: "submitted", reviewer: "", reasonHash: "", updatedAt: "100" }
+const app = { collection: "C1", founder: addr(1), statementHash: digest("a"), statementCID: cid, revision: "1",
+    status: "submitted", reviewer: "", reasonHash: "", reasonCID: "", updatedAt: "100" }
 const feature = { proposer: addr(2), approver: addr(3), reasonHash: digest("b"), until: "200", approvedAt: "100" }
 
 describe("Launchpad curation reads", () => {
@@ -39,6 +40,8 @@ describe("Launchpad curation reads", () => {
         expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, "ApplicationsJSON(1, 20)", true)
         query.mockResolvedValueOnce(qeval([{ ...app, status: "recommended" }]))
         await expect(listCurationApplications("rpc")).rejects.toThrow("Inconsistent application review")
+        query.mockResolvedValueOnce(qeval([{ ...app, statementCID: "https://example.com" }]))
+        await expect(listCurationApplications("rpc")).rejects.toThrow()
         query.mockResolvedValueOnce(qeval([app, app]))
         await expect(listCurationApplications("rpc")).rejects.toThrow("Duplicate application")
         await expect(listCurationApplications("rpc", -1)).rejects.toThrow("Invalid application page")

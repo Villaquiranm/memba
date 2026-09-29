@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: verifiable public curation evidence (2026-09-29)
+
+- Show application and review evidence from their on-chain IPFS content addresses only after checking the fetched bytes against each public SHA-256 digest. Malformed, oversized, unavailable or altered content does not render in Market Operations.
+
 ### Memba OS: native founder discussion in Market Operations (2026-09-28)
 
 - Let eligible founders and community managers open a private text thread from an application record. The native desk binds reads and sends to the signed wallet and network, checks current chain access, clears private content before a refresh, and explains denied or unavailable states.

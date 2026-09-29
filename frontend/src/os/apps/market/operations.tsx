@@ -5,6 +5,7 @@ import { readCurationDaoSnapshot, type CurationDaoProposal } from "../../../lib/
 import { Empty, ErrorState, Loading, Pill } from "../../kit"
 import type { OsSession } from "../../shell/useOsSession"
 import CurationDiscussion from "./discussion"
+import PublicCurationEvidence from "./evidence"
 
 const PAGE_SIZE = 20
 
@@ -64,9 +65,9 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rp
                 <div className="os-market-record-meta"><span>Founder <code>{item.founder}</code></span><span>Revision {item.revision}</span><span>Updated {formatTime(item.updatedAt)}</span></div>
                 <button type="button" className="os-btn os-quiet" aria-expanded={selected === item.collection} onClick={() => { setSelected((id) => id === item.collection ? null : item.collection); setReceipt(null) }}>{selected === item.collection ? "Hide record" : "View record"}</button>
                 {selected === item.collection && <div className="os-market-terms">
-                    <span>Application statement hash <code>{item.statementHash}</code></span>
+                    <PublicCurationEvidence label="Application evidence" cid={item.statementCID} sha256={item.statementHash} />
                     {item.reviewer && <span>Reviewer <code>{item.reviewer}</code></span>}
-                    {item.reasonHash && <span>Review reason hash <code>{item.reasonHash}</code></span>}
+                    {item.reasonHash && <PublicCurationEvidence label="Review reason" cid={item.reasonCID} sha256={item.reasonHash} />}
                     {!receipt || receipt.id !== item.collection || (!receipt.value && !receipt.error) ? <Loading label="Reading curation receipt…" /> : receipt.error ? <span role="alert">Could not verify this collection’s curation receipt.</span> : <ReceiptView value={receipt.value!} />}
                 </div>}
                 {selected === item.collection && <div className="os-curation-private-entry">

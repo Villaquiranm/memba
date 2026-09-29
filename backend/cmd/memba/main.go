@@ -503,6 +503,15 @@ func main() {
 		}
 	}
 	mux.Handle("/api/nft/curation-thread", rateLimitMiddleware("curation_inbox", launchpadCurationAccessHandler(svc, os.Getenv("GNO_CHAIN_ID"), curationInbox)))
+	var curationEvidenceUpload http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"public evidence upload unavailable"}`, http.StatusServiceUnavailable)
+	})
+	if os.Getenv("LAUNCHPAD_CURATION_EVIDENCE_UPLOAD_ENABLED") == "1" {
+		curationEvidenceUpload = service.HandleCurationEvidenceUpload(
+			os.Getenv("LAUNCHPAD_CURATION_RPC_URL"), os.Getenv("GNO_CHAIN_ID"), svc.AllowCurationEvidenceUpload)
+	}
+	mux.Handle("/api/nft/curation-evidence/upload", rateLimitMiddleware("curation_evidence", launchpadCurationAccessHandler(
+		svc, os.Getenv("GNO_CHAIN_ID"), curationEvidenceUpload)))
 	// Membas Genesis mint plumbing — both endpoints are OFF (404) until their
 	// envs are set at ceremony time (brief §8): the allowlist proofs file and
 	// the mint-ticket collection config.

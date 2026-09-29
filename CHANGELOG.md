@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: public curation evidence upload (2026-09-29)
+
+- Add a disabled, exact-chain authenticated text pinning endpoint for public application and review evidence. It enforces a 16 KiB UTF-8 limit, per-IP and per-wallet quotas, a fixed upstream and a validated CID, then returns the SHA-256 of the exact uploaded bytes.
+
 ### Memba OS: verifiable public curation evidence (2026-09-29)
 
 - Show application and review evidence from their on-chain IPFS content addresses only after checking the fetched bytes against each public SHA-256 digest. Malformed, oversized, unavailable or altered content does not render in Market Operations.

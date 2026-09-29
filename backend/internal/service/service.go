@@ -341,6 +341,14 @@ func (s *MultisigService) AllowCurationMessage(addr string) bool {
 	return s.userLimiter.AllowKey(addr, ratelimit.CurationMessageEndpoint)
 }
 
+// AllowCurationEvidenceUpload bounds public text pinning by signed wallet.
+func (s *MultisigService) AllowCurationEvidenceUpload(addr string) bool {
+	if s.userLimiter == nil {
+		return true
+	}
+	return s.userLimiter.AllowKey(addr, ratelimit.CurationEvidenceEndpoint)
+}
+
 // AllowArcadeSubmit applies the per-authenticated-wallet BARRICADE submit cap
 // (same AllowKey machinery). Returns true when the wallet is under quota — or
 // when no limiter is configured (the default in tests), so it's a no-op there.

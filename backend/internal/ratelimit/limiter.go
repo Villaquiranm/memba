@@ -30,6 +30,7 @@ func DefaultConfigs() map[string]Config {
 		"upload_image":       {MaxRequests: 20, Window: time.Minute},  // App Store media — one listing is up to 7 files (icon + 6 screenshots), so > the strict avatar bucket, plus retries
 		"nft":                {MaxRequests: 60, Window: time.Minute},  // NFT image/metadata proxy — cacheable reads
 		"curation_inbox":     {MaxRequests: 30, Window: time.Minute},  // private founder thread reads and writes
+		"curation_evidence":  {MaxRequests: 12, Window: time.Minute},  // small public text pins, disabled by default
 		"arcade_submit":      {MaxRequests: 20, Window: time.Minute},  // BARRICADE run certify — each triggers a CPU-heavy node re-sim, so per-IP strict
 		"marketplace":        {MaxRequests: 30, Window: time.Minute},  // Marketplace agents/escrow render
 		"token_launches":     {MaxRequests: 60, Window: time.Minute},  // cached token launch-date map (read)
@@ -58,7 +59,8 @@ const (
 	// fan out the CPU-heavy re-simulation.
 	ArcadeSubmitEndpoint = "arcade_submit"
 	// CurationMessageEndpoint bounds private founder/manager writes per wallet.
-	CurationMessageEndpoint = "curation_message"
+	CurationMessageEndpoint  = "curation_message"
+	CurationEvidenceEndpoint = "curation_evidence"
 )
 
 // PerUserQuestConfigs returns the per-address quest rate limits (Q-03). Defaults:
@@ -82,9 +84,10 @@ func PerUserQuestConfigs(envInt func(name string, def int) int) map[string]Confi
 		ImageUploadEndpoint: {MaxRequests: envInt("MEMBA_IMAGE_UPLOAD_RPM", 30), Window: time.Minute},
 		// Per-wallet BARRICADE submit cap: a player certifies a handful of runs a
 		// day, so this bounds one wallet's re-simulation fan-out across rotated IPs.
-		ArcadeSubmitEndpoint:    {MaxRequests: envInt("MEMBA_ARCADE_SUBMIT_RPM", 20), Window: time.Minute},
-		CurationMessageEndpoint: {MaxRequests: envInt("MEMBA_CURATION_MESSAGE_RPM", 12), Window: time.Minute},
-		"default":               {MaxRequests: 10, Window: time.Minute},
+		ArcadeSubmitEndpoint:     {MaxRequests: envInt("MEMBA_ARCADE_SUBMIT_RPM", 20), Window: time.Minute},
+		CurationMessageEndpoint:  {MaxRequests: envInt("MEMBA_CURATION_MESSAGE_RPM", 12), Window: time.Minute},
+		CurationEvidenceEndpoint: {MaxRequests: envInt("MEMBA_CURATION_EVIDENCE_RPM", 6), Window: time.Minute},
+		"default":                {MaxRequests: 10, Window: time.Minute},
 	}
 }
 

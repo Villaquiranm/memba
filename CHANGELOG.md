@@ -95,6 +95,9 @@ Full changelogs are split by version range for easier navigation:
 
 - Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
+### Memba OS: guarded Launchpad NFT collection discovery (2026-09-28)
+
+- Prepare the NFT window to read collections and SoulBound terms from the new Launchpad ledger once its realm is deployed and allowlisted. Show loading and read failures separately from an empty collection list; keep creation and trading tied to the existing realms until their new contract flows are ready.
 
 ### Memba OS: native Settings
 

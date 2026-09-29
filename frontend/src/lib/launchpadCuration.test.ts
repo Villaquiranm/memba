@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
 import { bech32Encode } from "./dao/realmAddress"
 import { LAUNCHPAD_CURATION_PATH } from "./nftConfig"
-import { getCollectionCuration, getCurationApplication, getCurationReviewAccess, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
+import { getCollectionCuration, getCurationApplication, getCurationEditorialAccess, getCurationReviewAccess, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
 
 const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
 const digest = (c: string) => c.repeat(64)
@@ -80,5 +80,16 @@ describe("Launchpad curation reads", () => {
         expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, `ReviewAccessJSON("C1", "${addr(2)}")`, true)
         await expect(getCurationReviewAccess("rpc", "C1", addr(2))).rejects.toThrow("Inconsistent")
         await expect(getCurationReviewAccess("rpc", "C1", addr(2))).rejects.toThrow("mismatch")
+    })
+
+    it("reads editorial eligibility for a collection without an application", async () => {
+        const access = { collection: "C1", account: addr(2), creator: addr(1), isManager: true }
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(access))
+            .mockResolvedValueOnce(qeval({ ...access, creator: addr(2) }))
+            .mockResolvedValueOnce(qeval({ ...access, collection: "C2" }))
+        expect(await getCurationEditorialAccess("rpc", "C1", addr(2))).toEqual(access)
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, `EditorialAccessJSON("C1", "${addr(2)}")`, true)
+        await expect(getCurationEditorialAccess("rpc", "C1", addr(2))).rejects.toThrow("Inconsistent")
+        await expect(getCurationEditorialAccess("rpc", "C1", addr(2))).rejects.toThrow("mismatch")
     })
 })

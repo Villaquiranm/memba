@@ -29,12 +29,15 @@ const reviewAccess = z.strictObject({ collection, account: address, founder: add
 }).refine((v) => v.isFounder === (v.account === v.founder) && !(v.isFounder && v.isManager) &&
     v.canRead === (v.isFounder || v.isManager) &&
     v.canReview === (v.isManager && (v.status === "submitted" || v.status === "changes_requested")), "Inconsistent curation access")
+const editorialAccess = z.strictObject({ collection, account: address, creator: address, isManager: z.boolean() })
+    .refine((v) => !v.isManager || v.account !== v.creator, "Inconsistent editorial access")
 
 export type CurationState = z.infer<typeof state>
 export type CurationSeat = z.infer<typeof seat>
 export type CurationApplication = z.infer<typeof application>
 export type CurationReceipt = z.infer<typeof receipt>
 export type CurationReviewAccess = z.infer<typeof reviewAccess>
+export type CurationEditorialAccess = z.infer<typeof editorialAccess>
 
 async function read(rpcUrl: string, expression: string): Promise<unknown> {
     const raw = await queryEval(rpcUrl, LAUNCHPAD_CURATION_PATH, expression, true)
@@ -78,5 +81,12 @@ export async function getCurationReviewAccess(rpcUrl: string, id: string, accoun
     if (!collection.safeParse(id).success || !address.safeParse(account).success) throw new Error("Invalid curation access target")
     const result = reviewAccess.nullable().parse(await read(rpcUrl, `ReviewAccessJSON(${JSON.stringify(id)}, ${JSON.stringify(account)})`))
     if (result && (result.collection !== id || result.account !== account)) throw new Error("Curation access target mismatch")
+    return result
+}
+
+export async function getCurationEditorialAccess(rpcUrl: string, id: string, account: string): Promise<CurationEditorialAccess | null> {
+    if (!collection.safeParse(id).success || !address.safeParse(account).success) throw new Error("Invalid editorial access target")
+    const result = editorialAccess.nullable().parse(await read(rpcUrl, `EditorialAccessJSON(${JSON.stringify(id)}, ${JSON.stringify(account)})`))
+    if (result && (result.collection !== id || result.account !== account)) throw new Error("Editorial access target mismatch")
     return result
 }

@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: urgent discovery holds for any collection (2026-09-29)
+
+- Add a signed, chain-checked editorial access probe and native Market Operations lookup for managers to start or second-confirm a short discovery hold even without a founder application. Public reasons must be pinned and byte-verified; second managers must read the verified existing reason before wallet review. The upload route checks the new live collection-level role when no application exists. The curation realm and routes remain disabled until the publication gates.
+
 ### Memba OS: reviewed manager editorial actions (2026-09-29)
 
 - Give appointed managers native Market Operations wallet reviews for a public-reason feature proposal, second-manager feature approval, 24-hour discovery hold and second-manager hold confirmation. The signer rechecks the current chain role, original manager, collection, application, receipt and pinned bytes before signing, then verifies the resulting public receipt and locks uncertain outcomes.

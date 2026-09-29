@@ -7,6 +7,7 @@ import type { OsSession } from "../../shell/useOsSession"
 import CurationDiscussion from "./discussion"
 import PublicCurationEvidence from "./evidence"
 import { FounderApplicationDesk, ManagerEditorialDesk, ManagerReviewDesk } from "./curationActions"
+import EmergencyHoldDesk from "./emergencyHold"
 
 const PAGE_SIZE = 20
 
@@ -59,6 +60,7 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session, toast 
             {team.seats.length === 0 ? <p className="os-sub">The DAO has not appointed any active managers.</p> : <div className="os-ops-seats">{team.seats.map((seat) => <div className="os-ops-seat" key={seat.account}><Pill tone={seat.lead ? "ok" : "neutral"}>{seat.lead ? "Lead" : "Manager"}</Pill><code>{seat.account}</code><span>Term ends {formatTime(seat.until)}</span></div>)}</div>}
         </section>}
         <FounderApplicationDesk rpcUrl={rpcUrl} session={session} toast={toast} onChanged={refreshRecords} />
+        <EmergencyHoldDesk rpcUrl={rpcUrl} session={session} toast={toast} onChanged={refreshRecords} />
         {daoAvailable && <CurationGovernance rpcUrl={rpcUrl} account={session.status === "member" ? session.address : ""} />}
         <section className="os-stack" aria-labelledby="os-ops-applications-title">
             <div className="os-ops-section-head"><h2 id="os-ops-applications-title">Founder applications</h2><span>On-chain status and public evidence hashes</span></div>

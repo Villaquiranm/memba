@@ -2,9 +2,9 @@
 import type { Token } from "../gen/memba/v1/memba_pb"
 import { clearGovernanceReceipt, type GovernanceScope } from "./dao/governanceRecovery"
 import { doContractBroadcast, type AminoMsg } from "./grc20"
-import { getCollectionCuration, getCurationApplication, getCurationReviewAccess, getCurationState,
+import { getCollectionCuration, getCurationApplication, getCurationEditorialAccess, getCurationState,
     type CurationApplication, type CurationReceipt, type CurationState } from "./launchpadCuration"
-import { readCurationAccess } from "./launchpadCurationInbox"
+import { readCurationEditorialAccess } from "./launchpadCurationInbox"
 import { fetchCurationEvidence, type VerifiedCurationEvidence } from "./launchpadCurationEvidence"
 import { CURATION_ACTION_GAS_WANTED } from "./launchpadCurationActions"
 import { getLaunchpadNftCollection, type LaunchpadNftCollection } from "./launchpadNft"
@@ -48,15 +48,15 @@ function otherActor(action: EditorialAction, receipt: CurationReceipt): string {
 }
 
 export function editorialRequest(input: {
-    action: EditorialAction; application: CurationApplication; collection: LaunchpadNftCollection;
+    action: EditorialAction; application: CurationApplication | null; collection: LaunchpadNftCollection;
     receipt: CurationReceipt; state: CurationState; caller: string; token: Token;
     evidence?: VerifiedCurationEvidence; until?: string; rpcUrl: string; chainId: string;
     estimatedGasFeeUgnot: number; onSettled?: () => void;
 }): SignRequest {
     const { action, application, collection, receipt, state, caller, token, evidence, until, rpcUrl, chainId, estimatedGasFeeUgnot } = input
     if (!state.governed || !state.admin || !Number.isSafeInteger(estimatedGasFeeUgnot) || estimatedGasFeeUgnot <= 0 ||
-        collection.id !== application.collection || collection.creator !== application.founder || receipt.collection !== collection.id ||
-        token.userAddress !== caller || token.chainId !== chainId || caller === application.founder ||
+        (application !== null && (collection.id !== application.collection || collection.creator !== application.founder)) ||
+        receipt.collection !== collection.id || token.userAddress !== caller || token.chainId !== chainId || caller === collection.creator ||
         !eligible(action, receipt, caller, until) ||
         ((action === "feature-propose" || action === "hide-start") && (!evidence?.text.trim() || !evidence.cid || !evidence.sha256))) {
         throw new Error("This editorial action is not ready for wallet review.")
@@ -65,12 +65,14 @@ export function editorialRequest(input: {
         "hide-start": "Start a temporary discovery hold", "hide-confirm": "Confirm a discovery hold" }[action]
     const call = buildEditorialMsg(action, collection.id, caller, evidence, until)
     const scope = editorialScope(chainId, collection.id, caller, action)
+    const priorReason = action === "feature-approve" ? receipt.feature : action === "hide-confirm" ? receipt.hold : null
     return {
         title, summary: `${collection.name} (${collection.id})`,
         lines: () => [["Collection", `${collection.name} (${collection.id})`], ["Manager", caller],
             ["Action", title], ...(until ? [["Feature ends (Unix seconds)", until] as [string, string]] : []),
             ...(evidence ? [["Public reason", evidence.text.length > 180 ? `${evidence.text.slice(0, 180)}…` : evidence.text],
                 ["IPFS CID", evidence.cid], ["Exact byte SHA-256", evidence.sha256]] as [string, string][] : []),
+            ...(priorReason ? [["Existing reason CID", priorReason.reasonCID], ["Existing reason SHA-256", priorReason.reasonHash]] as [string, string][] : []),
             ["Realm", LAUNCHPAD_CURATION_PATH], ["Network", chainId],
             ["Gas limit", CURATION_ACTION_GAS_WANTED.toLocaleString()],
             ["Estimated gas fee", `${estimatedGasFeeUgnot.toLocaleString()} ugnot`], ["Storage deposit cap", `${DEPOSIT}ugnot`]],
@@ -82,16 +84,18 @@ export function editorialRequest(input: {
             const [freshApp, freshCollection, freshReceipt, freshState, access, other, fetched] = await Promise.all([
                 getCurationApplication(rpcUrl, collection.id), getLaunchpadNftCollection(rpcUrl, collection.id),
                 getCollectionCuration(rpcUrl, collection.id), getCurationState(rpcUrl),
-                readCurationAccess(collection.id, caller, chainId, token),
-                otherActor(action, receipt) ? getCurationReviewAccess(rpcUrl, collection.id, otherActor(action, receipt)) : Promise.resolve(null),
-                evidence ? fetchCurationEvidence(evidence.cid, evidence.sha256) : Promise.resolve(null),
+                readCurationEditorialAccess(collection.id, caller, chainId, token),
+                otherActor(action, receipt) ? getCurationEditorialAccess(rpcUrl, collection.id, otherActor(action, receipt)) : Promise.resolve(null),
+                evidence ? fetchCurationEvidence(evidence.cid, evidence.sha256) : priorReason ?
+                    fetchCurationEvidence(priorReason.reasonCID, priorReason.reasonHash) : Promise.resolve(null),
             ])
-            if (!same(freshApp, application) || freshCollection.creator !== application.founder ||
+            if (!same(freshApp, application) || freshCollection.creator !== collection.creator ||
                 !same(freshReceipt, receipt) || !freshState.governed || freshState.admin !== state.admin ||
-                !access.isManager || access.revision !== application.revision ||
+                !access.isManager || access.creator !== collection.creator ||
                 !eligible(action, freshReceipt, caller, until) ||
-                (otherActor(action, receipt) && !other?.isManager) ||
-                (evidence && fetched?.text !== evidence.text)) {
+                (otherActor(action, receipt) && (!other?.isManager || other.creator !== collection.creator)) ||
+                (evidence && fetched?.text !== evidence.text) ||
+                (priorReason && (!fetched?.text.trim() || fetched.cid !== priorReason.reasonCID || fetched.sha256 !== priorReason.reasonHash))) {
                 throw new Error("Manager role, collection, receipt or public reason changed. Refresh before signing.")
             }
         },

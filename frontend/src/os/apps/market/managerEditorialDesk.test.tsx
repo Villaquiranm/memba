@@ -9,13 +9,14 @@ const getState = vi.hoisted(() => vi.fn())
 const sign = vi.hoisted(() => vi.fn())
 const editorial = vi.hoisted(() => vi.fn())
 const upload = vi.hoisted(() => vi.fn())
+const fetchEvidence = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/launchpadCurationInbox", () => ({ readCurationAccess: readAccess }))
 vi.mock("../../../lib/launchpadNft", () => ({ getLaunchpadNftCollection: getCollection }))
 vi.mock("../../../lib/launchpadCuration", () => ({ getCurationState: getState }))
 vi.mock("../../../lib/launchpadCurationEditorial", () => ({ editorialScope: (_chain: string, id: string, _who: string, action: string) => ({
     chainId: "gnoland-1", realmPath: "gno.land/r/samcrew/launchpad/curation/v1", caller: "manager", operation: `${action}:${id}` }),
     editorialRequest: editorial }))
-vi.mock("../../../lib/launchpadCurationEvidence", () => ({ uploadCurationEvidence: upload }))
+vi.mock("../../../lib/launchpadCurationEvidence", () => ({ uploadCurationEvidence: upload, fetchCurationEvidence: fetchEvidence }))
 vi.mock("../../../lib/grc20", async (original) => ({ ...(await original<typeof import("../../../lib/grc20")>()),
     networkGasPrice: vi.fn(async () => ({ gas: 1000, ugnot: 1 })) }))
 vi.mock("../../sign/signerContext", () => ({ useSigner: () => ({ sign, version: 0 }) }))
@@ -40,6 +41,7 @@ describe("manager editorial desk", () => {
         editorial.mockReset().mockReturnValue({ title: "Approve" })
         sign.mockReset()
         upload.mockReset()
+        fetchEvidence.mockReset().mockResolvedValue({ cid, sha256: receipt.feature.reasonHash, text: "Public feature rationale" })
         localStorage.clear()
     })
 
@@ -47,6 +49,9 @@ describe("manager editorial desk", () => {
         render(<ManagerEditorialDesk {...props} />)
         expect(await screen.findByRole("heading", { name: "Editorial controls" })).toBeInTheDocument()
         expect(screen.getByRole("option", { name: "Approve feature slot" })).toBeInTheDocument()
+        expect(screen.getByRole("button", { name: "Review editorial action in wallet" })).toBeDisabled()
+        fireEvent.click(screen.getByRole("button", { name: "Read verified text" }))
+        await waitFor(() => expect(screen.getByRole("button", { name: "Review editorial action in wallet" })).toBeEnabled())
         fireEvent.click(screen.getByRole("button", { name: "Review editorial action in wallet" }))
         await waitFor(() => expect(sign).toHaveBeenCalledWith({ title: "Approve" }))
         expect(editorial).toHaveBeenCalledWith(expect.objectContaining({ action: "feature-approve", caller: manager }))

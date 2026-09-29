@@ -12,6 +12,7 @@ import { txExplorerUrl } from "../../../lib/txExplorerUrl"
 import { useSigner } from "../../sign/signerContext"
 import type { OsSession } from "../../shell/useOsSession"
 import { Loading } from "../../kit"
+import PublicCurationEvidence from "./evidence"
 
 export function EvidenceComposer({ collection, account, chainId, token, label, onPrepared }: {
     collection: string; account: string; chainId: string; token: Token; label: string;
@@ -48,7 +49,7 @@ export function EvidenceComposer({ collection, account, chainId, token, label, o
     </div>
 }
 
-function PriorAction({ scope, chainId, onClear }: { scope: ReturnType<typeof curationActionScope>; chainId: string; onClear: () => void }) {
+export function PriorAction({ scope, chainId, onClear }: { scope: ReturnType<typeof curationActionScope>; chainId: string; onClear: () => void }) {
     const receipt = readGovernanceReceipt(scope)
     const [checked, setChecked] = useState(false)
     if (!receipt) return null
@@ -184,6 +185,7 @@ export function ManagerEditorialDesk({ application, receipt, rpcUrl, session, on
     const [action, setAction] = useState<EditorialAction>("feature-propose")
     const [days, setDays] = useState(7)
     const [evidence, setEvidence] = useState<{ action: EditorialAction; value: VerifiedCurationEvidence } | null>(null)
+    const [reviewed, setReviewed] = useState<{ action: EditorialAction; cid: string; sha256: string } | null>(null)
     const [preparing, setPreparing] = useState(false)
     const [revision, setRevision] = useState(0)
     const [now, setNow] = useState(0)
@@ -219,12 +221,14 @@ export function ManagerEditorialDesk({ application, receipt, rpcUrl, session, on
     const selected = options.some((option) => option.value === action) ? action : options[0]?.value
     if (!selected) return null
     const needsReason = selected === "feature-propose" || selected === "hide-start"
+    const priorReason = selected === "feature-approve" ? receipt.feature : selected === "hide-confirm" ? receipt.hold : null
+    const reasonReviewed = !priorReason || (reviewed?.action === selected && reviewed.cid === priorReason.reasonCID && reviewed.sha256 === priorReason.reasonHash)
     const scope = editorialScope(session.network.chainId, application.collection, session.address, selected)
     const prior = readGovernanceReceipt(scope)
     return <div className="os-curation-author os-curation-review">
         <div><h3>Editorial controls</h3><p className="os-sub">Feature slots and discovery holds need a public reason. A second unconflicted manager confirms each decision. Holds affect discovery only; trading and claims remain available.</p></div>
         <label htmlFor={`curation-editorial-${application.collection}`}>Action</label>
-        <select id={`curation-editorial-${application.collection}`} value={selected} onChange={(event) => { setAction(event.target.value as EditorialAction); setEvidence(null) }}>
+        <select id={`curation-editorial-${application.collection}`} value={selected} onChange={(event) => { setAction(event.target.value as EditorialAction); setEvidence(null); setReviewed(null) }}>
             {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
         {selected === "feature-propose" && <><label htmlFor={`curation-feature-days-${application.collection}`}>Feature duration</label>
@@ -234,10 +238,12 @@ export function ManagerEditorialDesk({ application, receipt, rpcUrl, session, on
         {needsReason && <EvidenceComposer key={`${application.collection}:${selected}`} collection={application.collection}
             account={session.address} chainId={session.network.chainId} token={token} label="Public editorial reason"
             onPrepared={(value) => setEvidence(value ? { action: selected, value } : null)} />}
-        {!needsReason && <p className="os-note">Review the existing public reason and current receipt above before confirming this action.</p>}
+        {priorReason && <PublicCurationEvidence key={`${selected}:${priorReason.reasonCID}:${priorReason.reasonHash}`}
+            label="Reason to review before confirming" cid={priorReason.reasonCID} sha256={priorReason.reasonHash}
+            onVerified={(value) => setReviewed(value ? { action: selected, cid: value.cid, sha256: value.sha256 } : null)} />}
         <PriorAction scope={scope} chainId={session.network.chainId} onClear={() => { setRevision((value) => value + 1); onChanged() }} />
-        <button type="button" className="os-btn" disabled={(needsReason && evidence?.action !== selected) || preparing || !!prior} onClick={() => {
-            if (needsReason && evidence?.action !== selected) return
+        <button type="button" className="os-btn" disabled={(needsReason && evidence?.action !== selected) || !reasonReviewed || preparing || !!prior} onClick={() => {
+            if ((needsReason && evidence?.action !== selected) || !reasonReviewed) return
             const until = selected === "feature-propose" ? String(Math.floor(Date.now() / 1000) + days * 86400) : undefined
             setPreparing(true)
             void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => signer.sign(editorialRequest({

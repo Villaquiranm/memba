@@ -483,6 +483,10 @@ func main() {
 		svc, os.Getenv("GNO_CHAIN_ID"), service.HandleLaunchpadCurationAccess(
 			os.Getenv("LAUNCHPAD_CURATION_RPC_URL"), os.Getenv("GNO_CHAIN_ID"),
 			os.Getenv("LAUNCHPAD_CURATION_ACCESS_ENABLED") == "1"))))
+	mux.Handle("/api/nft/curation-editorial-access", rateLimitMiddleware("nft", launchpadCurationAccessHandler(
+		svc, os.Getenv("GNO_CHAIN_ID"), service.HandleLaunchpadEditorialAccess(
+			os.Getenv("LAUNCHPAD_CURATION_RPC_URL"), os.Getenv("GNO_CHAIN_ID"),
+			os.Getenv("LAUNCHPAD_CURATION_ACCESS_ENABLED") == "1"))))
 	var curationInbox http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":"curation inbox unavailable"}`, http.StatusServiceUnavailable)
 	})

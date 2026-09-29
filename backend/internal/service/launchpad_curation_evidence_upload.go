@@ -2,12 +2,9 @@ package service
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"mime"
@@ -16,14 +13,12 @@ import (
 	"net/textproto"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
 const curationEvidenceMaxBytes = 16 * 1024
-const launchpadEvidenceNFTPath = "gno.land/r/samcrew/launchpad/nft/v1"
 
 var curationEvidenceCID = regexp.MustCompile(`^(bafy[a-z2-7]{55,86}|Qm[1-9A-HJ-NP-Za-km-z]{44})$`)
 
@@ -87,12 +82,12 @@ func HandleCurationEvidenceUpload(rpcURL, chainID string, allow func(string) boo
 			return
 		}
 		if access == nil {
-			creator, err := readLaunchpadCollectionCreator(r.Context(), rpcURL, collection)
+			editorial, err := readLaunchpadEditorialAccess(r.Context(), rpcURL, chainID, collection, wallet)
 			if err != nil {
 				writeHoldingsError(w, http.StatusServiceUnavailable, "collection authority unavailable")
 				return
 			}
-			if creator != wallet {
+			if editorial == nil || (editorial.Creator != wallet && !editorial.IsManager) {
 				writeHoldingsError(w, http.StatusForbidden, "collection creator required")
 				return
 			}
@@ -160,54 +155,4 @@ func HandleCurationEvidenceUpload(rpcURL, chainID string, allow func(string) boo
 		_ = json.NewEncoder(w).Encode(map[string]string{"cid": cid, "sha256": hex.EncodeToString(digest[:])})
 		slog.Info("public curation evidence pinned", "cid", cid, "bytes", len(data))
 	})
-}
-
-// Called only after readLaunchpadReviewAccess verified this RPC's chain and
-// recent head. The initial founder can pin evidence before an application
-// exists; the NFT ledger remains the source of that creator authority.
-func readLaunchpadCollectionCreator(ctx context.Context, rpcURL, collection string) (string, error) {
-	expr := launchpadEvidenceNFTPath + ".CollectionJSON(" + strconv.Quote(collection) + ")"
-	request := abciQueryRequest{JSONRPC: "2.0", ID: 1, Method: "abci_query", Params: abciQueryParams{
-		Path: "vm/qeval", Data: base64.StdEncoding.EncodeToString([]byte(expr)),
-	}}
-	payload, err := json.Marshal(request)
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(rpcURL, "/"), bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	body, err := launchpadRPCBody(client, req)
-	if err != nil {
-		return "", err
-	}
-	var response abciResponse
-	if err := json.Unmarshal(body, &response); err != nil || response.Error != nil ||
-		abciErrorPresent(response.Result.Response.ResponseBase.Error) || response.Result.Response.ResponseBase.Data == "" {
-		return "", errors.New("NFT creator query unavailable")
-	}
-	raw, err := base64.StdEncoding.DecodeString(response.Result.Response.ResponseBase.Data)
-	if err != nil || len(raw) > 32768 {
-		return "", errors.New("invalid NFT creator query data")
-	}
-	const suffix = " string)"
-	if !strings.HasPrefix(string(raw), "(") || !strings.HasSuffix(string(raw), suffix) {
-		return "", errors.New("invalid NFT creator response")
-	}
-	jsonText, err := strconv.Unquote(strings.TrimSuffix(string(raw[1:]), suffix))
-	if err != nil || jsonText == "null" {
-		return "", errors.New("missing NFT collection")
-	}
-	var info struct {
-		ID      string `json:"id"`
-		Creator string `json:"creator"`
-	}
-	if err := json.Unmarshal([]byte(jsonText), &info); err != nil || info.ID != collection ||
-		!strings.HasPrefix(info.Creator, "g1") || len(info.Creator) != 40 {
-		return "", errors.New("invalid NFT creator record")
-	}
-	return info.Creator, nil
 }

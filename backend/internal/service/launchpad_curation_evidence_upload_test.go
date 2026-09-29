@@ -146,8 +146,8 @@ func TestCurationEvidenceUploadAllowsInitialCreator(t *testing.T) {
 			t.Error(err)
 		}
 		view := "null"
-		if string(expr) == launchpadEvidenceNFTPath+`.CollectionJSON("C1")` {
-			view = `{"id":"C1","creator":"` + accessTestWallet + `"}`
+		if string(expr) == launchpadCurationPath+`.EditorialAccessJSON("C1","`+accessTestWallet+`")` {
+			view = `{"collection":"C1","account":"` + accessTestWallet + `","creator":"` + accessTestWallet + `","isManager":false}`
 		} else if string(expr) != launchpadCurationPath+`.ReviewAccessJSON("C1","`+accessTestWallet+`")` {
 			t.Errorf("unexpected query %q", expr)
 		}
@@ -166,6 +166,61 @@ func TestCurationEvidenceUploadAllowsInitialCreator(t *testing.T) {
 	h.ServeHTTP(w, evidenceRequest("Public founder application", true))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("creator status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCurationEvidenceUploadAllowsUnreviewedManagerButRejectsOthers(t *testing.T) {
+	t.Setenv("LIGHTHOUSE_API_KEY", "test-only-key")
+	for _, tc := range []struct {
+		name    string
+		creator string
+		manager bool
+		want    int
+	}{
+		{"manager without application", accessTestFounder, true, http.StatusCreated},
+		{"unassigned wallet", accessTestFounder, false, http.StatusForbidden},
+		{"self-manager claim", accessTestWallet, true, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rpc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/status" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+						"node_info": map[string]string{"network": "gnoland-1"},
+						"sync_info": map[string]any{"latest_block_height": "100", "latest_block_time": time.Now().UTC().Format(time.RFC3339Nano), "catching_up": false},
+					}})
+					return
+				}
+				var query abciQueryRequest
+				if err := json.NewDecoder(r.Body).Decode(&query); err != nil {
+					t.Error(err)
+				}
+				expr, err := base64.StdEncoding.DecodeString(query.Params.Data)
+				if err != nil {
+					t.Error(err)
+				}
+				view := "null"
+				if string(expr) == launchpadCurationPath+`.EditorialAccessJSON("C1","`+accessTestWallet+`")` {
+					view = `{"collection":"C1","account":"` + accessTestWallet + `","creator":"` + tc.creator + `","isManager":` + strconv.FormatBool(tc.manager) + `}`
+				} else if string(expr) != launchpadCurationPath+`.ReviewAccessJSON("C1","`+accessTestWallet+`")` {
+					t.Errorf("unexpected query %q", expr)
+				}
+				typed := "(" + strconv.Quote(view) + " string)"
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"response": map[string]any{
+					"ResponseBase": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(typed)), "Error": nil},
+				}}})
+			}))
+			defer rpc.Close()
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `{"Hash":"`+evidenceTestCID+`"}`)
+			}))
+			defer upstream.Close()
+			h := HandleCurationEvidenceUpload(rpc.URL, "gnoland-1", func(string) bool { return true }, ipfsUploadOptions{uploadURL: upstream.URL})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, evidenceRequest("Public emergency hold reason", true))
+			if w.Code != tc.want {
+				t.Fatalf("status=%d want=%d body=%s", w.Code, tc.want, w.Body.String())
+			}
+		})
 	}
 }
 

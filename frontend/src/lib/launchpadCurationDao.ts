@@ -7,12 +7,15 @@ import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "./nftConfi
 const schema = "memba-weighted-host/v13" as const
 const collection = z.union([z.literal(""), z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)])
 const reason = z.union([z.literal(""), sha256Hex])
+const reasonCID = z.union([z.literal(""), z.string().regex(/^(bafy[a-z2-7]{55,86}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/)])
 const state = z.strictObject({
     admin: optionalAddress, pendingAdmin: optionalAddress, governed: z.boolean(), activeManagers: uint64.refine(s => BigInt(s) <= 5n),
     seat: z.strictObject({ account: optionalAddress, lead: z.boolean(), until: uint64 }),
     verification: z.strictObject({ exists: z.boolean(), verified: z.boolean(), reasonHash: z.string().max(64), updatedAt: uint64 }),
-    feature: z.strictObject({ exists: z.boolean(), proposer: optionalAddress, approver: optionalAddress, reasonHash: z.string().max(64), until: uint64, approvedAt: uint64 }),
-    hold: z.strictObject({ exists: z.boolean(), actor: optionalAddress, confirmer: optionalAddress, reasonHash: z.string().max(64), until: uint64 }),
+    feature: z.strictObject({ exists: z.boolean(), proposer: optionalAddress, approver: optionalAddress, reasonHash: z.string().max(64), reasonCID, until: uint64, approvedAt: uint64 })
+        .refine(v => v.exists === (v.reasonCID !== ""), "Inconsistent feature evidence"),
+    hold: z.strictObject({ exists: z.boolean(), actor: optionalAddress, confirmer: optionalAddress, reasonHash: z.string().max(64), reasonCID, until: uint64 })
+        .refine(v => v.exists === (v.reasonCID !== ""), "Inconsistent hold evidence"),
     conflict: z.boolean(),
 })
 const operations = ["accept-admin", "return-admin", "abort-return", "appoint-manager", "remove-manager", "mark-conflict", "set-verification", "clear-feature", "clear-hide"] as const

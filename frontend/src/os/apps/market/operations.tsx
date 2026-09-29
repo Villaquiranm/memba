@@ -147,8 +147,10 @@ function curationActionLabel(item: CurationDaoProposal): string {
 function ReceiptView({ value }: { value: CurationReceipt }) {
     return <div className="os-ops-receipt">
         <span>DAO verification: <strong>{value.verification?.verified ? "Verified" : "Not verified"}</strong>{value.verification && <> · Reason <code>{value.verification.reasonHash}</code></>}</span>
-        <span>Editorial placement: <strong>{value.featured ? "Featured" : "Not featured"}</strong>{value.feature && <> · Through {formatTime(value.feature.until)} · Reason <code>{value.feature.reasonHash}</code></>}</span>
-        <span>Discovery hold: <strong>{value.hidden ? "Active" : "None"}</strong>{value.hold && <> · Through {formatTime(value.hold.until)} · Reason <code>{value.hold.reasonHash}</code></>}</span>
+        <span>Editorial placement: <strong>{value.featured ? "Featured" : "Not featured"}</strong>{value.feature && <> · Through {formatTime(value.feature.until)}</>}</span>
+        {value.feature && <PublicCurationEvidence label="Feature reason" cid={value.feature.reasonCID} sha256={value.feature.reasonHash} />}
+        <span>Discovery hold: <strong>{value.hidden ? "Active" : "None"}</strong>{value.hold && <> · Through {formatTime(value.hold.until)}</>}</span>
+        {value.hold && <PublicCurationEvidence label="Discovery hold reason" cid={value.hold.reasonCID} sha256={value.hold.reasonHash} />}
         <span className="os-sub">Verification identifies a DAO authenticity decision. It does not promise price performance or endorse a trade.</span>
     </div>
 }

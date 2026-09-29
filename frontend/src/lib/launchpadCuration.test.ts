@@ -10,7 +10,7 @@ const cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e"
 const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
 const app = { collection: "C1", founder: addr(1), statementHash: digest("a"), statementCID: cid, revision: "1",
     status: "submitted", reviewer: "", reasonHash: "", reasonCID: "", updatedAt: "100" }
-const feature = { proposer: addr(2), approver: addr(3), reasonHash: digest("b"), until: "200", approvedAt: "100" }
+const feature = { proposer: addr(2), approver: addr(3), reasonHash: digest("b"), reasonCID: cid, until: "200", approvedAt: "100" }
 
 describe("Launchpad curation reads", () => {
     beforeEach(() => vi.restoreAllMocks())
@@ -60,11 +60,13 @@ describe("Launchpad curation reads", () => {
         const query = vi.spyOn(shared, "queryEval")
             .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature, hold: null, verification: { verified: true, reasonHash: digest("c"), updatedAt: "101" } }))
             .mockResolvedValueOnce(qeval({ collection: "C2", featured: true, hidden: false, feature, hold: null, verification: null }))
-            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: true, feature, hold: { actor: addr(2), confirmer: "", reasonHash: digest("d"), until: "200" }, verification: null }))
+            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: true, feature, hold: { actor: addr(2), confirmer: "", reasonHash: digest("d"), reasonCID: cid, until: "200" }, verification: null }))
         expect((await getCollectionCuration("rpc", "C1")).verification?.verified).toBe(true)
         expect(query).toHaveBeenNthCalledWith(1, "rpc", LAUNCHPAD_CURATION_PATH, 'CollectionCurationJSON("C1")', true)
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow("mismatch")
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow("Inconsistent curation receipt")
         await expect(getCollectionCuration("rpc", "bad")).rejects.toThrow("Invalid collection ID")
+        query.mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature: { ...feature, reasonCID: "invalid" }, hold: null, verification: null }))
+        await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow()
     })
 })

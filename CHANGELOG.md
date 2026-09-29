@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: verifiable editorial reasons (2026-09-29)
+
+- Read #317's public evidence CIDs for manager feature proposals and discovery holds. Market Operations only displays the reason text after fetching bounded bytes and verifying their SHA-256 against the on-chain receipt; malformed pointers fail closed.
+
 ### Memba OS: curation DAO roster and quorum visibility (2026-09-29)
 
 - Show the separate curation DAO's verified seven-seat voting roster, voting weight, critical quorum, timelocks and proposal tallies in Market Operations. Refuse malformed or changing roster data while paging decisions. Signing for the unpublished v13 realm remains on hold.

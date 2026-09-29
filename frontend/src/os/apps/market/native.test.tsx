@@ -557,7 +557,7 @@ describe("native Market window", () => {
         listCurationManagers.mockResolvedValue([{ account: "g1manager", lead: true, until: "2000000000", active: true }])
         listCurationApplications.mockResolvedValue([{ collection: "C1", founder: "g1founder", statementHash: "a".repeat(64), statementCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", revision: "1", status: "recommended", reviewer: "g1manager", reasonHash: "b".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", updatedAt: "1000000000" }])
         getCollectionCuration.mockResolvedValue({ collection: "C1", featured: true, hidden: false,
-            feature: { proposer: "g1manager", approver: "g1other", reasonHash: "c".repeat(64), until: "2000000000", approvedAt: "1000000000" },
+            feature: { proposer: "g1manager", approver: "g1other", reasonHash: "c".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", until: "2000000000", approvedAt: "1000000000" },
             hold: null, verification: { verified: true, reasonHash: "d".repeat(64), updatedAt: "1000000000" } })
         render(<MarketWindow {...base} section="operations" open={vi.fn()} />)
         expect(await screen.findByText("1 of 5 active seats")).toBeInTheDocument()
@@ -565,6 +565,7 @@ describe("native Market window", () => {
         fireEvent.click(screen.getByRole("button", { name: "View record" }))
         await waitFor(() => expect(screen.getByText(/DAO verification:/)).toBeInTheDocument())
         expect(screen.getByText(/Verified/)).toBeInTheDocument()
+        expect(screen.getByText("Feature reason")).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: /Approve|Reject|Verify/ })).toBeNull()
         expect(readCurationDaoSnapshot).not.toHaveBeenCalled()
     })

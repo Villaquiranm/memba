@@ -10,8 +10,8 @@ const before = {
     admin: addr(1), pendingAdmin: "", governed: true, activeManagers: "0",
     seat: { account: "", lead: false, until: "0" },
     verification: { exists: false, verified: false, reasonHash: "", updatedAt: "0" },
-    feature: { exists: false, proposer: "", approver: "", reasonHash: "", until: "0", approvedAt: "0" },
-    hold: { exists: false, actor: "", confirmer: "", reasonHash: "", until: "0" }, conflict: false,
+    feature: { exists: false, proposer: "", approver: "", reasonHash: "", reasonCID: "", until: "0", approvedAt: "0" },
+    hold: { exists: false, actor: "", confirmer: "", reasonHash: "", reasonCID: "", until: "0" }, conflict: false,
 }
 const config = {
     schema: "memba-weighted-host/v13", kind: "config", realmPath: LAUNCHPAD_CURATION_DAO_PATH,
@@ -80,5 +80,12 @@ describe("v13 NFT curation DAO reads", () => {
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Invalid curation DAO roster")
         query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...roster, schema: "memba-weighted-host/v12" })).mockResolvedValueOnce(qeval(page))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
+    })
+
+    it("rejects a feature prestate whose public evidence pointer is missing", async () => {
+        vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster))
+            .mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action,
+                before: { ...before, feature: { ...before.feature, exists: true, reasonHash: "a".repeat(64) } } } }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Inconsistent feature evidence")
     })
 })

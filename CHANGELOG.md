@@ -95,6 +95,30 @@ Full changelogs are split by version range for easier navigation:
 
 - Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
+### Memba OS: founder applications and manager reviews (2026-09-29)
+
+- Let collection creators pin public application evidence and review an on-chain submission in the native Market Operations desk. Eligible community managers can pin a public reason and review a request-changes, recommendation or decline decision. Wallet reviews recheck the evidence bytes, collection, application, role and network before signing and verify the result on chain.
+
+### Memba OS: public curation evidence upload (2026-09-29)
+
+- Add a disabled, exact-chain authenticated text pinning endpoint for public application and review evidence. It enforces a 16 KiB UTF-8 limit, per-IP and per-wallet quotas, a fixed upstream and a validated CID, then returns the SHA-256 of the exact uploaded bytes.
+
+### Memba OS: verifiable public curation evidence (2026-09-29)
+
+- Show application and review evidence from their on-chain IPFS content addresses only after checking the fetched bytes against each public SHA-256 digest. Malformed, oversized, unavailable or altered content does not render in Market Operations.
+
+### Memba OS: native founder discussion in Market Operations (2026-09-28)
+
+- Let eligible founders and community managers open a private text thread from an application record. The native desk binds reads and sends to the signed wallet and network, checks current chain access, clears private content before a refresh, and explains denied or unavailable states.
+
+### Memba OS: private founder and manager text threads (2026-09-28)
+
+- Add a disabled, authenticated text inbox for collection founders and active unconflicted managers. Each private request rechecks on-chain access; message content is encrypted before SQLite storage, writes have a per-wallet cap and idempotency key, and read/send metadata is audited. Activation still requires key, backup, retention and target-chain review.
+
+### Memba OS: chain-backed founder inbox permissions (2026-09-28)
+
+- Add an opt-in, authenticated curation access probe for the unpublished founder inbox. It requires a wallet token signed for the exact chain, verifies a single configured RPC's network, and checks the current founder or unconflicted manager snapshot from the curation realm before any private workflow can be enabled.
+
 ### Memba OS: confirmed Launchpad NFT collectibles (2026-09-28)
 
 - Show a connected wallet's confirmed Launchpad NFTs in a native, paged collectibles view. The backend keeps the query on one chain and one block snapshot, rejects pages after a chain reorganization, excludes transferred or retired tokens, and refuses to serve while the indexer is stalled or far behind; each card opens token management for a fresh chain check before any action.

@@ -555,7 +555,7 @@ describe("native Market window", () => {
         availability.curation = true
         getCurationState.mockResolvedValue({ admin: "g1dao", pendingAdmin: "", governed: true, activeManagers: 1 })
         listCurationManagers.mockResolvedValue([{ account: "g1manager", lead: true, until: "2000000000", active: true }])
-        listCurationApplications.mockResolvedValue([{ collection: "C1", founder: "g1founder", statementHash: "a".repeat(64), revision: "1", status: "recommended", reviewer: "g1manager", reasonHash: "b".repeat(64), updatedAt: "1000000000" }])
+        listCurationApplications.mockResolvedValue([{ collection: "C1", founder: "g1founder", statementHash: "a".repeat(64), statementCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", revision: "1", status: "recommended", reviewer: "g1manager", reasonHash: "b".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", updatedAt: "1000000000" }])
         getCollectionCuration.mockResolvedValue({ collection: "C1", featured: true, hidden: false,
             feature: { proposer: "g1manager", approver: "g1other", reasonHash: "c".repeat(64), until: "2000000000", approvedAt: "1000000000" },
             hold: null, verification: { verified: true, reasonHash: "d".repeat(64), updatedAt: "1000000000" } })

@@ -8,13 +8,15 @@ const MAX_INT64 = 9223372036854775807n
 const collection = z.string().regex(/^C[1-9][0-9]*$/)
 const uint = z.string().regex(/^(0|[1-9][0-9]*)$/).refine((s) => BigInt(s) <= MAX_INT64)
 const positive = uint.refine((s) => s !== "0")
+const evidenceCID = z.string().regex(/^(bafy[a-z2-7]{55,86}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/)
 const state = z.strictObject({ admin: address, pendingAdmin: optionalAddress, governed: z.boolean(), activeManagers: z.number().int().min(0).max(5) })
 const seat = z.strictObject({ account: address, lead: z.boolean(), until: positive, active: z.boolean() })
 const application = z.strictObject({
-    collection, founder: address, statementHash: sha256Hex, revision: positive,
+    collection, founder: address, statementHash: sha256Hex, statementCID: evidenceCID, revision: positive,
     status: z.enum(["submitted", "changes_requested", "recommended", "declined"]),
-    reviewer: optionalAddress, reasonHash: z.union([z.literal(""), sha256Hex]), updatedAt: positive,
-}).refine((a) => a.status === "submitted" ? a.reviewer === "" && a.reasonHash === "" : a.reviewer !== "" && a.reasonHash !== "", "Inconsistent application review")
+    reviewer: optionalAddress, reasonHash: z.union([z.literal(""), sha256Hex]), reasonCID: z.union([z.literal(""), evidenceCID]), updatedAt: positive,
+}).refine((a) => a.status === "submitted" ? a.reviewer === "" && a.reasonHash === "" && a.reasonCID === "" :
+    a.reviewer !== "" && a.reasonHash !== "" && a.reasonCID !== "", "Inconsistent application review")
 const feature = z.strictObject({ proposer: address, approver: optionalAddress, reasonHash: sha256Hex, until: positive, approvedAt: uint })
     .refine((f) => f.approver === "" ? f.approvedAt === "0" : f.approvedAt !== "0" && BigInt(f.approvedAt) < BigInt(f.until), "Inconsistent feature approval")
 const hold = z.strictObject({ actor: address, confirmer: optionalAddress, reasonHash: sha256Hex, until: positive })
@@ -48,6 +50,13 @@ export async function listCurationApplications(rpcUrl: string, page = 0, size = 
     const rows = z.array(application).max(size).parse(await read(rpcUrl, `ApplicationsJSON(${page}, ${size})`))
     if (new Set(rows.map((a) => a.collection)).size !== rows.length) throw new Error("Duplicate application")
     return rows
+}
+
+export async function getCurationApplication(rpcUrl: string, id: string): Promise<CurationApplication | null> {
+    if (!collection.safeParse(id).success) throw new Error("Invalid collection ID")
+    const result = application.nullable().parse(await read(rpcUrl, `ApplicationJSON(${JSON.stringify(id)})`))
+    if (result && result.collection !== id) throw new Error("Curation application collection mismatch")
+    return result
 }
 
 export async function getCollectionCuration(rpcUrl: string, id: string): Promise<CurationReceipt> {

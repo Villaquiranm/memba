@@ -20,6 +20,10 @@ const config = {
     mutableRoles: ["admin", "finance"], capabilities: { roleProposals: true, memberReplacement: true, migration: false, treasuryExecution: false, applicationActions: true },
     maxProposalPage: 50, curationPolicy: { target: LAUNCHPAD_CURATION_PATH, successor: addr(2), actionCategory: "critical", maxManagers: 5, maxTermSeconds: 7776000, returnStagesOnly: true, invalidatesOtherProposals: true },
 }
+const roster = { schema: config.schema, kind: "members", members: Array.from({ length: 7 }, (_, n) => ({
+    personId: `member-${n}`, address: addr(n + 10), founder: n === 0, weight: n === 0 ? 2 : 1,
+    admin: n === 0, finance: n === 1,
+})) }
 const proposal = {
     id: "3", proposer: addr(3), action: { type: "curation", target: LAUNCHPAD_CURATION_PATH, operation: "appoint-manager", recipient: "", manager: addr(4), collection: "", reasonHash: "", lead: false, verified: false, until: "1702851200", before },
     category: "critical", status: "VOTING", qualified: false, ready: false, votingClosed: false, talliesAvailable: true,
@@ -31,40 +35,50 @@ describe("v13 NFT curation DAO reads", () => {
     beforeEach(() => vi.restoreAllMocks())
 
     it("reads only the isolated DAO path and parses typed curation proposals", async () => {
-        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(page))
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval(page))
         const result = await readCurationDaoSnapshot("rpc")
         expect(result.proposals).toHaveLength(1)
         expect(result.proposals[0].action.operation).toBe("appoint-manager")
         expect(result.nextBefore).toBe("3")
+        expect(result.members).toHaveLength(7)
         expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_DAO_PATH, "GetConfigJSON()", true)
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_DAO_PATH, "GetMembersJSON()", true)
         expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_DAO_PATH, "GetProposalsJSON(0, 20)", true)
     })
 
     it("rejects a v12 response, wrong target or malformed curation action", async () => {
         const query = vi.spyOn(shared, "queryEval")
-        query.mockResolvedValueOnce(qeval({ ...config, schema: "memba-weighted-host/v12" })).mockResolvedValueOnce(qeval(page))
+        query.mockResolvedValueOnce(qeval({ ...config, schema: "memba-weighted-host/v12" })).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval(page))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
-        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action, target: "gno.land/r/other/curation" } }] }))
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action, target: "gno.land/r/other/curation" } }] }))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
-        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action, recipient: addr(5) } }] }))
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action, recipient: addr(5) } }] }))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
     })
 
     it("refuses duplicate curation IDs and untrusted pagination", async () => {
-        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [proposal, proposal] }))
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval({ ...page, proposals: [proposal, proposal] }))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Duplicate curation proposal")
         await expect(readCurationDaoSnapshot("rpc", "1); Vote(3")).rejects.toThrow("Invalid governance cursor")
-        expect(query).toHaveBeenCalledTimes(2)
+        expect(query).toHaveBeenCalledTimes(3)
     })
 
     it("omits role proposals but never silently drops a malformed curation proposal", async () => {
         const query = vi.spyOn(shared, "queryEval")
         const role = { ...proposal, id: "2", action: { type: "set-role", target: addr(5), role: "admin", grant: true } }
-        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [role, proposal] }))
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval({ ...page, proposals: [role, proposal] }))
         expect((await readCurationDaoSnapshot("rpc")).proposals.map(p => p.id)).toEqual(["3"])
-        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, status: "READY", ready: false }] }))
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, status: "READY", ready: false }] }))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Inconsistent curation proposal")
-        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { type: "arbitrary-call" } }] }))
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { type: "arbitrary-call" } }] }))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Unknown DAO action type")
+    })
+
+    it("rejects a malformed or duplicate weighted roster", async () => {
+        const query = vi.spyOn(shared, "queryEval")
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...roster, members: roster.members.map((m, n) => n === 1 ? { ...m, address: roster.members[0].address } : m) })).mockResolvedValueOnce(qeval(page))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Invalid curation DAO roster")
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...roster, schema: "memba-weighted-host/v12" })).mockResolvedValueOnce(qeval(page))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
     })
 })

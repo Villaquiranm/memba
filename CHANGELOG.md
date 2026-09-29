@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: curation DAO roster and quorum visibility (2026-09-29)
+
+- Show the separate curation DAO's verified seven-seat voting roster, voting weight, critical quorum, timelocks and proposal tallies in Market Operations. Refuse malformed or changing roster data while paging decisions. Signing for the unpublished v13 realm remains on hold.
+
 ### Memba OS: bounded private curation retention (2026-09-29)
 
 - Require an explicit 1–365 day policy before the private founder inbox can start. Delete expired encrypted messages and read/send metadata at boot, hourly and on authorized requests; filter expired content at read time. Document that off-volume backup retention and secure deletion need a separate operator policy.

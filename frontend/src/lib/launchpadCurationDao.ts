@@ -1,7 +1,7 @@
 /** Read-only v13 curation governance. This never enables a wallet action. */
 import { z } from "zod"
 import { parseQevalJSON, queryEval } from "./dao/shared"
-import { address, id, optionalAddress, sha256Hex, time, uint64 } from "./dao/weightedPrimitives"
+import { address, id, optionalAddress, personID, sha256Hex, time, uint64 } from "./dao/weightedPrimitives"
 import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "./nftConfig"
 
 const schema = "memba-weighted-host/v13" as const
@@ -60,10 +60,16 @@ const config = z.strictObject({
     maxProposalPage: z.literal(50),
     curationPolicy: z.strictObject({ target: z.literal(LAUNCHPAD_CURATION_PATH), successor: address, actionCategory: z.literal("critical"), maxManagers: z.literal(5), maxTermSeconds: z.literal(7776000), returnStagesOnly: z.literal(true), invalidatesOtherProposals: z.literal(true) }),
 })
+const member = z.strictObject({ personId: personID, address, founder: z.boolean(), weight: z.union([z.literal(1), z.literal(2)]), admin: z.boolean(), finance: z.boolean() })
+const members = z.strictObject({ schema: z.literal(schema), kind: z.literal("members"), members: z.array(member).length(7) })
+    .refine(({ members: rows }) => new Set(rows.map(row => row.address)).size === 7 &&
+        new Set(rows.map(row => row.personId)).size === 7 && rows.filter(row => row.founder).length === 1 &&
+        rows.some(row => row.admin) && rows.every(row => row.weight === (row.founder ? 2 : 1)), "Invalid curation DAO roster")
 const page = z.strictObject({ schema: z.literal(schema), kind: z.literal("proposals"), total: uint64, proposals: z.array(z.unknown()).max(20), nextBefore: id.nullable() })
 
 export type CurationDaoProposal = z.infer<typeof proposal>
-export type CurationDaoSnapshot = { successor: string; total: string; proposals: CurationDaoProposal[]; nextBefore: string | null }
+export type CurationDaoMember = z.infer<typeof member>
+export type CurationDaoSnapshot = { successor: string; members: CurationDaoMember[]; total: string; proposals: CurationDaoProposal[]; nextBefore: string | null }
 
 async function read(rpcUrl: string, expression: string): Promise<unknown> {
     const raw = await queryEval(rpcUrl, LAUNCHPAD_CURATION_DAO_PATH, expression, true)
@@ -74,8 +80,9 @@ async function read(rpcUrl: string, expression: string): Promise<unknown> {
 /** Unknown role/recovery proposals are omitted from this curation-only view. Malformed curation proposals fail the page. */
 export async function readCurationDaoSnapshot(rpcUrl: string, before = "0"): Promise<CurationDaoSnapshot> {
     if (!/^(0|[1-9][0-9]{0,19})$/.test(before) || BigInt(before) > 18446744073709551615n) throw new Error("Invalid governance cursor")
-    const [rawConfig, rawPage] = await Promise.all([read(rpcUrl, "GetConfigJSON()"), read(rpcUrl, `GetProposalsJSON(${before}, 20)`)])
+    const [rawConfig, rawMembers, rawPage] = await Promise.all([read(rpcUrl, "GetConfigJSON()"), read(rpcUrl, "GetMembersJSON()"), read(rpcUrl, `GetProposalsJSON(${before}, 20)`)])
     const policy = config.parse(rawConfig)
+    const roster = members.parse(rawMembers)
     const result = page.parse(rawPage)
     const proposals: CurationDaoProposal[] = []
     for (const item of result.proposals) {
@@ -84,5 +91,5 @@ export async function readCurationDaoSnapshot(rpcUrl: string, before = "0"): Pro
         else if (item.action.type !== "set-role" && item.action.type !== "recover-member") throw new Error("Unknown DAO action type")
     }
     if (new Set(proposals.map(item => item.id)).size !== proposals.length) throw new Error("Duplicate curation proposal")
-    return { successor: policy.curationPolicy.successor, total: result.total, proposals, nextBefore: result.nextBefore }
+    return { successor: policy.curationPolicy.successor, members: roster.members, total: result.total, proposals, nextBefore: result.nextBefore }
 }

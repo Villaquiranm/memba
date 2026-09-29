@@ -96,7 +96,7 @@ func HandleCurationEvidenceUpload(rpcURL, chainID string, allow func(string) boo
 				writeHoldingsError(w, http.StatusForbidden, "collection creator required")
 				return
 			}
-		} else if !access.IsFounder && !access.CanReview {
+		} else if !access.IsFounder && !access.IsManager {
 			writeHoldingsError(w, http.StatusForbidden, "curation role required")
 			return
 		}

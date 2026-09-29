@@ -182,3 +182,25 @@ func TestCurationEvidenceUploadDeniesUnassignedWallet(t *testing.T) {
 		t.Fatalf("unassigned wallet status=%d queries=%d", w.Code, queries)
 	}
 }
+
+func TestCurationEvidenceUploadAllowsManagerAfterReview(t *testing.T) {
+	t.Setenv("LIGHTHOUSE_API_KEY", "test-only-key")
+	for _, status := range []string{"recommended", "declined"} {
+		t.Run(status, func(t *testing.T) {
+			view := `{"collection":"C1","account":"` + accessTestWallet + `","founder":"` + accessTestFounder + `","revision":"1","status":"` + status + `","isFounder":false,"isManager":true,"canRead":true,"canReview":false}`
+			queries := 0
+			rpc := accessRPCServer(t, "gnoland-1", view, &queries)
+			defer rpc.Close()
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `{"Hash":"`+evidenceTestCID+`"}`)
+			}))
+			defer upstream.Close()
+			h := HandleCurationEvidenceUpload(rpc.URL, "gnoland-1", func(string) bool { return true }, ipfsUploadOptions{uploadURL: upstream.URL})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, evidenceRequest("Public editorial reason", true))
+			if w.Code != http.StatusCreated || queries != 1 {
+				t.Fatalf("status=%d queries=%d body=%s", w.Code, queries, w.Body.String())
+			}
+		})
+	}
+}

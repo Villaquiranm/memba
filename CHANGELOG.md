@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: editorial reason upload access (2026-09-29)
+
+- Let an active, unconflicted curation manager pin public editorial evidence after an application is recommended or declined. The uploader still checks the current chain role and signed wallet on every request; review decisions continue to require the narrower live `canReview` permission.
+
 ### Memba OS: verifiable editorial reasons (2026-09-29)
 
 - Read #317's public evidence CIDs for manager feature proposals and discovery holds. Market Operations only displays the reason text after fetching bounded bytes and verifying their SHA-256 against the on-chain receipt; malformed pointers fail closed.

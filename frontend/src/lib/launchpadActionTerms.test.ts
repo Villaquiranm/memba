@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 import { queryEval } from "./dao/shared"
 import { parseActionTerms, readActionTerms } from "./launchpadActionTerms"
+import { packageAddress } from "./dao/weightedApplications"
 import { WUGNOT_KEY } from "./launchpadTokenTrade"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_DROPS_PATH, LAUNCHPAD_FEES_PATH,
+    LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, LAUNCHPAD_POOL_PATH, LAUNCHPAD_SALES_PATH,
+    LAUNCHPAD_TOKENS_PATH, PUBLISHED_MEMBA_DAO_PATH } from "./nftConfig"
 
 vi.mock("./dao/shared", async (original) => ({ ...(await original<typeof import("./dao/shared")>()), queryEval: vi.fn() }))
 
@@ -22,6 +26,11 @@ describe("Launchpad creator action terms", () => {
 
     it("rejects changed identity, impossible gates and unsafe numeric values", () => {
         expect(() => parseActionTerms({ ...record, treasury: "bad" }, "collection", "ugnot")).toThrow("inconsistent")
+        for (const path of [LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_DROPS_PATH,
+            LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, LAUNCHPAD_POOL_PATH,
+            LAUNCHPAD_SALES_PATH, LAUNCHPAD_TOKENS_PATH, LAUNCHPAD_CURATION_DAO_PATH, PUBLISHED_MEMBA_DAO_PATH]) {
+            expect(() => parseActionTerms({ ...record, treasury: packageAddress(path) }, "collection", "ugnot")).toThrow("inconsistent")
+        }
         expect(() => parseActionTerms({ ...record, actionReady: false }, "collection", "ugnot")).toThrow("inconsistent")
         expect(() => parseActionTerms({ ...record, currency: WUGNOT_KEY }, "collection", "ugnot")).toThrow("identity")
         expect(parseActionTerms({ ...record, collectionFee: "9007199254740993" }, "collection", "ugnot").collectionFee).toBe(9007199254740993n)

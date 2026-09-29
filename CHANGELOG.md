@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: claimable Launchpad proceeds recipients (2026-09-29)
+
+- Reject known Launchpad and Memba DAO realm addresses without a proceeds-claim method in creator royalty terms and ready DAO fee policies before wallet review, matching the contract's guard against stranded funds. DAO proceeds remain directed to a separately verified signer-controlled treasury.
+
 ### Memba OS: verifiable DAO curation decisions (2026-09-29)
 
 - Read the curation DAO's public reason CIDs for verification and clearance proposals. Market Operations displays decision text only after fetching bounded bytes and matching the on-chain SHA-256; collection verification receipts use the same check. The separate DAO realm remains unpublished and signing stays gated.

@@ -38,8 +38,14 @@ export const LAUNCHPAD_FEES_PATH = "gno.land/r/samcrew/launchpad/fees/v1"
 /** Governed editorial receipts and manager seats. Unpublished until DAO handoff. */
 export const LAUNCHPAD_CURATION_PATH = "gno.land/r/samcrew/launchpad/curation/v1"
 
+/** Known Launchpad operational realms without a proceeds-claim entry point. */
+export const LAUNCHPAD_SALES_PATH = "gno.land/r/samcrew/launchpad/sales/v1"
+export const LAUNCHPAD_POOL_PATH = "gno.land/r/samcrew/launchpad/pool/v1"
+export const LAUNCHPAD_TOKENS_PATH = "gno.land/r/samcrew/launchpad/tokens/v1"
+
 /** Separate weighted curation candidate. The published ten-policy DAO remains at memba_dao. */
 export const LAUNCHPAD_CURATION_DAO_PATH = "gno.land/r/samcrew/memba_dao/v2"
+export const PUBLISHED_MEMBA_DAO_PATH = "gno.land/r/samcrew/memba_dao"
 
 /**
  * Bech32 address of the marketplace realm.

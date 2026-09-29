@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: reviewed manager editorial actions (2026-09-29)
+
+- Give appointed managers native Market Operations wallet reviews for a public-reason feature proposal, second-manager feature approval, 24-hour discovery hold and second-manager hold confirmation. The signer rechecks the current chain role, original manager, collection, application, receipt and pinned bytes before signing, then verifies the resulting public receipt and locks uncertain outcomes.
+
 ### Memba OS: editorial reason upload access (2026-09-29)
 
 - Let an active, unconflicted curation manager pin public editorial evidence after an application is recommended or declined. The uploader still checks the current chain role and signed wallet on every request; review decisions continue to require the narrower live `canReview` permission.

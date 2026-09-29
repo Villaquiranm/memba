@@ -23,11 +23,18 @@ const hold = z.strictObject({ actor: address, confirmer: optionalAddress, reason
 const verification = z.strictObject({ verified: z.boolean(), reasonHash: sha256Hex, updatedAt: positive })
 const receipt = z.strictObject({ collection, featured: z.boolean(), hidden: z.boolean(), feature: feature.nullable(), hold: hold.nullable(), verification: verification.nullable() })
     .refine((r) => (!r.featured || (r.feature !== null && r.feature.approver !== "" && !r.hidden)) && (!r.hidden || r.hold !== null), "Inconsistent curation receipt")
+const reviewAccess = z.strictObject({ collection, account: address, founder: address, revision: positive,
+    status: z.enum(["submitted", "changes_requested", "recommended", "declined"]),
+    isFounder: z.boolean(), isManager: z.boolean(), canRead: z.boolean(), canReview: z.boolean(),
+}).refine((v) => v.isFounder === (v.account === v.founder) && !(v.isFounder && v.isManager) &&
+    v.canRead === (v.isFounder || v.isManager) &&
+    v.canReview === (v.isManager && (v.status === "submitted" || v.status === "changes_requested")), "Inconsistent curation access")
 
 export type CurationState = z.infer<typeof state>
 export type CurationSeat = z.infer<typeof seat>
 export type CurationApplication = z.infer<typeof application>
 export type CurationReceipt = z.infer<typeof receipt>
+export type CurationReviewAccess = z.infer<typeof reviewAccess>
 
 async function read(rpcUrl: string, expression: string): Promise<unknown> {
     const raw = await queryEval(rpcUrl, LAUNCHPAD_CURATION_PATH, expression, true)
@@ -63,5 +70,13 @@ export async function getCollectionCuration(rpcUrl: string, id: string): Promise
     if (!collection.safeParse(id).success) throw new Error("Invalid collection ID")
     const result = receipt.parse(await read(rpcUrl, `CollectionCurationJSON(${JSON.stringify(id)})`))
     if (result.collection !== id) throw new Error("Curation receipt collection mismatch")
+    return result
+}
+
+/** Public eligibility snapshot for checking the other manager in a two-person decision. */
+export async function getCurationReviewAccess(rpcUrl: string, id: string, account: string): Promise<CurationReviewAccess | null> {
+    if (!collection.safeParse(id).success || !address.safeParse(account).success) throw new Error("Invalid curation access target")
+    const result = reviewAccess.nullable().parse(await read(rpcUrl, `ReviewAccessJSON(${JSON.stringify(id)}, ${JSON.stringify(account)})`))
+    if (result && (result.collection !== id || result.account !== account)) throw new Error("Curation access target mismatch")
     return result
 }

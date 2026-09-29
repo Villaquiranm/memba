@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react"
 import type { Token } from "../../../gen/memba/v1/memba_pb"
 import { clearGovernanceReceipt, readGovernanceReceipt } from "../../../lib/dao/governanceRecovery"
 import { feeForGasWanted, networkGasPrice } from "../../../lib/grc20"
-import { getCurationApplication, getCurationState, type CurationApplication, type CurationState } from "../../../lib/launchpadCuration"
+import { getCurationApplication, getCurationState, type CurationApplication, type CurationReceipt, type CurationState } from "../../../lib/launchpadCuration"
 import { readCurationAccess } from "../../../lib/launchpadCurationInbox"
 import { uploadCurationEvidence, type VerifiedCurationEvidence } from "../../../lib/launchpadCurationEvidence"
 import { CURATION_ACTION_GAS_WANTED, curationActionScope, curationApplyRequest, curationReviewRequest, type CurationDecision } from "../../../lib/launchpadCurationActions"
+import { editorialRequest, editorialScope, type EditorialAction } from "../../../lib/launchpadCurationEditorial"
 import { getLaunchpadNftCollection, type LaunchpadNftCollection } from "../../../lib/launchpadNft"
 import { txExplorerUrl } from "../../../lib/txExplorerUrl"
 import { useSigner } from "../../sign/signerContext"
@@ -168,5 +169,84 @@ export function ManagerReviewDesk({ application, rpcUrl, session, onChanged, toa
             }))).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare manager review."))
                 .finally(() => setPreparing(false))
         }}>{preparing ? "Preparing wallet review…" : "Review decision in wallet"}</button>
+    </div>
+}
+
+export function ManagerEditorialDesk({ application, receipt, rpcUrl, session, onChanged, toast }: {
+    application: CurationApplication; receipt: CurationReceipt; rpcUrl: string; session: OsSession;
+    onChanged: () => void; toast: (message: string) => void
+}) {
+    const signer = useSigner()
+    const [eligible, setEligible] = useState(false)
+    const [checked, setChecked] = useState(false)
+    const [collection, setCollection] = useState<LaunchpadNftCollection | null>(null)
+    const [state, setState] = useState<CurationState | null>(null)
+    const [action, setAction] = useState<EditorialAction>("feature-propose")
+    const [days, setDays] = useState(7)
+    const [evidence, setEvidence] = useState<{ action: EditorialAction; value: VerifiedCurationEvidence } | null>(null)
+    const [preparing, setPreparing] = useState(false)
+    const [revision, setRevision] = useState(0)
+    const [now, setNow] = useState(0)
+    const token = session.layout.auth.token
+
+    useEffect(() => {
+        const refresh = () => setNow(Math.floor(Date.now() / 1000))
+        refresh()
+        const timer = window.setInterval(refresh, 30_000)
+        return () => window.clearInterval(timer)
+    }, [])
+
+    useEffect(() => {
+        if (session.status !== "member" || !token) return
+        let cancelled = false
+        void Promise.all([readCurationAccess(application.collection, session.address, session.network.chainId, token),
+            getLaunchpadNftCollection(rpcUrl, application.collection), getCurationState(rpcUrl)]).then(([access, nft, team]) => {
+            if (!cancelled) { setEligible(access.isManager && access.revision === application.revision && team.governed);
+                setCollection(nft); setState(team); setChecked(true) }
+        }).catch(() => { if (!cancelled) { setEligible(false); setCollection(null); setState(null); setChecked(true) } })
+        return () => { cancelled = true }
+    }, [application.collection, application.revision, rpcUrl, session.address, session.network.chainId, session.status, token, revision, signer.version])
+
+    if (session.status !== "member" || !token || !checked || !eligible || !collection || !state || !now ||
+        collection.creator !== application.founder || receipt.collection !== application.collection) return null
+    const options: { value: EditorialAction; label: string }[] = []
+    if (!receipt.feature || Number(receipt.feature.until) <= now) options.push({ value: "feature-propose", label: "Propose feature slot" })
+    if (receipt.feature && receipt.feature.approver === "" && receipt.feature.proposer !== session.address && Number(receipt.feature.until) > now)
+        options.push({ value: "feature-approve", label: "Approve feature slot" })
+    if (!receipt.hold) options.push({ value: "hide-start", label: "Start 24-hour discovery hold" })
+    if (receipt.hold && receipt.hold.confirmer === "" && receipt.hold.actor !== session.address && Number(receipt.hold.until) > now)
+        options.push({ value: "hide-confirm", label: "Confirm discovery hold" })
+    const selected = options.some((option) => option.value === action) ? action : options[0]?.value
+    if (!selected) return null
+    const needsReason = selected === "feature-propose" || selected === "hide-start"
+    const scope = editorialScope(session.network.chainId, application.collection, session.address, selected)
+    const prior = readGovernanceReceipt(scope)
+    return <div className="os-curation-author os-curation-review">
+        <div><h3>Editorial controls</h3><p className="os-sub">Feature slots and discovery holds need a public reason. A second unconflicted manager confirms each decision. Holds affect discovery only; trading and claims remain available.</p></div>
+        <label htmlFor={`curation-editorial-${application.collection}`}>Action</label>
+        <select id={`curation-editorial-${application.collection}`} value={selected} onChange={(event) => { setAction(event.target.value as EditorialAction); setEvidence(null) }}>
+            {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        {selected === "feature-propose" && <><label htmlFor={`curation-feature-days-${application.collection}`}>Feature duration</label>
+            <select id={`curation-feature-days-${application.collection}`} value={days} onChange={(event) => setDays(Number(event.target.value))}>
+                <option value={1}>1 day</option><option value={3}>3 days</option><option value={7}>7 days</option><option value={13}>13 days</option>
+            </select></>}
+        {needsReason && <EvidenceComposer key={`${application.collection}:${selected}`} collection={application.collection}
+            account={session.address} chainId={session.network.chainId} token={token} label="Public editorial reason"
+            onPrepared={(value) => setEvidence(value ? { action: selected, value } : null)} />}
+        {!needsReason && <p className="os-note">Review the existing public reason and current receipt above before confirming this action.</p>}
+        <PriorAction scope={scope} chainId={session.network.chainId} onClear={() => { setRevision((value) => value + 1); onChanged() }} />
+        <button type="button" className="os-btn" disabled={(needsReason && evidence?.action !== selected) || preparing || !!prior} onClick={() => {
+            if (needsReason && evidence?.action !== selected) return
+            const until = selected === "feature-propose" ? String(Math.floor(Date.now() / 1000) + days * 86400) : undefined
+            setPreparing(true)
+            void networkGasPrice(session.network.chainId, [rpcUrl]).then((gasPrice) => signer.sign(editorialRequest({
+                action: selected, application, collection, receipt, state, caller: session.address, token,
+                evidence: needsReason ? evidence?.value : undefined, until, rpcUrl, chainId: session.network.chainId,
+                estimatedGasFeeUgnot: feeForGasWanted(CURATION_ACTION_GAS_WANTED, gasPrice),
+                onSettled: () => { setRevision((value) => value + 1); onChanged() },
+            }))).catch((cause) => toast(cause instanceof Error ? cause.message : "Could not prepare editorial action."))
+                .finally(() => setPreparing(false))
+        }}>{preparing ? "Preparing wallet review…" : "Review editorial action in wallet"}</button>
     </div>
 }

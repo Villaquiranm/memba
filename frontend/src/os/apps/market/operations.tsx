@@ -6,7 +6,7 @@ import { Empty, ErrorState, Loading, Pill } from "../../kit"
 import type { OsSession } from "../../shell/useOsSession"
 import CurationDiscussion from "./discussion"
 import PublicCurationEvidence from "./evidence"
-import { FounderApplicationDesk, ManagerReviewDesk } from "./curationActions"
+import { FounderApplicationDesk, ManagerEditorialDesk, ManagerReviewDesk } from "./curationActions"
 
 const PAGE_SIZE = 20
 
@@ -80,6 +80,8 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session, toast 
                 </div>}
                 {selected === item.collection && session.status === "member" && session.layout.auth.token &&
                     <div className="os-curation-private-entry"><ManagerReviewDesk key={`${item.collection}:${item.revision}:${session.address}`} application={item} rpcUrl={rpcUrl} session={session} toast={toast} onChanged={refreshRecords} /></div>}
+                {selected === item.collection && receipt?.id === item.collection && receipt.value && session.status === "member" && session.layout.auth.token &&
+                    <div className="os-curation-private-entry"><ManagerEditorialDesk key={`${item.collection}:${item.revision}:${session.address}`} application={item} receipt={receipt.value} rpcUrl={rpcUrl} session={session} toast={toast} onChanged={refreshRecords} /></div>}
             </article>)}</div>}
             {loading && applications.length > 0 && <Loading label="Loading more applications…" />}
             {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more applications</button>}

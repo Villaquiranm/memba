@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
 import { bech32Encode } from "./dao/realmAddress"
 import { LAUNCHPAD_CURATION_PATH } from "./nftConfig"
-import { getCollectionCuration, getCurationApplication, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
+import { getCollectionCuration, getCurationApplication, getCurationReviewAccess, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
 
 const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
 const digest = (c: string) => c.repeat(64)
@@ -68,5 +68,17 @@ describe("Launchpad curation reads", () => {
         await expect(getCollectionCuration("rpc", "bad")).rejects.toThrow("Invalid collection ID")
         query.mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature: { ...feature, reasonCID: "invalid" }, hold: null, verification: null }))
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow()
+    })
+
+    it("checks the other manager's live public eligibility for a two-person action", async () => {
+        const access = { collection: "C1", account: addr(2), founder: addr(1), revision: "1", status: "recommended",
+            isFounder: false, isManager: true, canRead: true, canReview: false }
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(access))
+            .mockResolvedValueOnce(qeval({ ...access, isManager: false }))
+            .mockResolvedValueOnce(qeval({ ...access, account: addr(3) }))
+        expect((await getCurationReviewAccess("rpc", "C1", addr(2)))?.isManager).toBe(true)
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, `ReviewAccessJSON("C1", "${addr(2)}")`, true)
+        await expect(getCurationReviewAccess("rpc", "C1", addr(2))).rejects.toThrow("Inconsistent")
+        await expect(getCurationReviewAccess("rpc", "C1", addr(2))).rejects.toThrow("mismatch")
     })
 })

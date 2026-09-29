@@ -56,7 +56,7 @@ describe("direct manager editorial wallet actions", () => {
         expect(req.prepare(undefined).msgs).toEqual([buildEditorialMsg("feature-propose", "C1", manager, evidence, until)])
         expect(req.prepare(undefined).msgs[0].value).toMatchObject({ func: "ProposeFeature", args: ["C1", evidence.sha256, cid, until], send: "" })
         await expect(req.recheck?.(undefined)).resolves.toBeUndefined()
-        getReceipt.mockResolvedValueOnce({ ...baseReceipt, verification: { verified: true, reasonHash: "d".repeat(64), updatedAt: "100" } })
+        getReceipt.mockResolvedValueOnce({ ...baseReceipt, verification: { verified: true, reasonHash: "d".repeat(64), reasonCID: cid, updatedAt: "100" } })
         await expect(req.recheck?.(undefined)).rejects.toThrow("changed")
         getReceipt.mockResolvedValueOnce({ ...baseReceipt, feature: { ...feature, proposer: manager, until } })
         await expect(req.verify?.(undefined, "tx", null)).resolves.toBe(true)

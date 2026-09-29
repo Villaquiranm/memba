@@ -558,13 +558,14 @@ describe("native Market window", () => {
         listCurationApplications.mockResolvedValue([{ collection: "C1", founder: "g1founder", statementHash: "a".repeat(64), statementCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", revision: "1", status: "recommended", reviewer: "g1manager", reasonHash: "b".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", updatedAt: "1000000000" }])
         getCollectionCuration.mockResolvedValue({ collection: "C1", featured: true, hidden: false,
             feature: { proposer: "g1manager", approver: "g1other", reasonHash: "c".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", until: "2000000000", approvedAt: "1000000000" },
-            hold: null, verification: { verified: true, reasonHash: "d".repeat(64), updatedAt: "1000000000" } })
+            hold: null, verification: { verified: true, reasonHash: "d".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", updatedAt: "1000000000" } })
         render(<MarketWindow {...base} section="operations" open={vi.fn()} />)
         expect(await screen.findByText("1 of 5 active seats")).toBeInTheDocument()
         expect(screen.getByText(/g1founder/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole("button", { name: "View record" }))
         await waitFor(() => expect(screen.getByText(/DAO verification:/)).toBeInTheDocument())
         expect(screen.getByText(/Verified/)).toBeInTheDocument()
+        expect(screen.getByText("DAO verification reason")).toBeInTheDocument()
         expect(screen.getByText("Feature reason")).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: /Approve|Reject|Verify/ })).toBeNull()
         expect(readCurationDaoSnapshot).not.toHaveBeenCalled()
@@ -578,11 +579,15 @@ describe("native Market window", () => {
         getCurationState.mockResolvedValue({ admin: "g1dao", pendingAdmin: "", governed: true, activeManagers: 0 })
         listCurationManagers.mockResolvedValue([])
         listCurationApplications.mockResolvedValue([])
-        readCurationDaoSnapshot.mockResolvedValue({ successor: "g1successor", members: Array.from({ length: 7 }, (_, n) => ({ address: `g1member${n}`, founder: n === 0, weight: n === 0 ? 2 : 1, admin: n === 0, finance: false })), total: "1", nextBefore: null, proposals: [{ id: "1", proposer: "g1proposer", status: "EXECUTED", votingDeadline: "2026-09-28T00:00:00Z", action: { operation: "appoint-manager", collection: "", manager: "g1manager", reasonHash: "", verified: false } }] })
+        readCurationDaoSnapshot.mockResolvedValue({ successor: "g1successor", members: Array.from({ length: 7 }, (_, n) => ({ address: `g1member${n}`, founder: n === 0, weight: n === 0 ? 2 : 1, admin: n === 0, finance: false })), total: "2", nextBefore: null, proposals: [
+            { id: "1", proposer: "g1proposer", status: "EXECUTED", votingDeadline: "2026-09-28T00:00:00Z", action: { operation: "appoint-manager", collection: "", manager: "g1manager", reasonHash: "", reasonCID: "", verified: false } },
+            { id: "2", proposer: "g1proposer", status: "EXECUTED", votingDeadline: "2026-09-28T00:00:00Z", action: { operation: "set-verification", collection: "C1", manager: "", reasonHash: "a".repeat(64), reasonCID: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e", verified: true } },
+        ] })
         render(<MarketWindow {...base} section="operations" open={vi.fn()} />)
         expect(await screen.findByRole("heading", { name: "DAO curation proposals" })).toBeInTheDocument()
         expect(await screen.findByText("Proposal 1")).toBeInTheDocument()
         expect(screen.getByText("Appoint manager")).toBeInTheDocument()
+        expect(screen.getByText("DAO decision reason")).toBeInTheDocument()
         expect(screen.getByText("7 members · 8 points")).toBeInTheDocument()
         expect(readCurationDaoSnapshot).toHaveBeenCalledWith(expect.any(String), "0")
         expect(screen.queryByRole("button", { name: /Vote|Execute|Appoint manager/ })).toBeNull()

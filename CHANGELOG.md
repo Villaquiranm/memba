@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: verifiable DAO curation decisions (2026-09-29)
+
+- Read the curation DAO's public reason CIDs for verification and clearance proposals. Market Operations displays decision text only after fetching bounded bytes and matching the on-chain SHA-256; collection verification receipts use the same check. The separate DAO realm remains unpublished and signing stays gated.
+
 ### Memba OS: urgent discovery holds for any collection (2026-09-29)
 
 - Add a signed, chain-checked editorial access probe and native Market Operations lookup for managers to start or second-confirm a short discovery hold even without a founder application. Public reasons must be pinned and byte-verified; second managers must read the verified existing reason before wallet review. The upload route checks the new live collection-level role when no application exists. The curation realm and routes remain disabled until the publication gates.

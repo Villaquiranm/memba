@@ -11,7 +11,8 @@ const reasonCID = z.union([z.literal(""), z.string().regex(/^(bafy[a-z2-7]{55,86
 const state = z.strictObject({
     admin: optionalAddress, pendingAdmin: optionalAddress, governed: z.boolean(), activeManagers: uint64.refine(s => BigInt(s) <= 5n),
     seat: z.strictObject({ account: optionalAddress, lead: z.boolean(), until: uint64 }),
-    verification: z.strictObject({ exists: z.boolean(), verified: z.boolean(), reasonHash: z.string().max(64), updatedAt: uint64 }),
+    verification: z.strictObject({ exists: z.boolean(), verified: z.boolean(), reasonHash: reason, reasonCID, updatedAt: uint64 })
+        .refine(v => v.exists === (v.reasonHash !== "" && v.reasonCID !== ""), "Inconsistent verification evidence"),
     feature: z.strictObject({ exists: z.boolean(), proposer: optionalAddress, approver: optionalAddress, reasonHash: z.string().max(64), reasonCID, until: uint64, approvedAt: uint64 })
         .refine(v => v.exists === (v.reasonCID !== ""), "Inconsistent feature evidence"),
     hold: z.strictObject({ exists: z.boolean(), actor: optionalAddress, confirmer: optionalAddress, reasonHash: z.string().max(64), reasonCID, until: uint64 })
@@ -21,7 +22,7 @@ const state = z.strictObject({
 const operations = ["accept-admin", "return-admin", "abort-return", "appoint-manager", "remove-manager", "mark-conflict", "set-verification", "clear-feature", "clear-hide"] as const
 const action = z.strictObject({
     type: z.literal("curation"), target: z.literal(LAUNCHPAD_CURATION_PATH), operation: z.enum(operations),
-    recipient: optionalAddress, manager: optionalAddress, collection, reasonHash: reason,
+    recipient: optionalAddress, manager: optionalAddress, collection, reasonHash: reason, reasonCID,
     lead: z.boolean(), verified: z.boolean(), until: uint64, before: state,
 }).superRefine((a, ctx) => {
     const fail = () => ctx.addIssue({ code: "custom", message: "Inconsistent curation action" })
@@ -29,7 +30,8 @@ const action = z.strictObject({
     const managerOp = a.operation === "appoint-manager" || a.operation === "remove-manager" || a.operation === "mark-conflict"
     const collectionOp = a.operation === "mark-conflict" || a.operation === "set-verification" || a.operation === "clear-feature" || a.operation === "clear-hide"
     const reasonOp = a.operation === "set-verification" || a.operation === "clear-feature" || a.operation === "clear-hide"
-    if ((a.recipient !== "") !== returnOp || (a.manager !== "") !== managerOp || (a.collection !== "") !== collectionOp || (a.reasonHash !== "") !== reasonOp) fail()
+    if ((a.recipient !== "") !== returnOp || (a.manager !== "") !== managerOp || (a.collection !== "") !== collectionOp ||
+        (a.reasonHash !== "") !== reasonOp || (a.reasonCID !== "") !== reasonOp) fail()
     if (a.operation !== "appoint-manager" && (a.lead || a.until !== "0") || a.operation !== "set-verification" && a.verified) fail()
     if (a.operation === "appoint-manager" && a.until === "0") fail()
 })

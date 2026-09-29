@@ -5,11 +5,12 @@ import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "./nftConfi
 import { readCurationDaoSnapshot } from "./launchpadCurationDao"
 
 const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
+const cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e"
 const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
 const before = {
     admin: addr(1), pendingAdmin: "", governed: true, activeManagers: "0",
     seat: { account: "", lead: false, until: "0" },
-    verification: { exists: false, verified: false, reasonHash: "", updatedAt: "0" },
+    verification: { exists: false, verified: false, reasonHash: "", reasonCID: "", updatedAt: "0" },
     feature: { exists: false, proposer: "", approver: "", reasonHash: "", reasonCID: "", until: "0", approvedAt: "0" },
     hold: { exists: false, actor: "", confirmer: "", reasonHash: "", reasonCID: "", until: "0" }, conflict: false,
 }
@@ -25,7 +26,7 @@ const roster = { schema: config.schema, kind: "members", members: Array.from({ l
     admin: n === 0, finance: n === 1,
 })) }
 const proposal = {
-    id: "3", proposer: addr(3), action: { type: "curation", target: LAUNCHPAD_CURATION_PATH, operation: "appoint-manager", recipient: "", manager: addr(4), collection: "", reasonHash: "", lead: false, verified: false, until: "1702851200", before },
+    id: "3", proposer: addr(3), action: { type: "curation", target: LAUNCHPAD_CURATION_PATH, operation: "appoint-manager", recipient: "", manager: addr(4), collection: "", reasonHash: "", reasonCID: "", lead: false, verified: false, until: "1702851200", before },
     category: "critical", status: "VOTING", qualified: false, ready: false, votingClosed: false, talliesAvailable: true,
     weightYes: 0, peopleYes: 0, developersYes: 0, createdAt: "2023-11-20T22:13:20Z", votingDeadline: "2023-11-27T22:13:20Z", weightedAfter: null, developerAfter: null, invalidation: null,
 }
@@ -87,5 +88,21 @@ describe("v13 NFT curation DAO reads", () => {
             .mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action,
                 before: { ...before, feature: { ...before.feature, exists: true, reasonHash: "a".repeat(64) } } } }] }))
         await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Inconsistent feature evidence")
+    })
+
+    it("requires a committed public CID for DAO verification and clearance reasons", async () => {
+        const query = vi.spyOn(shared, "queryEval")
+        const editorial = { ...proposal, action: { ...proposal.action, operation: "set-verification", manager: "",
+            collection: "C1", reasonHash: "a".repeat(64), reasonCID: cid, verified: true, until: "0" } }
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster))
+            .mockResolvedValueOnce(qeval({ ...page, proposals: [editorial] }))
+        expect((await readCurationDaoSnapshot("rpc")).proposals[0].action.reasonCID).toBe(cid)
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster))
+            .mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...editorial, action: { ...editorial.action, reasonCID: "" } }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Inconsistent curation action")
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(roster))
+            .mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...editorial, action: { ...editorial.action,
+                before: { ...before, verification: { ...before.verification, exists: true, verified: true, reasonHash: "b".repeat(64) } } } }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Inconsistent verification evidence")
     })
 })

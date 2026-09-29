@@ -132,7 +132,7 @@ function CurationGovernance({ rpcUrl, account }: { rpcUrl: string; account: stri
             {item.talliesAvailable && <span className="os-sub">Yes: {item.weightYes} of 8 points · {item.peopleYes} people · {item.developersYes} developers</span>}
             {item.status === "TIMELOCKED" && <span className="os-sub">Passed; execution waits for the DAO timelock.</span>}
             {item.status === "READY" && <span className="os-sub">Quorum and timelock met; execution still needs a separate DAO transaction.</span>}
-            {item.action.reasonHash && <span className="os-sub">Reason hash <code>{item.action.reasonHash}</code></span>}
+            {item.action.reasonHash && <PublicCurationEvidence label={item.status === "EXECUTED" ? "DAO decision reason" : "DAO proposal reason"} cid={item.action.reasonCID} sha256={item.action.reasonHash} />}
             {item.status === "INVALIDATED" && <span className="os-sub">Invalidated before execution.</span>}
         </article>)}</div>}
         {!state.error && !state.loading && state.next && <button type="button" className="os-btn os-quiet" onClick={() => { setBefore(state.next!); setState((previous) => ({ ...previous, loading: true })) }}>Load older decisions</button>}
@@ -150,7 +150,8 @@ function curationActionLabel(item: CurationDaoProposal): string {
 
 function ReceiptView({ value }: { value: CurationReceipt }) {
     return <div className="os-ops-receipt">
-        <span>DAO verification: <strong>{value.verification?.verified ? "Verified" : "Not verified"}</strong>{value.verification && <> · Reason <code>{value.verification.reasonHash}</code></>}</span>
+        <span>DAO verification: <strong>{value.verification?.verified ? "Verified" : "Not verified"}</strong></span>
+        {value.verification && <PublicCurationEvidence label="DAO verification reason" cid={value.verification.reasonCID} sha256={value.verification.reasonHash} />}
         <span>Editorial placement: <strong>{value.featured ? "Featured" : "Not featured"}</strong>{value.feature && <> · Through {formatTime(value.feature.until)}</>}</span>
         {value.feature && <PublicCurationEvidence label="Feature reason" cid={value.feature.reasonCID} sha256={value.feature.reasonHash} />}
         <span>Discovery hold: <strong>{value.hidden ? "Active" : "None"}</strong>{value.hold && <> · Through {formatTime(value.hold.until)}</>}</span>

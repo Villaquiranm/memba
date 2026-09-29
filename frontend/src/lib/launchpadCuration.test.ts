@@ -58,7 +58,7 @@ describe("Launchpad curation reads", () => {
 
     it("binds public feature, hold and verification facts to one collection", async () => {
         const query = vi.spyOn(shared, "queryEval")
-            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature, hold: null, verification: { verified: true, reasonHash: digest("c"), updatedAt: "101" } }))
+            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature, hold: null, verification: { verified: true, reasonHash: digest("c"), reasonCID: cid, updatedAt: "101" } }))
             .mockResolvedValueOnce(qeval({ collection: "C2", featured: true, hidden: false, feature, hold: null, verification: null }))
             .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: true, feature, hold: { actor: addr(2), confirmer: "", reasonHash: digest("d"), reasonCID: cid, until: "200" }, verification: null }))
         expect((await getCollectionCuration("rpc", "C1")).verification?.verified).toBe(true)
@@ -67,6 +67,8 @@ describe("Launchpad curation reads", () => {
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow("Inconsistent curation receipt")
         await expect(getCollectionCuration("rpc", "bad")).rejects.toThrow("Invalid collection ID")
         query.mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature: { ...feature, reasonCID: "invalid" }, hold: null, verification: null }))
+        await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow()
+        query.mockResolvedValueOnce(qeval({ collection: "C1", featured: false, hidden: false, feature: null, hold: null, verification: { verified: true, reasonHash: digest("c"), reasonCID: "invalid", updatedAt: "101" } }))
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow()
     })
 

@@ -20,7 +20,7 @@ const application = z.strictObject({
 const feature = z.strictObject({ proposer: address, approver: optionalAddress, reasonHash: sha256Hex, reasonCID: evidenceCID, until: positive, approvedAt: uint })
     .refine((f) => f.approver === "" ? f.approvedAt === "0" : f.approvedAt !== "0" && BigInt(f.approvedAt) < BigInt(f.until), "Inconsistent feature approval")
 const hold = z.strictObject({ actor: address, confirmer: optionalAddress, reasonHash: sha256Hex, reasonCID: evidenceCID, until: positive })
-const verification = z.strictObject({ verified: z.boolean(), reasonHash: sha256Hex, updatedAt: positive })
+const verification = z.strictObject({ verified: z.boolean(), reasonHash: sha256Hex, reasonCID: evidenceCID, updatedAt: positive })
 const receipt = z.strictObject({ collection, featured: z.boolean(), hidden: z.boolean(), feature: feature.nullable(), hold: hold.nullable(), verification: verification.nullable() })
     .refine((r) => (!r.featured || (r.feature !== null && r.feature.approver !== "" && !r.hidden)) && (!r.hidden || r.hold !== null), "Inconsistent curation receipt")
 const reviewAccess = z.strictObject({ collection, account: address, founder: address, revision: positive,

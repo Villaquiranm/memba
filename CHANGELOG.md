@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: bounded private curation retention (2026-09-29)
+
+- Require an explicit 1–365 day policy before the private founder inbox can start. Delete expired encrypted messages and read/send metadata at boot, hourly and on authorized requests; filter expired content at read time. Document that off-volume backup retention and secure deletion need a separate operator policy.
+
 ### Memba OS: founder applications and manager reviews (2026-09-29)
 
 - Let collection creators pin public application evidence and review an on-chain submission in the native Market Operations desk. Eligible community managers can pin a public reason and review a request-changes, recommendation or decline decision. Wallet reviews recheck the evidence bytes, collection, application, role and network before signing and verify the result on chain.

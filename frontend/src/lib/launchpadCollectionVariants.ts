@@ -1,20 +1,18 @@
 /** Native-fee collection creation with permanent royalty and reveal commitments. */
 import { clearGovernanceReceipt } from "./dao/governanceRecovery"
 import { isValidGnoAddressChecksum } from "./dao/address"
-import { packageAddress } from "./dao/weightedApplications"
 import { doContractBroadcast, type AminoMsg } from "./grc20"
 import { readActionTerms, type LaunchpadActionTerms } from "./launchpadActionTerms"
 import { buildCreateCollectionMsg, CREATE_COLLECTION_GAS_WANTED, createCollectionScope, readCollectionCount,
     sameCollectionTerms, validateStaticCollection, type StaticCollectionDraft } from "./launchpadCollectionCreate"
 import { getLaunchpadNftCollection, type LaunchpadNftCollection } from "./launchpadNft"
-import { LAUNCHPAD_DROPS_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH } from "./nftConfig"
+import { isKnownUnclaimableLaunchpadReceiver } from "./launchpadRecipients"
+import { LAUNCHPAD_DROPS_PATH } from "./nftConfig"
 import type { SignRequest } from "../os/sign/signer"
 
 const HASH = /^[0-9a-f]{64}$/
 const BAD_URI_CHARS = "\"'<>\\`()[]{}|^"
 const STORAGE_CAP = 10_000_000
-const FORBIDDEN_RECEIVERS = new Set([LAUNCHPAD_DROPS_PATH, LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH]
-    .map(packageAddress))
 
 export interface CollectionRoyaltyInput { account: string; bps: bigint }
 type Core = Omit<StaticCollectionDraft, "baseURI">
@@ -37,7 +35,7 @@ export function encodeCollectionRoyalties(draft: CollectionCreationDraft): { enc
     let totalBPS = 0n
     for (let index = 0; index < ordered.length; index++) {
         const receiver = ordered[index]
-        if (!isValidGnoAddressChecksum(receiver.account) || FORBIDDEN_RECEIVERS.has(receiver.account) ||
+        if (!isValidGnoAddressChecksum(receiver.account) || isKnownUnclaimableLaunchpadReceiver(receiver.account) ||
             (index > 0 && receiver.account === ordered[index - 1].account) ||
             receiver.bps < 1n || receiver.bps > 1000n) throw new Error("Check each royalty receiver and basis-point share.")
         totalBPS += receiver.bps

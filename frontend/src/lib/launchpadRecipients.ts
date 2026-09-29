@@ -1,0 +1,17 @@
+/** Match the contract's known operational realms that cannot claim proceeds. */
+import { packageAddress } from "./dao/weightedApplications"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_DROPS_PATH,
+    LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH,
+    LAUNCHPAD_POOL_PATH, LAUNCHPAD_SALES_PATH, LAUNCHPAD_TOKENS_PATH,
+    LAUNCHPAD_CURATION_DAO_PATH, PUBLISHED_MEMBA_DAO_PATH } from "./nftConfig"
+
+const UNCLAIMABLE = new Set([
+    LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_DROPS_PATH,
+    LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH,
+    LAUNCHPAD_POOL_PATH, LAUNCHPAD_SALES_PATH, LAUNCHPAD_TOKENS_PATH,
+    LAUNCHPAD_CURATION_DAO_PATH, PUBLISHED_MEMBA_DAO_PATH,
+].map(packageAddress))
+
+export function isKnownUnclaimableLaunchpadReceiver(account: string): boolean {
+    return UNCLAIMABLE.has(account)
+}

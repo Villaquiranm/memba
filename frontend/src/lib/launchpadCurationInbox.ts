@@ -14,6 +14,13 @@ export interface CurationAccess {
     canReview: boolean
 }
 
+export interface CurationEditorialAccess {
+    collection: string
+    account: string
+    creator: string
+    isManager: boolean
+}
+
 export interface CurationMessage {
     id: string
     sender: string
@@ -73,6 +80,24 @@ export async function readCurationAccess(collection: string, account: string, ch
         throw new Error("Invalid curation access response.")
     }
     return value as unknown as CurationAccess
+}
+
+export async function readCurationEditorialAccess(collection: string, account: string, chainId: string, token: Token, signal?: AbortSignal): Promise<CurationEditorialAccess> {
+    const response = await fetch(endpoint(collection, "curation-editorial-access"), {
+        headers: auth(token, account, chainId), cache: "no-store", signal,
+    })
+    if (!response.ok) throw new Error(response.status === 404 ? "This collection or wallet is unavailable for editorial review." :
+        response.status === 401 ? "Sign in again to check editorial authority." :
+            "Could not verify current editorial authority.")
+    const raw: unknown = await response.json()
+    if (!raw || typeof raw !== "object") throw new Error("Invalid editorial access response.")
+    const value = raw as Record<string, unknown>
+    if (value.collection !== collection || value.account !== account || typeof value.creator !== "string" ||
+        !addressPattern.test(value.creator) || typeof value.isManager !== "boolean" ||
+        (value.isManager && value.creator === account) || Object.keys(value).some((key) => !["collection", "account", "creator", "isManager"].includes(key))) {
+        throw new Error("Invalid editorial access response.")
+    }
+    return value as unknown as CurationEditorialAccess
 }
 
 function validMessage(raw: unknown): CurationMessage {

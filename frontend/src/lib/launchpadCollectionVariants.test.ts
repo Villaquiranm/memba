@@ -5,7 +5,9 @@ import { readActionTerms } from "./launchpadActionTerms"
 import { buildCreateCollectionVariantMsg, createCollectionVariantRequest, encodeCollectionRoyalties,
     type CollectionCreationDraft } from "./launchpadCollectionVariants"
 import { getLaunchpadNftCollection } from "./launchpadNft"
-import { LAUNCHPAD_MARKET_PATH } from "./nftConfig"
+import { LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_DROPS_PATH, LAUNCHPAD_FEES_PATH,
+    LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, LAUNCHPAD_POOL_PATH, LAUNCHPAD_SALES_PATH,
+    LAUNCHPAD_TOKENS_PATH, PUBLISHED_MEMBA_DAO_PATH } from "./nftConfig"
 
 vi.mock("./dao/shared", async (original) => ({ ...(await original<typeof import("./dao/shared")>()), queryEval: vi.fn() }))
 vi.mock("./launchpadActionTerms", async (original) => ({ ...(await original<typeof import("./launchpadActionTerms")>()), readActionTerms: vi.fn() }))
@@ -32,7 +34,11 @@ describe("permanent NFT creator variants", () => {
             ordered: [{ account: low, bps: 400n }, { account: high, bps: 100n }] })
         expect(() => encodeCollectionRoyalties({ ...staticDraft, royalties: [{ account: low, bps: 600n }, { account: high, bps: 500n }] })).toThrow("10%")
         expect(() => encodeCollectionRoyalties({ ...staticDraft, royalties: [{ account: low, bps: 10n }, { account: low, bps: 10n }] })).toThrow("receiver")
-        expect(() => encodeCollectionRoyalties({ ...staticDraft, royalties: [{ account: packageAddress(LAUNCHPAD_MARKET_PATH), bps: 10n }] })).toThrow("receiver")
+        for (const path of [LAUNCHPAD_CONFIG_PATH, LAUNCHPAD_CURATION_PATH, LAUNCHPAD_DROPS_PATH,
+            LAUNCHPAD_FEES_PATH, LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, LAUNCHPAD_POOL_PATH,
+            LAUNCHPAD_SALES_PATH, LAUNCHPAD_TOKENS_PATH, LAUNCHPAD_CURATION_DAO_PATH, PUBLISHED_MEMBA_DAO_PATH]) {
+            expect(() => encodeCollectionRoyalties({ ...staticDraft, royalties: [{ account: packageAddress(path), bps: 10n }] })).toThrow("receiver")
+        }
         expect(() => encodeCollectionRoyalties({ ...staticDraft, mode: "soulbound", royalties: [{ account: low, bps: 10n }] })).toThrow("Soulbound")
     })
 

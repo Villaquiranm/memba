@@ -27,10 +27,11 @@ const curationMessageMaxBytes = 4000
 var curationClientID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type CurationInboxConfig struct {
-	RPCURL    string
-	ChainID   string
-	Key       []byte // dedicated 32-byte key, never the auth signing seed
-	AllowSend func(wallet string) bool
+	RPCURL        string
+	ChainID       string
+	Key           []byte // dedicated 32-byte key, never the auth signing seed
+	RetentionDays int    // explicit private-content policy; 1–365 days
+	AllowSend     func(wallet string) bool
 }
 
 type curationMessage struct {
@@ -71,8 +72,8 @@ type curationInbox struct {
 // disabled unless a dedicated encryption key and the on-chain curation realm
 // are deliberately configured. Every request rechecks current chain access.
 func NewCurationInboxHandler(db *sql.DB, cfg CurationInboxConfig) (http.Handler, error) {
-	if db == nil || cfg.RPCURL == "" || cfg.ChainID == "" || len(cfg.Key) != 32 || cfg.AllowSend == nil {
-		return nil, errors.New("curation inbox requires database, chain, RPC, key and send limiter")
+	if db == nil || cfg.RPCURL == "" || cfg.ChainID == "" || len(cfg.Key) != 32 || cfg.AllowSend == nil || cfg.RetentionDays < 1 || cfg.RetentionDays > 365 {
+		return nil, errors.New("curation inbox requires database, chain, RPC, key, retention days and send limiter")
 	}
 	block, err := aes.NewCipher(cfg.Key)
 	if err != nil {
@@ -83,7 +84,53 @@ func NewCurationInboxHandler(db *sql.DB, cfg CurationInboxConfig) (http.Handler,
 		return nil, err
 	}
 	inbox := &curationInbox{db: db, cfg: cfg, aead: aead}
+	purgeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := PurgeCurationInbox(purgeCtx, db, cfg.ChainID, cfg.RetentionDays, time.Now()); err != nil {
+		return nil, fmt.Errorf("curation inbox initial retention purge: %w", err)
+	}
 	return http.HandlerFunc(inbox.serveHTTP), nil
+}
+
+// PurgeCurationInbox deletes expired private text and read/send metadata for
+// one chain in a single transaction. The surrounding backup retention is a
+// separate operator policy; this function only controls the live database.
+func PurgeCurationInbox(ctx context.Context, db *sql.DB, chainID string, days int, now time.Time) error {
+	if db == nil || chainID == "" || days < 1 || days > 365 {
+		return errors.New("invalid curation retention configuration")
+	}
+	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour).UnixMicro()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM launchpad_curation_messages WHERE chain_id=? AND created_at<?`, chainID, cutoff); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM launchpad_curation_message_audit WHERE chain_id=? AND created_at<?`, chainID, cutoff); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// StartCurationInboxRetention purges even when no founder opens the inbox.
+// It stops with the server context. Failed sweeps are logged and retried.
+func StartCurationInboxRetention(ctx context.Context, db *sql.DB, chainID string, days int) {
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				if err := PurgeCurationInbox(ctx, db, chainID, days, now); err != nil && ctx.Err() == nil {
+					slog.Error("curation inbox retention purge failed", "error", err)
+				}
+			}
+		}
+	}()
 }
 
 func (i *curationInbox) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +165,10 @@ func (i *curationInbox) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeHoldingsError(w, http.StatusForbidden, "curation thread unavailable")
 		return
 	}
+	if err := PurgeCurationInbox(r.Context(), i.db, i.cfg.ChainID, i.cfg.RetentionDays, time.Now()); err != nil {
+		i.unavailable(w, err)
+		return
+	}
 	if r.Method == http.MethodGet {
 		i.readThread(w, r, collection, wallet)
 		return
@@ -136,10 +187,10 @@ func (i *curationInbox) readThread(w http.ResponseWriter, r *http.Request, colle
 		afterTime, afterID = cursor.CreatedAt, cursor.ID
 	}
 	rows, err := i.db.QueryContext(r.Context(), `SELECT id, sender, revision, created_at, nonce, ciphertext
-		FROM launchpad_curation_messages WHERE chain_id=? AND collection=?
+		FROM launchpad_curation_messages WHERE chain_id=? AND collection=? AND created_at>=?
 		  AND (?=0 OR created_at<? OR (created_at=? AND id<?))
 		ORDER BY created_at DESC, id DESC LIMIT ?`,
-		i.cfg.ChainID, collection, afterTime, afterTime, afterTime, afterID, curationInboxPageSize+1)
+		i.cfg.ChainID, collection, time.Now().Add(-time.Duration(i.cfg.RetentionDays)*24*time.Hour).UnixMicro(), afterTime, afterTime, afterTime, afterID, curationInboxPageSize+1)
 	if err != nil {
 		i.unavailable(w, err)
 		return

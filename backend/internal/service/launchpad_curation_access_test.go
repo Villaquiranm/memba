@@ -14,8 +14,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const accessTestWallet = "g1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const accessTestFounder = "g1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const accessTestWallet = "g1jg8mtutu9khhfwc4nxmuhcpftf0pajdhfvsqf5"
+const accessTestFounder = "g1z320vf0vwtdzqzgw8ln2f23c3z27npkjantqna"
 
 func accessRPCServer(t *testing.T, network string, view string, queryCount *int) *httptest.Server {
 	t.Helper()
@@ -46,6 +46,62 @@ func accessRPCServer(t *testing.T, network string, view string, queryCount *int)
 			"ResponseBase": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(typed)), "Error": nil},
 		}}})
 	}))
+}
+
+func editorialRPCServer(t *testing.T, network, view string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/status" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+				"node_info": map[string]string{"network": network},
+				"sync_info": map[string]any{"latest_block_height": "100", "latest_block_time": time.Now().UTC().Format(time.RFC3339Nano), "catching_up": false},
+			}})
+			return
+		}
+		var req abciQueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		expr, err := base64.StdEncoding.DecodeString(req.Params.Data)
+		if err != nil || req.Params.Path != "vm/qeval" || string(expr) != launchpadCurationPath+`.EditorialAccessJSON("C1","`+accessTestWallet+`")` {
+			t.Errorf("unexpected editorial query: path=%q expr=%q err=%v", req.Params.Path, expr, err)
+		}
+		typed := "(" + strconv.Quote(view) + " string)"
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"response": map[string]any{
+			"ResponseBase": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(typed)), "Error": nil},
+		}}})
+	}))
+}
+
+func TestLaunchpadEditorialAccessBindsCurrentChainAndWallet(t *testing.T) {
+	view := `{"collection":"C1","account":"` + accessTestWallet + `","creator":"` + accessTestFounder + `","isManager":true}`
+	rpc := editorialRPCServer(t, "gnoland-1", view)
+	defer rpc.Close()
+	h := HandleLaunchpadEditorialAccess(rpc.URL, "gnoland-1", true)
+	r := httptest.NewRequest(http.MethodGet, "/api/nft/curation-editorial-access?collection=C1", nil)
+	r = r.WithContext(WithAuthAddress(r.Context(), accessTestWallet))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"isManager":true`) || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("editorial snapshot: status=%d body=%s", w.Code, w.Body.String())
+	}
+	missing := httptest.NewRecorder()
+	h.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/nft/curation-editorial-access?collection=C1", nil))
+	if missing.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d", missing.Code)
+	}
+	wrongChain := httptest.NewRecorder()
+	HandleLaunchpadEditorialAccess(rpc.URL, "other-chain", true).ServeHTTP(wrongChain, r)
+	if wrongChain.Code != http.StatusServiceUnavailable {
+		t.Fatalf("wrong chain status=%d", wrongChain.Code)
+	}
+	forged := editorialRPCServer(t, "gnoland-1", `{"collection":"C1","account":"`+accessTestWallet+`","creator":"`+accessTestWallet+`","isManager":true}`)
+	defer forged.Close()
+	invalid := httptest.NewRecorder()
+	HandleLaunchpadEditorialAccess(forged.URL, "gnoland-1", true).ServeHTTP(invalid, r)
+	if invalid.Code != http.StatusServiceUnavailable {
+		t.Fatalf("self-manager claim status=%d", invalid.Code)
+	}
 }
 
 func accessRequest(h http.Handler) *httptest.ResponseRecorder {

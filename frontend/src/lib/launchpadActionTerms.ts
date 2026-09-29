@@ -1,6 +1,7 @@
 /** Strict version-bound creator policy reads from the unpublished Launchpad config. */
 import { parseQevalJSON, queryEval } from "./dao/shared"
 import { WUGNOT_KEY } from "./launchpadTokenTrade"
+import { isKnownUnclaimableLaunchpadReceiver } from "./launchpadRecipients"
 import { LAUNCHPAD_CONFIG_PATH } from "./nftConfig"
 
 const ADDRESS = /^g1[02-9ac-hj-np-z]{38}$/
@@ -46,7 +47,7 @@ export function parseActionTerms(value: unknown, lane: LaunchpadActionLane, curr
     const paused = row.paused as boolean
     const laneReady = row.laneReady as boolean
     if (actionReady !== (!paused && allowed && laneReady) || (!configured && (allowed || laneReady || collectionFee !== -1n)) ||
-        (actionReady && (!ADDRESS.test(row.treasury) || (lane === "collection" && collectionFee < 0n) ||
+        (actionReady && (!ADDRESS.test(row.treasury) || isKnownUnclaimableLaunchpadReceiver(row.treasury) || (lane === "collection" && collectionFee < 0n) ||
             (lane === "drops" && primaryFeeBPS < 0n))) || primaryFeeBPS > 500n) throw new Error("Creator policy is inconsistent")
     return { lane, currency, version, treasury: row.treasury, collectionFee, primaryFeeBPS,
         currencyConfigured: configured, currencyAllowed: allowed, paused, laneReady, actionReady }

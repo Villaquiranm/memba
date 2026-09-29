@@ -95,6 +95,38 @@ Full changelogs are split by version range for easier navigation:
 
 - Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
+### Memba OS: claimable Launchpad proceeds recipients (2026-09-29)
+
+- Reject known Launchpad and Memba DAO realm addresses without a proceeds-claim method in creator royalty terms and ready DAO fee policies before wallet review, matching the contract's guard against stranded funds. DAO proceeds remain directed to a separately verified signer-controlled treasury.
+
+### Memba OS: verifiable DAO curation decisions (2026-09-29)
+
+- Read the curation DAO's public reason CIDs for verification and clearance proposals. Market Operations displays decision text only after fetching bounded bytes and matching the on-chain SHA-256; collection verification receipts use the same check. The separate DAO realm remains unpublished and signing stays gated.
+
+### Memba OS: urgent discovery holds for any collection (2026-09-29)
+
+- Add a signed, chain-checked editorial access probe and native Market Operations lookup for managers to start or second-confirm a short discovery hold even without a founder application. Public reasons must be pinned and byte-verified; second managers must read the verified existing reason before wallet review. The upload route checks the new live collection-level role when no application exists. The curation realm and routes remain disabled until the publication gates.
+
+### Memba OS: reviewed manager editorial actions (2026-09-29)
+
+- Give appointed managers native Market Operations wallet reviews for a public-reason feature proposal, second-manager feature approval, 24-hour discovery hold and second-manager hold confirmation. The signer rechecks the current chain role, original manager, collection, application, receipt and pinned bytes before signing, then verifies the resulting public receipt and locks uncertain outcomes.
+
+### Memba OS: editorial reason upload access (2026-09-29)
+
+- Let an active, unconflicted curation manager pin public editorial evidence after an application is recommended or declined. The uploader still checks the current chain role and signed wallet on every request; review decisions continue to require the narrower live `canReview` permission.
+
+### Memba OS: verifiable editorial reasons (2026-09-29)
+
+- Read #317's public evidence CIDs for manager feature proposals and discovery holds. Market Operations only displays the reason text after fetching bounded bytes and verifying their SHA-256 against the on-chain receipt; malformed pointers fail closed.
+
+### Memba OS: curation DAO roster and quorum visibility (2026-09-29)
+
+- Show the separate curation DAO's verified seven-seat voting roster, voting weight, critical quorum, timelocks and proposal tallies in Market Operations. Refuse malformed or changing roster data while paging decisions. Signing for the unpublished v13 realm remains on hold.
+
+### Memba OS: bounded private curation retention (2026-09-29)
+
+- Require an explicit 1–365 day policy before the private founder inbox can start. Delete expired encrypted messages and read/send metadata at boot, hourly and on authorized requests; filter expired content at read time. Document that off-volume backup retention and secure deletion need a separate operator policy.
+
 ### Memba OS: founder applications and manager reviews (2026-09-29)
 
 - Let collection creators pin public application evidence and review an on-chain submission in the native Market Operations desk. Eligible community managers can pin a public reason and review a request-changes, recommendation or decline decision. Wallet reviews recheck the evidence bytes, collection, application, role and network before signing and verify the result on chain.

@@ -1,24 +1,28 @@
 /** Read-only v13 curation governance. This never enables a wallet action. */
 import { z } from "zod"
 import { parseQevalJSON, queryEval } from "./dao/shared"
-import { address, id, optionalAddress, sha256Hex, time, uint64 } from "./dao/weightedPrimitives"
+import { address, id, optionalAddress, personID, sha256Hex, time, uint64 } from "./dao/weightedPrimitives"
 import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "./nftConfig"
 
 const schema = "memba-weighted-host/v13" as const
 const collection = z.union([z.literal(""), z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)])
 const reason = z.union([z.literal(""), sha256Hex])
+const reasonCID = z.union([z.literal(""), z.string().regex(/^(bafy[a-z2-7]{55,86}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/)])
 const state = z.strictObject({
     admin: optionalAddress, pendingAdmin: optionalAddress, governed: z.boolean(), activeManagers: uint64.refine(s => BigInt(s) <= 5n),
     seat: z.strictObject({ account: optionalAddress, lead: z.boolean(), until: uint64 }),
-    verification: z.strictObject({ exists: z.boolean(), verified: z.boolean(), reasonHash: z.string().max(64), updatedAt: uint64 }),
-    feature: z.strictObject({ exists: z.boolean(), proposer: optionalAddress, approver: optionalAddress, reasonHash: z.string().max(64), until: uint64, approvedAt: uint64 }),
-    hold: z.strictObject({ exists: z.boolean(), actor: optionalAddress, confirmer: optionalAddress, reasonHash: z.string().max(64), until: uint64 }),
+    verification: z.strictObject({ exists: z.boolean(), verified: z.boolean(), reasonHash: reason, reasonCID, updatedAt: uint64 })
+        .refine(v => v.exists === (v.reasonHash !== "" && v.reasonCID !== ""), "Inconsistent verification evidence"),
+    feature: z.strictObject({ exists: z.boolean(), proposer: optionalAddress, approver: optionalAddress, reasonHash: z.string().max(64), reasonCID, until: uint64, approvedAt: uint64 })
+        .refine(v => v.exists === (v.reasonCID !== ""), "Inconsistent feature evidence"),
+    hold: z.strictObject({ exists: z.boolean(), actor: optionalAddress, confirmer: optionalAddress, reasonHash: z.string().max(64), reasonCID, until: uint64 })
+        .refine(v => v.exists === (v.reasonCID !== ""), "Inconsistent hold evidence"),
     conflict: z.boolean(),
 })
 const operations = ["accept-admin", "return-admin", "abort-return", "appoint-manager", "remove-manager", "mark-conflict", "set-verification", "clear-feature", "clear-hide"] as const
 const action = z.strictObject({
     type: z.literal("curation"), target: z.literal(LAUNCHPAD_CURATION_PATH), operation: z.enum(operations),
-    recipient: optionalAddress, manager: optionalAddress, collection, reasonHash: reason,
+    recipient: optionalAddress, manager: optionalAddress, collection, reasonHash: reason, reasonCID,
     lead: z.boolean(), verified: z.boolean(), until: uint64, before: state,
 }).superRefine((a, ctx) => {
     const fail = () => ctx.addIssue({ code: "custom", message: "Inconsistent curation action" })
@@ -26,7 +30,8 @@ const action = z.strictObject({
     const managerOp = a.operation === "appoint-manager" || a.operation === "remove-manager" || a.operation === "mark-conflict"
     const collectionOp = a.operation === "mark-conflict" || a.operation === "set-verification" || a.operation === "clear-feature" || a.operation === "clear-hide"
     const reasonOp = a.operation === "set-verification" || a.operation === "clear-feature" || a.operation === "clear-hide"
-    if ((a.recipient !== "") !== returnOp || (a.manager !== "") !== managerOp || (a.collection !== "") !== collectionOp || (a.reasonHash !== "") !== reasonOp) fail()
+    if ((a.recipient !== "") !== returnOp || (a.manager !== "") !== managerOp || (a.collection !== "") !== collectionOp ||
+        (a.reasonHash !== "") !== reasonOp || (a.reasonCID !== "") !== reasonOp) fail()
     if (a.operation !== "appoint-manager" && (a.lead || a.until !== "0") || a.operation !== "set-verification" && a.verified) fail()
     if (a.operation === "appoint-manager" && a.until === "0") fail()
 })
@@ -60,10 +65,16 @@ const config = z.strictObject({
     maxProposalPage: z.literal(50),
     curationPolicy: z.strictObject({ target: z.literal(LAUNCHPAD_CURATION_PATH), successor: address, actionCategory: z.literal("critical"), maxManagers: z.literal(5), maxTermSeconds: z.literal(7776000), returnStagesOnly: z.literal(true), invalidatesOtherProposals: z.literal(true) }),
 })
+const member = z.strictObject({ personId: personID, address, founder: z.boolean(), weight: z.union([z.literal(1), z.literal(2)]), admin: z.boolean(), finance: z.boolean() })
+const members = z.strictObject({ schema: z.literal(schema), kind: z.literal("members"), members: z.array(member).length(7) })
+    .refine(({ members: rows }) => new Set(rows.map(row => row.address)).size === 7 &&
+        new Set(rows.map(row => row.personId)).size === 7 && rows.filter(row => row.founder).length === 1 &&
+        rows.some(row => row.admin) && rows.every(row => row.weight === (row.founder ? 2 : 1)), "Invalid curation DAO roster")
 const page = z.strictObject({ schema: z.literal(schema), kind: z.literal("proposals"), total: uint64, proposals: z.array(z.unknown()).max(20), nextBefore: id.nullable() })
 
 export type CurationDaoProposal = z.infer<typeof proposal>
-export type CurationDaoSnapshot = { successor: string; total: string; proposals: CurationDaoProposal[]; nextBefore: string | null }
+export type CurationDaoMember = z.infer<typeof member>
+export type CurationDaoSnapshot = { successor: string; members: CurationDaoMember[]; total: string; proposals: CurationDaoProposal[]; nextBefore: string | null }
 
 async function read(rpcUrl: string, expression: string): Promise<unknown> {
     const raw = await queryEval(rpcUrl, LAUNCHPAD_CURATION_DAO_PATH, expression, true)
@@ -74,8 +85,9 @@ async function read(rpcUrl: string, expression: string): Promise<unknown> {
 /** Unknown role/recovery proposals are omitted from this curation-only view. Malformed curation proposals fail the page. */
 export async function readCurationDaoSnapshot(rpcUrl: string, before = "0"): Promise<CurationDaoSnapshot> {
     if (!/^(0|[1-9][0-9]{0,19})$/.test(before) || BigInt(before) > 18446744073709551615n) throw new Error("Invalid governance cursor")
-    const [rawConfig, rawPage] = await Promise.all([read(rpcUrl, "GetConfigJSON()"), read(rpcUrl, `GetProposalsJSON(${before}, 20)`)])
+    const [rawConfig, rawMembers, rawPage] = await Promise.all([read(rpcUrl, "GetConfigJSON()"), read(rpcUrl, "GetMembersJSON()"), read(rpcUrl, `GetProposalsJSON(${before}, 20)`)])
     const policy = config.parse(rawConfig)
+    const roster = members.parse(rawMembers)
     const result = page.parse(rawPage)
     const proposals: CurationDaoProposal[] = []
     for (const item of result.proposals) {
@@ -84,5 +96,5 @@ export async function readCurationDaoSnapshot(rpcUrl: string, before = "0"): Pro
         else if (item.action.type !== "set-role" && item.action.type !== "recover-member") throw new Error("Unknown DAO action type")
     }
     if (new Set(proposals.map(item => item.id)).size !== proposals.length) throw new Error("Duplicate curation proposal")
-    return { successor: policy.curationPolicy.successor, total: result.total, proposals, nextBefore: result.nextBefore }
+    return { successor: policy.curationPolicy.successor, members: roster.members, total: result.total, proposals, nextBefore: result.nextBefore }
 }

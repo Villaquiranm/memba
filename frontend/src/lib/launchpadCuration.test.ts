@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
 import { bech32Encode } from "./dao/realmAddress"
 import { LAUNCHPAD_CURATION_PATH } from "./nftConfig"
-import { getCollectionCuration, getCurationApplication, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
+import { getCollectionCuration, getCurationApplication, getCurationEditorialAccess, getCurationReviewAccess, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
 
 const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
 const digest = (c: string) => c.repeat(64)
@@ -10,7 +10,7 @@ const cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf6bzut6qzzmtnkzqf54j7efm5e"
 const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
 const app = { collection: "C1", founder: addr(1), statementHash: digest("a"), statementCID: cid, revision: "1",
     status: "submitted", reviewer: "", reasonHash: "", reasonCID: "", updatedAt: "100" }
-const feature = { proposer: addr(2), approver: addr(3), reasonHash: digest("b"), until: "200", approvedAt: "100" }
+const feature = { proposer: addr(2), approver: addr(3), reasonHash: digest("b"), reasonCID: cid, until: "200", approvedAt: "100" }
 
 describe("Launchpad curation reads", () => {
     beforeEach(() => vi.restoreAllMocks())
@@ -58,13 +58,40 @@ describe("Launchpad curation reads", () => {
 
     it("binds public feature, hold and verification facts to one collection", async () => {
         const query = vi.spyOn(shared, "queryEval")
-            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature, hold: null, verification: { verified: true, reasonHash: digest("c"), updatedAt: "101" } }))
+            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature, hold: null, verification: { verified: true, reasonHash: digest("c"), reasonCID: cid, updatedAt: "101" } }))
             .mockResolvedValueOnce(qeval({ collection: "C2", featured: true, hidden: false, feature, hold: null, verification: null }))
-            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: true, feature, hold: { actor: addr(2), confirmer: "", reasonHash: digest("d"), until: "200" }, verification: null }))
+            .mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: true, feature, hold: { actor: addr(2), confirmer: "", reasonHash: digest("d"), reasonCID: cid, until: "200" }, verification: null }))
         expect((await getCollectionCuration("rpc", "C1")).verification?.verified).toBe(true)
         expect(query).toHaveBeenNthCalledWith(1, "rpc", LAUNCHPAD_CURATION_PATH, 'CollectionCurationJSON("C1")', true)
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow("mismatch")
         await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow("Inconsistent curation receipt")
         await expect(getCollectionCuration("rpc", "bad")).rejects.toThrow("Invalid collection ID")
+        query.mockResolvedValueOnce(qeval({ collection: "C1", featured: true, hidden: false, feature: { ...feature, reasonCID: "invalid" }, hold: null, verification: null }))
+        await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow()
+        query.mockResolvedValueOnce(qeval({ collection: "C1", featured: false, hidden: false, feature: null, hold: null, verification: { verified: true, reasonHash: digest("c"), reasonCID: "invalid", updatedAt: "101" } }))
+        await expect(getCollectionCuration("rpc", "C1")).rejects.toThrow()
+    })
+
+    it("checks the other manager's live public eligibility for a two-person action", async () => {
+        const access = { collection: "C1", account: addr(2), founder: addr(1), revision: "1", status: "recommended",
+            isFounder: false, isManager: true, canRead: true, canReview: false }
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(access))
+            .mockResolvedValueOnce(qeval({ ...access, isManager: false }))
+            .mockResolvedValueOnce(qeval({ ...access, account: addr(3) }))
+        expect((await getCurationReviewAccess("rpc", "C1", addr(2)))?.isManager).toBe(true)
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, `ReviewAccessJSON("C1", "${addr(2)}")`, true)
+        await expect(getCurationReviewAccess("rpc", "C1", addr(2))).rejects.toThrow("Inconsistent")
+        await expect(getCurationReviewAccess("rpc", "C1", addr(2))).rejects.toThrow("mismatch")
+    })
+
+    it("reads editorial eligibility for a collection without an application", async () => {
+        const access = { collection: "C1", account: addr(2), creator: addr(1), isManager: true }
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(access))
+            .mockResolvedValueOnce(qeval({ ...access, creator: addr(2) }))
+            .mockResolvedValueOnce(qeval({ ...access, collection: "C2" }))
+        expect(await getCurationEditorialAccess("rpc", "C1", addr(2))).toEqual(access)
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, `EditorialAccessJSON("C1", "${addr(2)}")`, true)
+        await expect(getCurationEditorialAccess("rpc", "C1", addr(2))).rejects.toThrow("Inconsistent")
+        await expect(getCurationEditorialAccess("rpc", "C1", addr(2))).rejects.toThrow("mismatch")
     })
 })

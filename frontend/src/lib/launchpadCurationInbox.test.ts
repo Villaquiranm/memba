@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { readCurationAccess, readCurationThread, sendCurationMessage } from "./launchpadCurationInbox"
+import { readCurationAccess, readCurationEditorialAccess, readCurationThread, sendCurationMessage } from "./launchpadCurationInbox"
 
 const account = `g1${"q".repeat(38)}`
 const founder = `g1${"p".repeat(38)}`
@@ -27,6 +27,18 @@ describe("private curation inbox client", () => {
             .mockResolvedValueOnce({ ok: true, json: async () => ({ chainId: "other-chain", collection: "C1", messages: [message] }) }))
         await expect(readCurationAccess("C1", account, "gnoland-1", token)).rejects.toThrow("Invalid curation access")
         await expect(readCurationThread("C1", account, "gnoland-1", token)).rejects.toThrow("Invalid discussion")
+    })
+
+    it("binds editorial access to the signed wallet and rejects self-manager claims", async () => {
+        const editorial = { collection: "C1", account, creator: founder, isManager: true }
+        const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => editorial })
+            .mockResolvedValueOnce({ ok: true, json: async () => ({ ...editorial, creator: account }) })
+        vi.stubGlobal("fetch", fetch)
+        await expect(readCurationEditorialAccess("C1", account, "gnoland-1", token)).resolves.toEqual(editorial)
+        expect(fetch.mock.calls[0][0]).toContain("curation-editorial-access")
+        await expect(readCurationEditorialAccess("C1", account, "gnoland-1", token)).rejects.toThrow("Invalid editorial access")
+        await expect(readCurationEditorialAccess("C1", founder, "gnoland-1", token)).rejects.toThrow("Sign in")
+        expect(fetch).toHaveBeenCalledTimes(2)
     })
 
     it("sends an idempotent text message and verifies the sender and content", async () => {

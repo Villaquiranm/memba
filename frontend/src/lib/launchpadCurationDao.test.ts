@@ -1,0 +1,70 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import * as shared from "./dao/shared"
+import { bech32Encode } from "./dao/realmAddress"
+import { LAUNCHPAD_CURATION_DAO_PATH, LAUNCHPAD_CURATION_PATH } from "./nftConfig"
+import { readCurationDaoSnapshot } from "./launchpadCurationDao"
+
+const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
+const qeval = (value: unknown) => `(${JSON.stringify(JSON.stringify(value))} string)`
+const before = {
+    admin: addr(1), pendingAdmin: "", governed: true, activeManagers: "0",
+    seat: { account: "", lead: false, until: "0" },
+    verification: { exists: false, verified: false, reasonHash: "", updatedAt: "0" },
+    feature: { exists: false, proposer: "", approver: "", reasonHash: "", until: "0", approvedAt: "0" },
+    hold: { exists: false, actor: "", confirmer: "", reasonHash: "", until: "0" }, conflict: false,
+}
+const config = {
+    schema: "memba-weighted-host/v13", kind: "config", realmPath: LAUNCHPAD_CURATION_DAO_PATH,
+    rosterSize: 7, totalPoints: 8, founderWeight: 2, developerWeight: 1, votingPeriodSeconds: 604800,
+    roleChanges: { category: "critical", weightedPoints: 6, weightedPeople: 4, weightedDelaySeconds: 86400, independentDevelopers: 5, independentDelaySeconds: 259200 },
+    mutableRoles: ["admin", "finance"], capabilities: { roleProposals: true, memberReplacement: true, migration: false, treasuryExecution: false, applicationActions: true },
+    maxProposalPage: 50, curationPolicy: { target: LAUNCHPAD_CURATION_PATH, successor: addr(2), actionCategory: "critical", maxManagers: 5, maxTermSeconds: 7776000, returnStagesOnly: true, invalidatesOtherProposals: true },
+}
+const proposal = {
+    id: "3", proposer: addr(3), action: { type: "curation", target: LAUNCHPAD_CURATION_PATH, operation: "appoint-manager", recipient: "", manager: addr(4), collection: "", reasonHash: "", lead: false, verified: false, until: "1702851200", before },
+    category: "critical", status: "VOTING", qualified: false, ready: false, votingClosed: false, talliesAvailable: true,
+    weightYes: 0, peopleYes: 0, developersYes: 0, createdAt: "2023-11-20T22:13:20Z", votingDeadline: "2023-11-27T22:13:20Z", weightedAfter: null, developerAfter: null, invalidation: null,
+}
+const page = { schema: config.schema, kind: "proposals", total: "3", proposals: [proposal], nextBefore: "3" }
+
+describe("v13 NFT curation DAO reads", () => {
+    beforeEach(() => vi.restoreAllMocks())
+
+    it("reads only the isolated DAO path and parses typed curation proposals", async () => {
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval(page))
+        const result = await readCurationDaoSnapshot("rpc")
+        expect(result.proposals).toHaveLength(1)
+        expect(result.proposals[0].action.operation).toBe("appoint-manager")
+        expect(result.nextBefore).toBe("3")
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_DAO_PATH, "GetConfigJSON()", true)
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_DAO_PATH, "GetProposalsJSON(0, 20)", true)
+    })
+
+    it("rejects a v12 response, wrong target or malformed curation action", async () => {
+        const query = vi.spyOn(shared, "queryEval")
+        query.mockResolvedValueOnce(qeval({ ...config, schema: "memba-weighted-host/v12" })).mockResolvedValueOnce(qeval(page))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action, target: "gno.land/r/other/curation" } }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { ...proposal.action, recipient: addr(5) } }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow()
+    })
+
+    it("refuses duplicate curation IDs and untrusted pagination", async () => {
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [proposal, proposal] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Duplicate curation proposal")
+        await expect(readCurationDaoSnapshot("rpc", "1); Vote(3")).rejects.toThrow("Invalid governance cursor")
+        expect(query).toHaveBeenCalledTimes(2)
+    })
+
+    it("omits role proposals but never silently drops a malformed curation proposal", async () => {
+        const query = vi.spyOn(shared, "queryEval")
+        const role = { ...proposal, id: "2", action: { type: "set-role", target: addr(5), role: "admin", grant: true } }
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [role, proposal] }))
+        expect((await readCurationDaoSnapshot("rpc")).proposals.map(p => p.id)).toEqual(["3"])
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, status: "READY", ready: false }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Inconsistent curation proposal")
+        query.mockResolvedValueOnce(qeval(config)).mockResolvedValueOnce(qeval({ ...page, proposals: [{ ...proposal, action: { type: "arbitrary-call" } }] }))
+        await expect(readCurationDaoSnapshot("rpc")).rejects.toThrow("Unknown DAO action type")
+    })
+})

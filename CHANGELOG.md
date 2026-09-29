@@ -95,6 +95,70 @@ Full changelogs are split by version range for easier navigation:
 
 - Validate raw Launchpad token creation events before future indexing, including the emitting realm, canonical token and registry identities, creator checksum and duplicate attributes. Parse successful `/block_results` deliveries with exact event positions, while withholding any public record or inferred launch time.
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
+### Memba OS: WUGNOT funded NFT offers (2026-09-28)
+
+- Let buyers choose WUGNOT for token-specific funded offers. Market reads the exact balance and allowance, separates a price-bounded approval from the offer escrow transaction, rechecks owner, policy and token spend before signing, and confirms the exact funded offer record afterward.
+
+### Memba OS: WUGNOT marketplace proceeds (2026-09-28)
+
+- Show separate chain-backed native and WUGNOT credits for the DAO reserve and connected receiver. A personal receiver can review a direct WUGNOT claim with a fresh exact-amount check and its own uncertain-outcome lock; DAO reserve credits continue to require threshold multisig signing.
+
+### Memba OS: WUGNOT NFT seller listings (2026-09-28)
+
+- Let sellers choose GNOT or WUGNOT for fixed-price Open NFT listings. WUGNOT prices use exact whole-token units, and the selected currency's market policy, seller and DAO fee, and creator royalties are reviewed and rechecked before signing.
+
+### Memba OS: reviewed WUGNOT NFT purchases (2026-09-28)
+
+- Let collectors inspect a registered WUGNOT listing, approve only its exact price for the verified market spender, then review a separate token-funded Buy. Both actions recheck listing and policy; Buy rechecks balance, allowance and the full seller, DAO and creator split before signing and confirms the buyer owns the NFT afterward.
+
+### Memba OS: native marketplace proceeds (2026-09-28)
+
+- Show chain-backed DAO treasury and connected wallet claimable native proceeds in Market. A personal receiver can review a direct no-payment claim with a fresh amount check and uncertain-outcome lock. The DAO reserve is displayed separately because its credit requires threshold multisig signing.
+
+### Memba OS: accept funded NFT offers (2026-09-28)
+
+- Let the current NFT owner review a funded offer's buyer, seller credit, DAO treasury and creator payouts before accepting. Recheck ownership, approval, active policy and the exact quote before signing; verify the buyer owns the NFT afterward and hold uncertain outcomes for chain review.
+
+### Memba OS: fund native NFT offers (2026-09-28)
+
+- Let a member inspect an active Open NFT and review a token-specific GNOT offer. The full amount enters market escrow after a wallet review of expiry, pinned DAO fee, creator royalties and future seller payout. Recheck ownership and policy before signing, verify the exact new offer record, and hold uncertain outcomes for chain review.
+
+### Memba OS: funded NFT offer refunds (2026-09-28)
+
+- Let buyers review cancellation of their funded Launchpad offers, including during a trading pause. Any connected member can review an expired-offer refund to its original buyer. Both actions recheck the offer, show the refund recipient and gas payer, and hold uncertain outcomes for chain review.
+
+### Memba OS: create native NFT listings (2026-09-28)
+
+- Let owners inspect an Open Launchpad NFT, approve that exact token for the market, and review a native-price listing with pinned DAO and creator payouts. Both wallet actions recheck ownership and policy; a previous uncertain outcome must be reconciled before another attempt.
+
+### Memba OS: seller exit for Launchpad listings (2026-09-28)
+
+- Let the listing seller review and sign cancellation from Market, including while trading is paused or the sale quote is unavailable. Recheck the listing immediately before signing and hold uncertain wallet outcomes for manual chain review.
+
+### Memba OS: reviewed native NFT purchases (2026-09-28)
+
+- Prepare a native-currency Buy action in Market after the Launchpad ledger, market, policy and proceeds realms are deployed and allowlisted. The OS review shows the exact seller, DAO and creator payouts, rechecks the listing and active policy before Adena opens, and verifies token ownership after submission. The NFT flag remains off until publication and release checks.
+
+### Memba OS: discoverable NFT collection rights (2026-09-28)
+
+- Read the Launchpad ledger's versioned collection capability record on demand in NFT. Show transfer, approval, Soulbound claim and revocation rights, native-market mode eligibility and the scope of royalty payments without implying a live sale.
+
+### Memba OS: weighted NFT curation proposals (2026-09-28)
+
+- Show read-only curation DAO proposals in Market Operations after the separate versioned DAO realm is deployed and allowlisted. Verify the target, action details and proposal state from chain; keep voting and manager changes gated until the authority and wallet release are reviewed.
+
+### Memba OS: public Market Operations records (2026-09-28)
+
+- Add a guarded Market Operations view for the DAO appointed manager roster, founder application statuses and public curation receipts. Keep manager actions and private founder conversations gated until the DAO adapter and role checked inbox are ready.
+
+### Memba OS: funded NFT offer records (2026-09-28)
+
+- Add a guarded, read-only Offers tab to native Market. Show chain-backed buyer, escrow status, expiry and the seller/DAO/royalty split without enabling offer signing before the contract and wallet release gates pass.
+
+### Memba OS: native Market desk and guarded Launchpad sale records (2026-09-28)
+
+- Open a native Market home for services and collectibles. After the Launchpad ledger and market are deployed and allowlisted, read exact sale records and seller, DAO and royalty quotes from chain; keep buying disabled until the trading review and wallet flow are complete.
+
 ### Memba OS: guarded Launchpad NFT collection discovery (2026-09-28)
 
 - Prepare the NFT window to read collections and SoulBound terms from the new Launchpad ledger once its realm is deployed and allowlisted. Show loading and read failures separately from an empty collection list; keep creation and trading tied to the existing realms until their new contract flows are ready.

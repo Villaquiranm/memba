@@ -12,8 +12,9 @@
 import { useEffect, useState } from "react"
 import type { NativeViewProps } from "../../native/types"
 import { GNO_CHAIN_ID, GNO_RPC_URL, NETWORKS, isNftEnabled, isRealmValidOn } from "../../../lib/config"
-import { LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
 import { listLaunchpadNftCollections, type LaunchpadNftCollection } from "../../../lib/launchpadNft"
+import { getLaunchpadNftCapabilities, type LaunchpadNftCapabilities } from "../../../lib/launchpadNftCapabilities"
 import { Card, CardGrid, Empty, ErrorState, Loading, Pill } from "../../kit"
 import { Icon } from "../../shell/icons"
 import { specForTarget } from "../../shell/windows"
@@ -26,6 +27,7 @@ export default function NftWindow({ section, session, open, openApp, fallback }:
     const legacyAvailable = isRealmValidOn(session.network.key, NFT_COLLECTIONS_PATH)
     const ledgerAvailable = isRealmValidOn(session.network.key, LAUNCHPAD_NFT_PATH)
     const marketAvailable = isRealmValidOn(session.network.key, NFT_MARKETPLACE_V3_PATH)
+    const launchpadMarketAvailable = isRealmValidOn(session.network.key, LAUNCHPAD_MARKET_PATH)
     if (!enabled || (!legacyAvailable && !ledgerAvailable)) {
         return (
             <div className="os-stack">
@@ -57,6 +59,10 @@ export default function NftWindow({ section, session, open, openApp, fallback }:
                 {legacyAvailable && marketAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "market", section: "nfts" })!)}>
                     <Icon name="tag" />
                     <span className="os-grow"><b>Browse NFTs</b><span className="os-sub os-block">Collections and listings, in Market</span></span>
+                </Card>}
+                {ledgerAvailable && launchpadMarketAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "market", section: "launchpad" })!)}>
+                    <Icon name="tag" />
+                    <span className="os-grow"><b>Launchpad sale records</b><span className="os-sub os-block">Inspect listings and on-chain fee splits in Market</span></span>
                 </Card>}
                 {legacyAvailable && <Card onClick={() => open(specForTarget({ kind: "app", app: "nft", section: "create" })!)}>
                     <Icon name="nft" />
@@ -123,10 +129,37 @@ function LaunchpadCollections({ rpcUrl }: { rpcUrl: string }) {
                     <span className="os-sub os-block">Base URI SHA-256: <code style={{ overflowWrap: "anywhere" }}>{item.baseURICommitment}</code></span>
                     {item.provenanceHash && <span className="os-sub os-block">Creator provenance hash: <code style={{ overflowWrap: "anywhere" }}>{item.provenanceHash}</code></span>}
                     {!item.revealed && <span className="os-sub os-block">Placeholder: <code style={{ overflowWrap: "anywhere" }}>{item.placeholderURI}</code></span>}
+                    <CapabilityInspector rpcUrl={rpcUrl} item={item} />
                 </details>
             </span>
         </Card>)}</CardGrid>}
         {loading && items.length > 0 && <Loading label="Loading more collections…" />}
         {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more collections</button>}
     </section>
+}
+
+function CapabilityInspector({ rpcUrl, item }: { rpcUrl: string; item: LaunchpadNftCollection }) {
+    const [revision, setRevision] = useState(0)
+    const [requested, setRequested] = useState(false)
+    const [result, setResult] = useState<{ value?: LaunchpadNftCapabilities; error?: boolean; revision: number } | null>(null)
+    useEffect(() => {
+        if (!requested) return
+        let cancelled = false
+        void getLaunchpadNftCapabilities(rpcUrl, item).then((value) => {
+            if (!cancelled) setResult({ value, revision })
+        }).catch(() => { if (!cancelled) setResult({ error: true, revision }) })
+        return () => { cancelled = true }
+    }, [rpcUrl, item, requested, revision])
+    return <div className="os-stack">
+        <button type="button" className="os-btn os-quiet" onClick={() => { setRequested(true); setRevision((value) => value + 1) }}>Check current rights</button>
+        {requested && (!result || result.revision !== revision) && <Loading label="Checking collection rights…" />}
+        {requested && result?.revision === revision && result.error && <span role="alert">Could not verify this collection’s rights from chain.</span>}
+        {requested && result?.revision === revision && result.value && <div className="os-stack">
+            <span className="os-sub">Transfer: {result.value.transferable ? "allowed" : "blocked"} · Approvals: {result.value.approvable ? "allowed" : "blocked"} · Holder burn: allowed</span>
+            <span className="os-sub">Issuer revoke: {result.value.issuerRevoke ? "allowed under the collection policy" : "not allowed"} · Recipient claim: {result.value.recipientClaimRequired ? "required" : "not required"}</span>
+            <span className="os-sub">Native market mode: {result.value.nativeMarketModeEligible ? "eligible" : "ineligible"}. A live sale also requires current ownership, approval and market policy.</span>
+            <span className="os-sub">Royalties: {result.value.royaltyScope === "native_market_only" ? "paid by native marketplace settlements; off-market transfers may not pay" : "none recorded"}</span>
+            <span className="os-sub">Metadata: {result.value.canReveal ? "committed reveal still available" : "no further reveal available"} · {result.value.metadataFrozen ? "frozen" : "not frozen"}</span>
+        </div>}
+    </div>
 }

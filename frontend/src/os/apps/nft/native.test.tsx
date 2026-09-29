@@ -1,22 +1,24 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { GNO_CHAIN_ID } from "../../../lib/config"
-import { LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
+import { LAUNCHPAD_MARKET_PATH, LAUNCHPAD_NFT_PATH, NFT_COLLECTIONS_PATH, NFT_MARKETPLACE_V3_PATH } from "../../../lib/nftConfig"
 import NftWindow from "./native"
 
-const availability = vi.hoisted(() => ({ enabled: false, launchpad: false, ledger: false, market: false }))
+const availability = vi.hoisted(() => ({ enabled: false, launchpad: false, ledger: false, market: false, launchpadMarket: false }))
 const listCollections = vi.hoisted(() => vi.fn())
+const getLaunchpadNftCapabilities = vi.hoisted(() => vi.fn())
 vi.mock("../../../lib/launchpadNft", () => ({ listLaunchpadNftCollections: listCollections }))
+vi.mock("../../../lib/launchpadNftCapabilities", () => ({ getLaunchpadNftCapabilities }))
 vi.mock("../../../lib/config", async (original) => ({
     ...(await original<typeof import("../../../lib/config")>()),
     isNftEnabled: () => availability.enabled,
-    isRealmValidOn: (_network: string, path: string) => path === NFT_COLLECTIONS_PATH ? availability.launchpad : path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === NFT_MARKETPLACE_V3_PATH ? availability.market : false,
+    isRealmValidOn: (_network: string, path: string) => path === NFT_COLLECTIONS_PATH ? availability.launchpad : path === LAUNCHPAD_NFT_PATH ? availability.ledger : path === NFT_MARKETPLACE_V3_PATH ? availability.market : path === LAUNCHPAD_MARKET_PATH ? availability.launchpadMarket : false,
 }))
 const session = (isTestnet: boolean) => ({ network: { key: isTestnet ? "testnet12" : "mainnet", isTestnet } }) as never
 const base = { query: undefined, close: () => {}, toast: () => {}, fallback: <p>classic page</p> }
 
 describe("NFT window", () => {
-    beforeEach(() => { availability.enabled = false; availability.launchpad = false; availability.ledger = false; availability.market = false; listCollections.mockReset() })
+    beforeEach(() => { availability.enabled = false; availability.launchpad = false; availability.ledger = false; availability.market = false; availability.launchpadMarket = false; listCollections.mockReset(); getLaunchpadNftCapabilities.mockReset() })
 
     it("on mainnet, separates implemented screens, absent registry and disabled build flag", () => {
         const openApp = vi.fn()
@@ -68,6 +70,7 @@ describe("NFT window", () => {
         availability.ledger = true
         listCollections.mockResolvedValue([{ id: "C1", name: "Founders", symbol: "FND", creator: "g1creator", mode: "soulbound", revocable: true, totalSupply: 1n, minted: 2n, maxSupply: 100n,
             metadataMode: "reveal_base", revealed: false, metadataFrozen: false, placeholderURI: "ipfs://placeholder/placeholder.json", baseURICommitment: "a".repeat(64), provenanceHash: "b".repeat(64), royaltyBPS: 0n, royalties: [] }])
+        getLaunchpadNftCapabilities.mockResolvedValue({ transferable: false, approvable: false, issuerRevoke: true, recipientClaimRequired: true, nativeMarketModeEligible: false, royaltyScope: "none", canReveal: true, metadataFrozen: false })
         render(<NftWindow {...base} section={null} session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
         expect(screen.queryByRole("button", { name: /Create a collection/ })).toBeNull()
         expect(screen.getByText(/Trading for these collections is not available yet/)).toBeInTheDocument()
@@ -79,6 +82,11 @@ describe("NFT window", () => {
         fireEvent.click(screen.getByText("Collection terms"))
         expect(screen.getByText(/File contents and provenance have not been verified by Memba/)).toBeInTheDocument()
         expect(screen.getByText("b".repeat(64))).toBeInTheDocument()
+        expect(getLaunchpadNftCapabilities).not.toHaveBeenCalled()
+        fireEvent.click(screen.getByRole("button", { name: "Check current rights" }))
+        expect(await screen.findByText(/Transfer: blocked · Approvals: blocked/)).toBeInTheDocument()
+        expect(screen.getByText(/Recipient claim: required/)).toBeInTheDocument()
+        expect(getLaunchpadNftCapabilities).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ id: "C1" }))
         expect(listCollections).toHaveBeenCalledWith(expect.any(String), 0, 20)
     })
 
@@ -89,6 +97,17 @@ describe("NFT window", () => {
         render(<NftWindow {...base} section={null} session={session(true)} open={vi.fn()} openApp={vi.fn()} />)
         await waitFor(() => expect(screen.getByText("Could not read Launchpad collections from this network.")).toBeInTheDocument())
         expect(screen.queryByText("No Launchpad collections have been created yet.")).toBeNull()
+    })
+
+    it("opens native Launchpad sale records only after the market realm is allowlisted", () => {
+        availability.enabled = true
+        availability.ledger = true
+        availability.launchpadMarket = true
+        listCollections.mockResolvedValue([])
+        const open = vi.fn()
+        render(<NftWindow {...base} section={null} session={session(true)} open={open} openApp={vi.fn()} />)
+        fireEvent.click(screen.getByRole("button", { name: /Launchpad sale records/ }))
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: "app", app: "market", section: "launchpad" } }))
     })
 
     it("renders the fallback for every section other than the home, on any network", () => {

@@ -20,6 +20,10 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: founder applications and manager reviews (2026-09-29)
+
+- Let collection creators pin public application evidence and review an on-chain submission in the native Market Operations desk. Eligible community managers can pin a public reason and review a request-changes, recommendation or decline decision. Wallet reviews recheck the evidence bytes, collection, application, role and network before signing and verify the result on chain.
+
 ### Memba OS: public curation evidence upload (2026-09-29)
 
 - Add a disabled, exact-chain authenticated text pinning endpoint for public application and review evidence. It enforces a 16 KiB UTF-8 limit, per-IP and per-wallet quotas, a fixed upstream and a validated CID, then returns the SHA-256 of the exact uploaded bytes.

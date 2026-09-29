@@ -52,6 +52,13 @@ export async function listCurationApplications(rpcUrl: string, page = 0, size = 
     return rows
 }
 
+export async function getCurationApplication(rpcUrl: string, id: string): Promise<CurationApplication | null> {
+    if (!collection.safeParse(id).success) throw new Error("Invalid collection ID")
+    const result = application.nullable().parse(await read(rpcUrl, `ApplicationJSON(${JSON.stringify(id)})`))
+    if (result && result.collection !== id) throw new Error("Curation application collection mismatch")
+    return result
+}
+
 export async function getCollectionCuration(rpcUrl: string, id: string): Promise<CurationReceipt> {
     if (!collection.safeParse(id).success) throw new Error("Invalid collection ID")
     const result = receipt.parse(await read(rpcUrl, `CollectionCurationJSON(${JSON.stringify(id)})`))

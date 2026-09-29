@@ -6,10 +6,11 @@ import { Empty, ErrorState, Loading, Pill } from "../../kit"
 import type { OsSession } from "../../shell/useOsSession"
 import CurationDiscussion from "./discussion"
 import PublicCurationEvidence from "./evidence"
+import { FounderApplicationDesk, ManagerReviewDesk } from "./curationActions"
 
 const PAGE_SIZE = 20
 
-export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rpcUrl: string; daoAvailable: boolean; session: OsSession }) {
+export default function MarketOperations({ rpcUrl, daoAvailable, session, toast }: { rpcUrl: string; daoAvailable: boolean; session: OsSession; toast: (message: string) => void }) {
     const [page, setPage] = useState(0)
     const [revision, setRevision] = useState(0)
     const [team, setTeam] = useState<{ state: CurationState; seats: CurationSeat[] } | null>(null)
@@ -20,6 +21,7 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rp
     const [receipt, setReceipt] = useState<{ id: string; value?: CurationReceipt; error?: boolean } | null>(null)
     const loading = settled.page !== page || settled.revision !== revision
     const error = !loading && settled.error
+    const refreshRecords = () => { setPage(0); setApplications([]); setTeam(null); setSelected(null); setReceipt(null); setRevision((value) => value + 1) }
 
     useEffect(() => {
         let cancelled = false
@@ -44,7 +46,7 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rp
             if (!cancelled) setReceipt({ id: selected, value })
         }).catch(() => { if (!cancelled) setReceipt({ id: selected, error: true }) })
         return () => { cancelled = true }
-    }, [rpcUrl, selected])
+    }, [rpcUrl, selected, revision])
 
     return <div className="os-stack os-market-operations">
         <header className="os-market-records-head"><div><h1>Market Operations</h1><p className="os-sub">A public trail of founder applications, community review seats and editorial decisions.</p></div><Pill tone="neutral">Public record</Pill></header>
@@ -56,6 +58,7 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rp
             <div className="os-ops-section-head"><h2 id="os-ops-team-title">Community review team</h2><span>{team.state.activeManagers} of 5 active seats</span></div>
             {team.seats.length === 0 ? <p className="os-sub">The DAO has not appointed any active managers.</p> : <div className="os-ops-seats">{team.seats.map((seat) => <div className="os-ops-seat" key={seat.account}><Pill tone={seat.lead ? "ok" : "neutral"}>{seat.lead ? "Lead" : "Manager"}</Pill><code>{seat.account}</code><span>Term ends {formatTime(seat.until)}</span></div>)}</div>}
         </section>}
+        <FounderApplicationDesk rpcUrl={rpcUrl} session={session} toast={toast} onChanged={refreshRecords} />
         {daoAvailable && <CurationGovernance rpcUrl={rpcUrl} />}
         <section className="os-stack" aria-labelledby="os-ops-applications-title">
             <div className="os-ops-section-head"><h2 id="os-ops-applications-title">Founder applications</h2><span>On-chain status and public evidence hashes</span></div>
@@ -75,6 +78,8 @@ export default function MarketOperations({ rpcUrl, daoAvailable, session }: { rp
                         ? <div className="os-note"><span>Connect a wallet to check whether you can join the private founder discussion.</span><button type="button" className="os-btn os-quiet" onClick={session.openConnect}>Connect wallet</button></div>
                         : <CurationDiscussion key={`${session.network.chainId}:${session.address}:${session.layout.auth.token.nonce}:${item.collection}`} collection={item.collection} account={session.address} chainId={session.network.chainId} token={session.layout.auth.token} />}
                 </div>}
+                {selected === item.collection && session.status === "member" && session.layout.auth.token &&
+                    <div className="os-curation-private-entry"><ManagerReviewDesk key={`${item.collection}:${item.revision}:${session.address}`} application={item} rpcUrl={rpcUrl} session={session} toast={toast} onChanged={refreshRecords} /></div>}
             </article>)}</div>}
             {loading && applications.length > 0 && <Loading label="Loading more applications…" />}
             {!error && !loading && hasMore && <button type="button" className="os-btn os-quiet" onClick={() => setPage((value) => value + 1)}>Load more applications</button>}

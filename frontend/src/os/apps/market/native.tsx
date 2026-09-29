@@ -38,7 +38,7 @@ export default function MarketWindow({ section, session, open, toast, fallback }
 
     if (section === "operations") {
         return curationAvailable
-            ? <MarketOperations key={`${network}:${session.address}`} rpcUrl={rpcUrl} daoAvailable={isRealmValidOn(network, LAUNCHPAD_CURATION_DAO_PATH)} session={session} />
+            ? <MarketOperations key={`${network}:${session.address}`} rpcUrl={rpcUrl} daoAvailable={isRealmValidOn(network, LAUNCHPAD_CURATION_DAO_PATH)} session={session} toast={toast} />
             : <div className="os-stack"><div className="os-note os-warn" role="note">Market Operations is awaiting the governed curation realm on this network.</div><button type="button" className="os-btn os-quiet" onClick={openServices}>Open services</button></div>
     }
 

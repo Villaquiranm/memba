@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as shared from "./dao/shared"
 import { bech32Encode } from "./dao/realmAddress"
 import { LAUNCHPAD_CURATION_PATH } from "./nftConfig"
-import { getCollectionCuration, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
+import { getCollectionCuration, getCurationApplication, getCurationState, listCurationApplications, listCurationManagers } from "./launchpadCuration"
 
 const addr = (n: number) => bech32Encode("g", new Uint8Array(20).fill(n))
 const digest = (c: string) => c.repeat(64)
@@ -45,6 +45,15 @@ describe("Launchpad curation reads", () => {
         query.mockResolvedValueOnce(qeval([app, app]))
         await expect(listCurationApplications("rpc")).rejects.toThrow("Duplicate application")
         await expect(listCurationApplications("rpc", -1)).rejects.toThrow("Invalid application page")
+    })
+
+    it("reads one exact application or an explicit missing record", async () => {
+        const query = vi.spyOn(shared, "queryEval").mockResolvedValueOnce(qeval(app)).mockResolvedValueOnce(qeval(null))
+            .mockResolvedValueOnce(qeval({ ...app, collection: "C2" }))
+        expect(await getCurationApplication("rpc", "C1")).toEqual(app)
+        expect(await getCurationApplication("rpc", "C1")).toBeNull()
+        await expect(getCurationApplication("rpc", "C1")).rejects.toThrow("mismatch")
+        expect(query).toHaveBeenCalledWith("rpc", LAUNCHPAD_CURATION_PATH, 'ApplicationJSON("C1")', true)
     })
 
     it("binds public feature, hold and verification facts to one collection", async () => {

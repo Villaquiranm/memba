@@ -75,6 +75,22 @@
 .memba-os .os-curation-evidence-body { display: grid; gap: 8px; }
 .memba-os .os-curation-evidence-body > span { color: var(--os-acc); font-weight: 700; }
 .memba-os .os-curation-evidence-body pre { max-height: 320px; margin: 0; overflow: auto; padding: 12px; border-radius: 7px; background: var(--os-hover); color: var(--os-ink); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memba-os .os-curation-author { display: grid; gap: 14px; padding: 20px; border: 1px solid var(--os-line); border-radius: 14px; background: var(--os-card); }
+.memba-os .os-curation-author h2, .memba-os .os-curation-author h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: -.025em; }
+.memba-os .os-curation-author p { margin: 0; }
+.memba-os .os-curation-lookup { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.memba-os .os-curation-lookup label { width: 100%; font-weight: 700; }
+.memba-os .os-curation-lookup input { min-width: 130px; max-width: 220px; }
+.memba-os .os-curation-author input:not([type="checkbox"]), .memba-os .os-curation-author select, .memba-os .os-curation-author textarea { box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--os-line); border-radius: 9px; background: var(--os-card); color: var(--os-ink); font: inherit; }
+.memba-os .os-curation-author input:focus-visible, .memba-os .os-curation-author select:focus-visible, .memba-os .os-curation-author textarea:focus-visible { outline: 2px solid var(--os-acc); outline-offset: 2px; }
+.memba-os .os-curation-author-body, .memba-os .os-curation-author-evidence { display: grid; gap: 12px; }
+.memba-os .os-curation-author-evidence { padding-top: 14px; border-top: 1px solid var(--os-line); }
+.memba-os .os-curation-author-evidence > label:first-child { font-weight: 700; }
+.memba-os .os-curation-author-evidence textarea { width: 100%; resize: vertical; line-height: 1.5; }
+.memba-os .os-curation-author-evidence .os-btn, .memba-os .os-curation-author-body > .os-btn { justify-self: start; }
+.memba-os .os-curation-prepared { display: grid; gap: 5px; }
+.memba-os .os-curation-prepared code { overflow-wrap: anywhere; }
+.memba-os .os-curation-review { margin-top: 12px; }
 @container os-window (max-width: 620px) {
   .memba-os .os-market-lanes { grid-template-columns: 1fr; }
   .memba-os .os-market-lane { min-height: 170px; padding: 18px; }

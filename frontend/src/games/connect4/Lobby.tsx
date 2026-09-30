@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { accept, cancel, getActive, offer, type Game } from "../../lib/connect4"
 import { ErrorToast } from "../../components/ui/ErrorToast"
 import { fmtSeconds, formatGnot, useActive, useChainNow, useTx } from "./useConnect4"
@@ -9,6 +9,8 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     const { data, dataUpdatedAt } = useActive()
     const now = useChainNow(data?.now, dataUpdatedAt)
     const tx = useTx()
+    const alive = useRef(true)
+    useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
     const [stake, setStake] = useState("1")
     const [validFor, setValidFor] = useState("10")
     const [opponent, setOpponent] = useState("")
@@ -26,10 +28,13 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
         const commitment = await offer(me, { stakeUgnot, validFor: minutes, opponent })
         // ponytail: finds the new game in the first 100 active games; page if the lobby ever grows past that.
         for (let i = 0; i < 10; i++) {
+            if (!alive.current) return
             const found = (await getActive(0, 100))?.games.find((g) => g.creator === me && g.commitment === commitment)
+            if (!alive.current) return
             if (found) { onOpen(found.id); return }
             await new Promise((r) => setTimeout(r, 1_500))
         }
+        if (alive.current) throw new Error("Your offer was posted but hasn't appeared yet — it will show in the lobby shortly.")
     })
 
     const canAccept = (g: Game) => connected && g.creator !== me && (g.opponent === "" || g.opponent === me) && now < g.expiresAt
@@ -62,7 +67,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
         <table><thead><tr><th>Game</th><th>Pot</th><th>Turn</th></tr></thead><tbody>
             {live.length === 0 && <tr><td colSpan={3}>No live games.</td></tr>}
             {live.map((g) => <tr key={g.id} aria-label={`#${g.id}`} onClick={() => onOpen(g.id)} style={{ cursor: "pointer" }}>
-                <td><button type="button" className="os-link" onClick={() => onOpen(g.id)}>#{g.id}</button>{(g.creator === me || g.acceptor === me) && " · yours"}</td>
+                <td><button type="button" className="os-link">#{g.id}</button>{(g.creator === me || g.acceptor === me) && " · yours"}</td>
                 <td>{formatGnot(2 * g.stake)}</td>
                 <td>{g.turn === 0 ? "awaiting reveal" : g.turnPlayer === me ? "you" : g.turnPlayer}</td>
             </tr>)}

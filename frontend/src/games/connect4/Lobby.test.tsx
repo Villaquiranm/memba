@@ -64,4 +64,27 @@ describe("Lobby", () => {
         expect(await screen.findByText(/Connect your wallet to play/)).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: "Post offer" })).toBeNull()
     })
+
+    it("tells the user when a posted offer never shows up", async () => {
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [] })
+        lib.offer.mockResolvedValue("c".repeat(64))
+        const onOpen = vi.fn()
+        renderWithProviders(<Lobby me="g1alice" connected onOpen={onOpen} />)
+        await screen.findByLabelText("Stake (GNOT)")
+        vi.useFakeTimers({ shouldAdvanceTime: true })
+        try {
+            fireEvent.click(screen.getByRole("button", { name: "Post offer" }))
+            await vi.advanceTimersByTimeAsync(20_000)
+        } finally { vi.useRealTimers() }
+        expect(await screen.findByText(/hasn't appeared yet/)).toBeInTheDocument()
+        expect(onOpen).not.toHaveBeenCalled()
+    })
+
+    it("opens a live game exactly once per click", async () => {
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [{ ...base, status: "playing", acceptor: "g1bob", turn: 1, turnPlayer: "g1alice" }] })
+        const onOpen = vi.fn()
+        renderWithProviders(<Lobby me="g1bob" connected onOpen={onOpen} />)
+        fireEvent.click(await screen.findByRole("button", { name: "#1" }))
+        expect(onOpen).toHaveBeenCalledTimes(1)
+    })
 })

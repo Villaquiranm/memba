@@ -1,0 +1,31 @@
+import { useEffect, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { getActive, getGame } from "../../lib/connect4"
+
+export const useActive = () => useQuery({ queryKey: ["connect4", "active"], queryFn: () => getActive(0, 100), refetchInterval: 10_000 })
+export const useGame = (id: number) => useQuery({ queryKey: ["connect4", "game", id], queryFn: () => getGame(id), refetchInterval: 3_000 })
+
+/** Chain seconds now: the last response's block time advanced by wall time since it arrived. */
+export function useChainNow(now: number | undefined, fetchedAt: number): number {
+    const [wall, setWall] = useState(() => Date.now())
+    useEffect(() => { const t = setInterval(() => setWall(Date.now()), 1_000); return () => clearInterval(t) }, [])
+    return now === undefined ? 0 : now + Math.max(0, Math.floor((wall - fetchedAt) / 1_000))
+}
+
+/** One tx at a time; refreshes every connect4 query after success. */
+export function useTx() {
+    const client = useQueryClient()
+    const [pending, setPending] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const run = async (fn: () => Promise<unknown>) => {
+        if (pending) return false
+        setPending(true); setError(null)
+        try { await fn(); await client.invalidateQueries({ queryKey: ["connect4"] }); return true }
+        catch (e) { setError(e instanceof Error ? e.message : String(e)); return false }
+        finally { setPending(false) }
+    }
+    return { pending, error, clearError: () => setError(null), run }
+}
+
+export const formatGnot = (ugnot: number) => `${ugnot / 1_000_000} GNOT`
+export const fmtSeconds = (s: number) => (s <= 0 ? "0s" : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`)

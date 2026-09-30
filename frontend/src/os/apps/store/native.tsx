@@ -13,6 +13,7 @@ import type { NativeViewProps } from "../../native/types"
 import { osTargetForClassic } from "../../page/classicRoute"
 import { Icon } from "../../shell/icons"
 import { specForTarget } from "../../shell/windows"
+import { NativeReviewComposer } from "./NativeReviewComposer"
 import "./native.css"
 
 const sections = [
@@ -37,8 +38,17 @@ function Artwork({ entry, large = false }: { entry: CatalogueEntry; large?: bool
     </span>
 }
 
+// Registering a listing is open to anyone: only a live one has been approved.
+const LISTING_PROVENANCE: Record<string, string> = {
+    live: "Curator approved listing",
+    pending: "Pending review, not yet vetted by a curator",
+    rejected: "Rejected by a curator",
+    delisted: "Delisted",
+}
+
 function provenance(entry: CatalogueEntry): string {
-    if (entry.source === "registry") return "Curator approved listing"
+    const status = entry.listing?.status ?? ""
+    if (entry.source === "registry") return Object.hasOwn(LISTING_PROVENANCE, status) ? LISTING_PROVENANCE[status] : "Unapproved listing"
     if (entry.project?.kind === "tool") return "Independent tool"
     if (entry.realmPath) return "Mainnet realm linked"
     return "External project"
@@ -84,6 +94,7 @@ function OpenDestination({ entry, session, open }: Pick<NativeViewProps, "sessio
 }
 
 function Detail({ section, session, open, close }: NativeViewProps) {
+    const [reviewRefresh, setReviewRefresh] = useState(0)
     const path = section?.startsWith("apps/") ? `gno.land/${section.slice(5)}` : null
     const projectId = section?.startsWith("project/") ? section.slice(8) : null
     const project = ECOSYSTEM_PROJECTS.find((candidate) => candidate.id === projectId)
@@ -95,7 +106,7 @@ function Detail({ section, session, open, close }: NativeViewProps) {
         staleTime: 60_000, retry: 1,
     })
     const listing = detail.data
-    const entry = project ? buildCatalogue([], [project], session.network.key)[0] : listing ? buildCatalogue([listing], ECOSYSTEM_PROJECTS, session.network.key)[0] ?? {
+    const entry = project ? buildCatalogue([], [project], session.network.key)[0] : listing ? buildCatalogue([listing], ECOSYSTEM_PROJECTS, session.network.key).find((candidate) => candidate.listing === listing) ?? {
         id: `registry:${listing.pkgPath}`, source: "registry" as const, name: listing.name,
         tagline: listing.tagline, category: catalogueCategory(listing.category), url: listing.appURL,
         realmPath: listing.pkgPath, availability: session.network.key === "mainnet" ? "mainnet" as const : "testnet" as const, listing,
@@ -112,14 +123,18 @@ function Detail({ section, session, open, close }: NativeViewProps) {
                 <Artwork key={entry.id} entry={entry} large />
                 <div><p className="os-store-kicker">{entry.category} <span aria-hidden="true">·</span> {availability(entry)}</p><h1>{entry.name}</h1><p>{entry.tagline}</p></div>
             </header>
-            {listing?.status !== undefined && listing.status !== "live" && <p className="os-store-notice" role="status">This listing is {listing.status}. It is not in the approved catalogue.</p>}
+            {listing?.status !== undefined && listing.status !== "live" && <p className="os-store-notice" role="status">{listing.status ? `This listing is ${listing.status}.` : "This listing has no status."} It is not in the approved catalogue.</p>}
             <div className="os-store-actions">{(!listing || listing.status === "live") && <OpenDestination entry={entry} session={session} open={open} />}{entry.realmPath && <a className="os-btn os-quiet" href={`https://gno.land/${entry.realmPath.replace(/^gno\.land\//, "")}$source`} target="_blank" rel="noopener noreferrer">Read realm source ↗</a>}</div>
             <div className="os-store-detail-columns">
                 <div className="os-store-main">
                     <section><h2>About this app</h2><p>{listing?.descr || entry.project?.description || entry.tagline || "The publisher has not supplied a description yet."}</p></section>
                     {!!listing?.screenshotCIDs?.filter(isValidCid).length && <section><h2>Screenshots</h2><div className="os-store-shots">{listing.screenshotCIDs.filter(isValidCid).map((cid, i) => <Screenshot key={cid} cid={cid} name={entry.name} index={i} />)}</div></section>}
                     {entry.source === "registry" && (isAppReviewsAvailable()
-                        ? <div className="os-store-reviews"><ReviewsSection subject={entry.realmPath!} realmPath={MEMBA_DAO.appReviewsPath} minRatedCount={MIN_RATED_COUNT} paginate useOnchainSummary readOnly /><a className="os-btn os-quiet" href={`https://memba.samourai.app/${session.network.key}/apps/${entry.realmPath!.replace(/^gno\.land\//, "")}`} target="_blank" rel="noopener noreferrer">Write or manage reviews ↗</a></div>
+                        ? <div className="os-store-reviews">
+                            {listing?.status === "live" && <NativeReviewComposer key={entry.realmPath} session={session} subject={entry.realmPath!} appName={entry.name} onSubmitted={() => setReviewRefresh(value => value + 1)} />}
+                            <ReviewsSection key={`${entry.realmPath}:${reviewRefresh}`} subject={entry.realmPath!} realmPath={MEMBA_DAO.appReviewsPath} minRatedCount={MIN_RATED_COUNT} paginate useOnchainSummary readOnly />
+                            <div className="os-store-review-actions"><button type="button" className="os-btn os-quiet" onClick={() => { setReviewRefresh(value => value + 1); void detail.refetch() }}>Refresh reviews</button><a className="os-btn os-quiet" href={`/${session.network.key}/apps/${entry.realmPath!.replace(/^gno\.land\//, "")}`} target="_blank" rel="noopener noreferrer">Manage reviews and replies ↗</a></div>
+                        </div>
                         : <section><h2>Community reviews</h2><p>Onchain app reviews are not available here yet.</p></section>)}
                 </div>
                 <aside className="os-store-trust"><h2>Before you open</h2><p><b>{provenance(entry)}</b> identifies how this page was listed. Curation is not a code audit or a transaction guarantee.</p>{entry.realmPath && <code>{entry.realmPath}</code>}{listing?.publisher && <p>Publisher <code>{listing.publisher}</code></p>}{entry.project?.evidence && <p>Link checked {entry.project.evidence.checkedAt}</p>}{entry.source === "editorial" && <p>Independent projects open outside Memba. Check their network before connecting a wallet.</p>}</aside>

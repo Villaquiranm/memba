@@ -49,6 +49,11 @@ Full changelogs are split by version range for easier navigation:
 ### App Store: shared classic discovery (2026-09-28)
 
 - Search and filter onchain listings and independent projects with the same catalogue controls on the classic Store. Read bounded registry pages beyond the old 30-item ceiling and disclose partial results.
+### Memba OS: native App Store review signing (2026-09-30)
+
+- When app reviews are enabled, compose an onchain app rating inside the OS and review the exact PostReview call, its account, its expected storage deposit and cap, and its network fee in the signing sheet. Recheck the live listing before Adena opens, and keep the draft in the browser session, across a wallet connection, until the review is submitted. Report an unknown outcome as unknown: refreshing the reviews shows whether it was posted, and posting again replaces the rating and text. Existing review reads stay paginated; classic review management remains available.
+- Keep the Store trust panel content-sized on desktop, keep the review form closed until it is opened or holds a draft, and give rating stars and review controls larger touch targets.
+- Reject listing paths with dot or empty segments. Show a listing that is not live under its own name and status, never as curator approved.
 
 ### Memba OS: quieter Live and repeat welcome
 
@@ -115,7 +120,7 @@ Full changelogs are split by version range for easier navigation:
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
 ### Memba OS: gated onchain App Store reviews (2026-09-28)
 
-- Read App Store reviews inside the native detail window when the dedicated realm is verified and enabled, with a clear path to the classic write flow until review actions use the OS transaction sheet. Keep wallet authorship distinct from proof of app use.
+- Read App Store reviews inside the native detail window when the dedicated realm is verified and enabled. Keep wallet authorship distinct from proof of app use.
 - Page through visible reviews after moderation, show the full onchain review count, and calculate decimal ratings from the exact sum. Offer retry when a review read fails.
 
 ### Memba OS: native Settings

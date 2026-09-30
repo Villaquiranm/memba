@@ -85,7 +85,7 @@ export async function getActive(offset: number, limit: number): Promise<{ now: n
 
 export type Connect4Func = "Offer" | "Accept" | "Reveal" | "Play" | "ClaimTimeout" | "Resign" | "Cancel"
 
-// Storage deposit cap per call, measured on onyx-1 (plan Task 2) with headroom.
+// Storage deposit cap per call. Placeholder until measured on onyx-1 (plan Task 2).
 const MAX_DEPOSIT_UGNOT = 2_000_000
 
 export function buildCall(func: Connect4Func, args: string[], caller: string, sendUgnot?: number): AminoMsg {
@@ -98,7 +98,7 @@ export function buildCall(func: Connect4Func, args: string[], caller: string, se
 }
 
 function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number) {
-    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`)
+    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { retry: false })
 }
 
 function assertIndex(n: number) {
@@ -134,6 +134,13 @@ export async function offer(caller: string, o: { stakeUgnot: number; validFor: n
     const bytes = crypto.getRandomValues(new Uint8Array(32))
     const passphrase = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
     const commitment = await sha256Hex(passphrase)
+    let raw: string | null = null
+    try { raw = localStorage.getItem(keyStore(caller)) } catch { /* unreadable: the write below reports it */ }
+    if (raw !== null) {
+        let v: unknown
+        try { v = JSON.parse(raw) } catch { v = null }
+        if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("Your stored reveal keys look damaged, so nothing was sent.")
+    }
     try {
         localStorage.setItem(keyStore(caller), JSON.stringify({ ...readKeys(caller), [commitment]: passphrase }))
     } catch {

@@ -10,7 +10,7 @@ export default function Connect4Game() {
     const nav = useNetworkNav()
     const me = adena.connected ? adena.address : ""
     const gameId = id !== undefined && /^\d{1,9}$/.test(id) ? Number(id) : null
-    if (id !== undefined && gameId === null) return <p>Invalid game id.</p>
+    if (id !== undefined && gameId === null) return <div><p>Invalid game id.</p><button type="button" onClick={() => nav("game/connect4")}>Back to lobby</button></div>
     return gameId === null
         ? <Lobby me={me} connected={adena.connected} onOpen={(g) => nav(`game/connect4/${g}`)} />
         : <GameView key={gameId} id={gameId} me={me} connected={adena.connected} onBack={() => nav("game/connect4")} />

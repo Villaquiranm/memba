@@ -87,4 +87,28 @@ describe("Lobby", () => {
         fireEvent.click(await screen.findByRole("button", { name: "#1" }))
         expect(onOpen).toHaveBeenCalledTimes(1)
     })
+
+    it("opens a game the creator must reveal, once; not for the acceptor", async () => {
+        const g = { ...base, status: "playing" as const, acceptor: "g1bob", turn: 0 as const }
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [g] })
+        const onOpen = vi.fn()
+        renderWithProviders(<Lobby me="g1alice" connected onOpen={onOpen} />)
+        await waitFor(() => expect(onOpen).toHaveBeenCalledWith(1))
+        await new Promise((r) => setTimeout(r, 50))
+        expect(onOpen).toHaveBeenCalledTimes(1)
+
+        const other = vi.fn()
+        renderWithProviders(<Lobby me="g1bob" connected onOpen={other} />)
+        await screen.findAllByRole("row", { name: /#1/ })
+        expect(other).not.toHaveBeenCalled()
+    })
+
+    it("filters to my games", async () => {
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [base, { ...base, id: 2, creator: "g1carol" }] })
+        renderWithProviders(<Lobby me="g1alice" connected onOpen={vi.fn()} />)
+        await screen.findByRole("row", { name: /#2/ })
+        fireEvent.click(screen.getByLabelText("Only my games"))
+        expect(screen.queryByRole("row", { name: /#2/ })).toBeNull()
+        expect(screen.getByRole("row", { name: /#1/ })).toBeInTheDocument()
+    })
 })

@@ -3,7 +3,8 @@ import { accept, cancel, getActive, offer, type Game } from "../../lib/connect4"
 import { ErrorToast } from "../../components/ui/ErrorToast"
 import { fmtSeconds, formatGnot, useActive, useChainNow, useTx } from "./useConnect4"
 
-const FEE_UGNOT = 100_000 // realm default; the form re-checks against each offer's own fee in the table
+// The realm's default fee, used for the pre-sign estimate only; per-game results use g.fee.
+const FEE_UGNOT = 100_000
 
 export function Lobby({ me, connected, onOpen }: { me: string; connected: boolean; onOpen: (id: number) => void }) {
     const { data, dataUpdatedAt } = useActive()
@@ -14,9 +15,22 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     const [stake, setStake] = useState("1")
     const [validFor, setValidFor] = useState("10")
     const [opponent, setOpponent] = useState("")
-    const games = data?.games ?? []
+    const [mineOnly, setMineOnly] = useState(false)
+    const games = (data?.games ?? []).filter((g) => !mineOnly || g.creator === me || g.acceptor === me || g.opponent === me)
     const offers = games.filter((g) => g.status === "open")
     const live = games.filter((g) => g.status === "playing")
+
+    // A creator whose offer was accepted must reveal: open that game so the reveal prompt/auto-reveal runs.
+    const opened = useRef(new Set<number>())
+    useEffect(() => {
+        if (!connected) return
+        for (const g of data?.games ?? []) {
+            if (g.status === "playing" && g.turn === 0 && g.creator === me && !opened.current.has(g.id)) {
+                opened.current.add(g.id)
+                onOpen(g.id)
+            }
+        }
+    }, [data, connected, me, onOpen])
 
     const stakeUgnot = Math.round(Number(stake) * 1_000_000)
     const minutes = Number(validFor)
@@ -48,6 +62,8 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
         <ErrorToast message={tx.error} onDismiss={tx.clearError} />
         {!connected && <div className="os-note" role="status">Connect your wallet to play. You can watch games without one.</div>}
 
+        {connected && <label><input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> Only my games</label>}
+
         <h3>Open offers</h3>
         <table><thead><tr><th>Game</th><th>Stake</th><th>Creator</th><th>Expires</th><th /></tr></thead><tbody>
             {offers.length === 0 && <tr><td colSpan={5}>No open offers.</td></tr>}
@@ -78,7 +94,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
             <label>Stake (GNOT) <input type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} /></label>
             <label>Valid for (minutes) <input type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} /></label>
             <label>Opponent address (optional) <input value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1…" /></label>
-            <p className="os-sub">Winner receives {formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}. After someone accepts, this device must be open to reveal within 90 seconds — the reveal key is stored only in this browser. Missing it forfeits your stake.</p>
+            <p className="os-sub">Winner receives {formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}. After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</p>
             <button type="submit" disabled={!formOk || tx.pending}>Post offer</button>
         </form>}
     </div>

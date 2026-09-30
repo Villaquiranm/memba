@@ -13,14 +13,16 @@ function result(g: Game, me: string): string {
 }
 
 export function GameView({ id, me, connected, onBack }: { id: number; me: string; connected: boolean; onBack: () => void }) {
-    const { data, dataUpdatedAt, isLoading } = useGame(id)
+    const { data, dataUpdatedAt, isLoading, isError } = useGame(id)
     const now = useChainNow(data?.now, dataUpdatedAt)
     const tx = useTx()
     const g = data?.game ?? null
     const isCreator = connected && g?.creator === me
     const isPlayer = connected && (g?.creator === me || g?.acceptor === me)
     const needsReveal = g?.status === "playing" && g.turn === 0
-    const key = isCreator && needsReveal && g ? revealKey(me, g.commitment) : null
+    const left = g ? g.deadline - now : 0
+    const expired = g?.status === "playing" && left <= 0
+    const key = isCreator && needsReveal && !expired && g ? revealKey(me, g.commitment) : null
     const autoRevealed = useRef(false)
 
     useEffect(() => {
@@ -30,10 +32,11 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     }, [key, g, me, tx])
 
     if (isLoading) return <p className="os-sub">Loading game #{id}…</p>
-    if (!g) return <div className="os-stack"><p>Game #{id} not found.</p><button type="button" onClick={onBack}>Back to lobby</button></div>
+    if (!g) {
+        const notFound = data?.game === null
+        return <div className="os-stack"><p>{notFound ? `Game #${id} not found.` : isError ? "Couldn't reach the network. Retrying…" : `Loading game #${id}…`}</p><button type="button" onClick={onBack}>Back to lobby</button></div>
+    }
 
-    const left = g.deadline - now
-    const expired = g.status === "playing" && left <= 0
     const myTurn = connected && g.status === "playing" && g.turnPlayer === me && !expired
 
     return <div className="os-stack">
@@ -42,11 +45,11 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         <ErrorToast message={tx.error} onDismiss={tx.clearError} />
 
         {g.status === "open" && <p role="status">Waiting for an opponent · offer {now >= g.expiresAt ? "expired" : `expires in ${fmtSeconds(g.expiresAt - now)}`}</p>}
-        {needsReveal && <p role="status">Waiting for the creator to reveal · {fmtSeconds(left)} left</p>}
+        {needsReveal && <p role="status">Waiting for the creator to reveal · {expired ? "reveal clock ran out" : `${fmtSeconds(left)} left`}</p>}
         {g.status === "playing" && g.turn !== 0 && <p role="status">
             {myTurn ? "Your move" : isPlayer ? "Opponent's move" : `${g.turnPlayer}'s move`} · {expired ? "clock ran out" : `${fmtSeconds(left)} left`}
         </p>}
-        {isCreator && needsReveal && !key && <div className="os-note" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
+        {isCreator && needsReveal && !expired && !key && <div className="os-note" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
         {!["open", "playing"].includes(g.status) && <div className="os-note" role="status">{result(g, me)}</div>}
 
         <Board game={g} canPlay={myTurn && !tx.pending} onPlay={(c) => void tx.run(() => play(me, g.id, c))} />

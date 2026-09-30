@@ -1,5 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { render } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderWithProviders } from "../../test/test-utils"
 import type { Game } from "../../lib/connect4"
 
@@ -72,5 +74,25 @@ describe("GameView", () => {
         lib.getGame.mockResolvedValue({ now: 1, game: null })
         renderWithProviders(<GameView id={4} me="" connected={false} onBack={vi.fn()} />)
         expect(await screen.findByText(/Game #4 not found/)).toBeInTheDocument()
+    })
+
+    it("does not reveal after the reveal clock ran out", async () => {
+        lib.revealKey.mockReturnValue("pass")
+        view("g1alice", { ...g, turn: 0, turnPlayer: "" }, 1_200)
+        expect(await screen.findByText(/reveal clock ran out/)).toBeInTheDocument()
+        expect(screen.getByRole("button", { name: "Claim timeout" })).toBeEnabled()
+        expect(screen.queryByRole("button", { name: "Reveal" })).toBeNull()
+        expect(lib.reveal).not.toHaveBeenCalled()
+    })
+
+    it("keeps the board when a later poll fails", async () => {
+        lib.getGame.mockResolvedValueOnce({ now: 1_000, game: g }).mockResolvedValue(null)
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(<QueryClientProvider client={client}><GameView id={4} me="g1alice" connected onBack={vi.fn()} /></QueryClientProvider>)
+        expect(await screen.findByText(/Your move/)).toBeInTheDocument()
+        await client.refetchQueries()
+        expect(lib.getGame).toHaveBeenCalledTimes(2)
+        expect(screen.getByText(/Your move/)).toBeInTheDocument()
+        expect(screen.queryByText(/not found/)).toBeNull()
     })
 })

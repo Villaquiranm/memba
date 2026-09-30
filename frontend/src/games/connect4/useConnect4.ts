@@ -2,8 +2,20 @@ import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getActive, getGame } from "../../lib/connect4"
 
-export const useActive = () => useQuery({ queryKey: ["connect4", "active"], queryFn: () => getActive(0, 100), refetchInterval: 10_000 })
-export const useGame = (id: number) => useQuery({ queryKey: ["connect4", "game", id], queryFn: () => getGame(id), refetchInterval: 3_000 })
+// Throw on a failed read so react-query keeps the last good data. Keep polling in a
+// background tab: a hidden tab that misses its reveal/move window forfeits stake.
+export const useActive = () => useQuery({
+    queryKey: ["connect4", "active"],
+    queryFn: async () => { const r = await getActive(0, 100); if (!r) throw new Error("unavailable"); return r },
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+})
+export const useGame = (id: number) => useQuery({
+    queryKey: ["connect4", "game", id],
+    queryFn: async () => { const r = await getGame(id); if (!r) throw new Error("unavailable"); return r },
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: true,
+})
 
 /** Chain seconds now: the last response's block time advanced by wall time since it arrived. */
 export function useChainNow(now: number | undefined, fetchedAt: number): number {

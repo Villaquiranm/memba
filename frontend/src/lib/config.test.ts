@@ -1399,6 +1399,8 @@ describe("candidature realm gate", () => {
 })
 
 describe("connect4 realm path", () => {
+    afterEach(() => vi.unstubAllEnvs())
+
     it("is set on onyx only, never on mainnet", () => {
         expect(connect4PathFor("onyx")).toBe("gno.land/r/nym-mikecito001/connect4_v2")
         expect(connect4PathFor("mainnet")).toBeNull()
@@ -1411,7 +1413,6 @@ describe("connect4 realm path", () => {
         expect(connect4PathFor("onyx")).toBe("gno.land/r/x/c4")
         expect(connect4PathFor("sapphire")).toBe("gno.land/r/x/c4")
         expect(connect4PathFor("mainnet")).toBeNull()
-        vi.unstubAllEnvs()
     })
 
     it("is off unless the flag is exactly true", () => {
@@ -1419,6 +1420,12 @@ describe("connect4 realm path", () => {
         expect(isConnect4Enabled()).toBe(false)
         vi.stubEnv("VITE_ENABLE_CONNECT4", "true")
         expect(isConnect4Enabled()).toBe(true)
-        vi.unstubAllEnvs()
+    })
+
+    it("isConnect4Live follows the flag and the active network's realm", () => {
+        vi.stubEnv("VITE_ENABLE_CONNECT4", "true")
+        expect(isConnect4Live()).toBe(connect4PathFor(ACTIVE_NETWORK_KEY) !== null)
+        vi.stubEnv("VITE_ENABLE_CONNECT4", "")
+        expect(isConnect4Live()).toBe(false)
     })
 })

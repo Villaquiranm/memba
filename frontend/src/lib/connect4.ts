@@ -8,6 +8,7 @@
 
 import { queryEval, parseQevalJSON } from "./dao/shared"
 import { ACTIVE_NETWORK_KEY, GNO_RPC_URL, connect4PathFor } from "./config"
+import { doContractBroadcast, type AminoMsg } from "./grc20"
 
 export type Status = "open" | "playing" | "won" | "draw" | "void" | "cancelled"
 
@@ -79,3 +80,83 @@ export async function getActive(offset: number, limit: number): Promise<{ now: n
     if (!v) return null
     return { now: v.now as number, games: Array.isArray(v.games) ? v.games.filter(isGame) : [] }
 }
+
+// WRITES
+
+export type Connect4Func = "Offer" | "Accept" | "Reveal" | "Play" | "ClaimTimeout" | "Resign" | "Cancel"
+
+// Storage deposit cap per call, measured on onyx-1 (plan Task 2) with headroom.
+const MAX_DEPOSIT_UGNOT = 2_000_000
+
+export function buildCall(func: Connect4Func, args: string[], caller: string, sendUgnot?: number): AminoMsg {
+    const path = realmPath()
+    if (!path) throw new Error("Connect 4 is not available on this network.")
+    return {
+        type: "vm/MsgCall",
+        value: { caller, send: sendUgnot ? `${sendUgnot}ugnot` : "", pkg_path: path, func, args, max_deposit: `${MAX_DEPOSIT_UGNOT}ugnot` },
+    }
+}
+
+function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number) {
+    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`)
+}
+
+function assertIndex(n: number) {
+    if (!isIndex(n)) throw new Error("Invalid game id")
+}
+
+export async function sha256Hex(s: string): Promise<string> {
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+// Reveal keys: commitment -> passphrase, per creator. Keyed by commitment
+// because the game id is unknown until the Offer lands.
+const keyStore = (caller: string) => `memba.connect4.pass.${caller}`
+
+function readKeys(caller: string): Record<string, string> {
+    try {
+        const v = JSON.parse(localStorage.getItem(keyStore(caller)) ?? "{}")
+        return v && typeof v === "object" ? v : {}
+    } catch {
+        return {}
+    }
+}
+
+export function revealKey(caller: string, commitment: string): string | null {
+    const v = readKeys(caller)[commitment]
+    return typeof v === "string" ? v : null
+}
+
+/** Posts an offer and returns its commitment. The passphrase is stored before
+ * signing; if it cannot be stored nothing is sent (a lost key forfeits). */
+export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string }): Promise<string> {
+    const bytes = crypto.getRandomValues(new Uint8Array(32))
+    const passphrase = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
+    const commitment = await sha256Hex(passphrase)
+    try {
+        localStorage.setItem(keyStore(caller), JSON.stringify({ ...readKeys(caller), [commitment]: passphrase }))
+    } catch {
+        throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
+    }
+    if (revealKey(caller, commitment) !== passphrase) throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
+    await submit("Offer", [o.opponent, String(o.validFor), commitment], caller, o.stakeUgnot)
+    return commitment
+}
+
+export const accept = (caller: string, g: Game) => submit("Accept", [String(g.id)], caller, g.stake)
+
+export async function reveal(caller: string, id: number, passphrase: string) {
+    assertIndex(id)
+    return submit("Reveal", [String(id), passphrase], caller)
+}
+
+export async function play(caller: string, id: number, column: number) {
+    assertIndex(id)
+    if (!Number.isInteger(column) || column < 1 || column > 7) throw new Error("Column must be 1-7")
+    return submit("Play", [String(id), String(column)], caller)
+}
+
+export async function claimTimeout(caller: string, id: number) { assertIndex(id); return submit("ClaimTimeout", [String(id)], caller) }
+export async function resign(caller: string, id: number) { assertIndex(id); return submit("Resign", [String(id)], caller) }
+export async function cancel(caller: string, id: number) { assertIndex(id); return submit("Cancel", [String(id)], caller) }

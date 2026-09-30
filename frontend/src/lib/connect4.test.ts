@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const qeval = vi.hoisted(() => vi.fn())
+const broadcast = vi.hoisted(() => vi.fn(async () => ({ hash: "h" })))
 vi.mock("./dao/shared", async (orig) => ({ ...(await orig<typeof import("./dao/shared")>()), queryEval: qeval }))
+vi.mock("./grc20", () => ({ doContractBroadcast: broadcast }))
 vi.mock("./config", async (orig) => ({
     ...(await orig<typeof import("./config")>()),
     connect4PathFor: () => "gno.land/r/test/c4",
     GNO_RPC_URL: "https://rpc.test",
 }))
 
-import { getActive, getGame, isGame, type Game } from "./connect4"
+import { accept, buildCall, getActive, getGame, isGame, offer, play, revealKey, sha256Hex, type Game } from "./connect4"
 
 export const sample: Game = {
     id: 3, creator: "g1creator", opponent: "", acceptor: "g1acceptor", stake: 2_000_000, fee: 100_000,
@@ -63,5 +65,46 @@ describe("getActive", () => {
     it("never queries with a non-integer offset", async () => {
         await expect(getActive(-1, 10)).resolves.toBeNull()
         expect(qeval).not.toHaveBeenCalled()
+    })
+})
+
+describe("writes", () => {
+    beforeEach(() => { broadcast.mockClear(); localStorage.clear() })
+
+    it("attaches coins only to Offer and Accept", async () => {
+        expect(buildCall("Play", ["3", "4"], "g1me").value.send).toBe("")
+        expect(buildCall("Accept", ["3"], "g1me", 2_000_000).value.send).toBe("2000000ugnot")
+        await accept("g1me", sample)
+        expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Accept", args: ["3"], send: "2000000ugnot", pkg_path: "gno.land/r/test/c4", caller: "g1me" })
+        await play("g1me", 3, 4)
+        expect(broadcast.mock.calls[1][0][0].value).toMatchObject({ func: "Play", args: ["3", "4"], send: "" })
+    })
+
+    it("rejects out-of-range columns before signing", async () => {
+        await expect(play("g1me", 3, 0)).rejects.toThrow()
+        await expect(play("g1me", 3, 8)).rejects.toThrow()
+        expect(broadcast).not.toHaveBeenCalled()
+    })
+
+    it("offer commits to sha256 of a stored fresh passphrase", async () => {
+        const commitment = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })
+        const pass = revealKey("g1me", commitment)!
+        expect(pass).toMatch(/^[0-9a-f]{64}$/)
+        expect(await sha256Hex(pass)).toBe(commitment)
+        expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Offer", args: ["", "10", commitment], send: "2000000ugnot" })
+        const second = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })
+        expect(second).not.toBe(commitment)
+        expect(revealKey("g1other", commitment)).toBeNull()
+    })
+
+    it("refuses to sign an offer when the key cannot be stored", async () => {
+        const spy = vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("quota") })
+        await expect(offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })).rejects.toThrow(/nothing was sent/)
+        expect(broadcast).not.toHaveBeenCalled()
+        spy.mockRestore()
+    })
+
+    it("sha256Hex matches a known vector", async () => {
+        expect(await sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     })
 })

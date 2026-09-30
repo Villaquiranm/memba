@@ -1,0 +1,9 @@
+.c4-board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 10px; border-radius: 12px; background: #1f4fbf; max-width: 420px; }
+.c4-col { display: grid; grid-template-rows: repeat(6, 1fr); gap: 6px; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 8px; }
+.c4-col:disabled { cursor: default; }
+.c4-col:not(:disabled):hover, .c4-col:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.c4-cell { aspect-ratio: 1; border-radius: 50%; background: var(--os-bg, #fff); }
+.c4-p1 { background: #e5484d; }
+.c4-p2 { background: #f5d90a; }
+.c4-last { box-shadow: 0 0 0 3px #fff inset; }
+.c4-win { box-shadow: 0 0 0 4px #30a46c; }

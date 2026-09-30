@@ -49,6 +49,8 @@ describe("ComingSoon", () => {
         }
         render(<ComingSoon />)
         expect(screen.getByTestId("soon-points")).toBeInTheDocument()
-        expect(screen.getAllByTestId(/^soon-/)).toHaveLength(1)
+        // Connect 4 is also testnet-only: it stays "soon" on any non-Onyx active network.
+        expect(screen.getByTestId("soon-connect4")).toBeInTheDocument()
+        expect(screen.getAllByTestId(/^soon-/)).toHaveLength(2)
     })
 })

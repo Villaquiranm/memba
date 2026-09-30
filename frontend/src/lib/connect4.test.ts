@@ -78,7 +78,7 @@ describe("writes", () => {
         expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Accept", args: ["3"], send: "2000000ugnot", pkg_path: "gno.land/r/test/c4", caller: "g1me" })
         await play("g1me", 3, 4)
         expect(broadcast.mock.calls[1][0][0].value).toMatchObject({ func: "Play", args: ["3", "4"], send: "" })
-        expect(broadcast.mock.calls[1][2]).toEqual({ retry: false })
+        expect(broadcast.mock.calls[1][2]).toEqual({ retry: false, gasWanted: 20_000_000 })
     })
 
     it("rejects out-of-range columns before signing", async () => {
@@ -93,7 +93,7 @@ describe("writes", () => {
         expect(pass).toMatch(/^[0-9a-f]{64}$/)
         expect(await sha256Hex(pass)).toBe(commitment)
         expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Offer", args: ["", "10", commitment], send: "2000000ugnot" })
-        expect(broadcast.mock.calls[0][2]).toEqual({ retry: false })
+        expect(broadcast.mock.calls[0][2]).toEqual({ retry: false, gasWanted: 20_000_000 })
         const second = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })
         expect(second).not.toBe(commitment)
         expect(revealKey("g1other", commitment)).toBeNull()

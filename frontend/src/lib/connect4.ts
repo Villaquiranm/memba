@@ -85,8 +85,12 @@ export async function getActive(offset: number, limit: number): Promise<{ now: n
 
 export type Connect4Func = "Offer" | "Accept" | "Reveal" | "Play" | "ClaimTimeout" | "Resign" | "Cancel"
 
-// Storage deposit cap per call. Placeholder until measured on onyx-1 (plan Task 2).
+// Storage deposit cap per call. Offer on onyx-1 stored 7,589 bytes (758,900ugnot
+// at 100ugnot/byte, simulated 2026-09-30); 2x, rounded up to a whole GNOT.
 const MAX_DEPOSIT_UGNOT = 2_000_000
+// Offer simulated at 8.24M gas; the 10M app default leaves too little room for a
+// settling Play (payout + Stats writes), and an out-of-gas winning move forfeits.
+const GAS_WANTED = 20_000_000
 
 export function buildCall(func: Connect4Func, args: string[], caller: string, sendUgnot?: number): AminoMsg {
     const path = realmPath()
@@ -98,7 +102,7 @@ export function buildCall(func: Connect4Func, args: string[], caller: string, se
 }
 
 function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number) {
-    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { retry: false })
+    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { retry: false, gasWanted: GAS_WANTED })
 }
 
 function assertIndex(n: number) {

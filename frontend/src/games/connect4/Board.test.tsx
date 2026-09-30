@@ -50,4 +50,14 @@ describe("Board", () => {
         render(<Board game={game(empty)} canPlay={false} onPlay={vi.fn()} />)
         for (let c = 1; c <= 7; c++) expect(screen.getByRole("button", { name: `Drop in column ${c}` })).toBeDisabled()
     })
+    it("shows both last-move and winning-line markers on the winning cell", () => {
+        let b = empty
+        // Create a horizontal four-in-a-row for player 1 at row 0, columns 0-3
+        for (let c = 0; c < 4; c++) b = put(b, c, 0, "1")
+        const { container } = render(
+            <Board game={game(b, { moves: 4, lastCol: 3, lastRow: 0 })} canPlay onPlay={vi.fn()} />
+        )
+        // The winning cell (column 3, row 0) should have both classes
+        expect(container.querySelectorAll('.c4-last.c4-win')).toHaveLength(1)
+    })
 })

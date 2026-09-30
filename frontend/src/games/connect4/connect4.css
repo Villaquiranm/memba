@@ -7,3 +7,4 @@
 .c4-p2 { background: #f5d90a; }
 .c4-last { box-shadow: 0 0 0 3px #fff inset; }
 .c4-win { box-shadow: 0 0 0 4px #30a46c; }
+.c4-last.c4-win { box-shadow: 0 0 0 3px #fff inset, 0 0 0 4px #30a46c; }

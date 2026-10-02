@@ -252,7 +252,45 @@ const POLICY_FOR: Record<WeightedApplicationAction["type"], ApplicationPolicyKey
     "market-config": "marketPolicy", reviews: "reviewsPolicy", quest: "questPolicy", arcade: "arcadePolicy", appstore: "appstorePolicy",
     escrow: "escrowPolicy", badges: "badgesPolicy", feed: "feedPolicy", channels: "channelsPolicy", feedback: "feedbackPolicy",
 }
-export function policyKeyFor(action: WeightedApplicationAction): ApplicationPolicyKey { return POLICY_FOR[action.type] }
+
+const LISTINGS = "approving, rejecting, delisting and restoring listings, and clearing their flags"
+const DISPUTES = "settling disputes (refunding the client or paying the freelancer)"
+const HANDOVER = null
+/**
+ * Every application operation in words, in one place: `title` names a
+ * proposal for it ("Set a fee"); `rule` is how the DAO's rules list it
+ * ("fees"), shared by the operations that make one decision, and null where
+ * the rules say it in their own sentence (handovers, unpausing).
+ */
+export const OPERATION_WORDS: Readonly<Record<string, { title: string; rule: string | null }>> = {
+    "accept-admin": { title: "Accept the handover", rule: HANDOVER }, "accept-owner": { title: "Accept the handover", rule: HANDOVER }, "accept-moderator": { title: "Accept the handover", rule: HANDOVER },
+    "return-admin": { title: "Hand it back", rule: HANDOVER }, "return-owner": { title: "Hand it back", rule: HANDOVER }, "return-moderator": { title: "Hand it back", rule: HANDOVER },
+    "abort-return": { title: "Cancel the hand-back", rule: HANDOVER }, unpause: { title: "Unpause", rule: null },
+    "set-fee": { title: "Set a fee", rule: "fees" }, "set-treasury": { title: "Set the treasury", rule: "the treasury" },
+    // Staged only: the nominated address accepts in its own transaction.
+    "set-fee-recipient": { title: "Nominate the fallback fee recipient", rule: "nominating the fallback fee recipient" },
+    "hide-review": { title: "Hide a review", rule: "hiding reviews and comments" }, "hide-comment": { title: "Hide a comment", rule: "hiding reviews and comments" },
+    unhide: { title: "Show a hidden review or comment", rule: "showing them again" },
+    "set-signer": { title: "Set the voucher signer", rule: "the voucher signer" },
+    "add-attester": { title: "Add a score attester", rule: "who attests scores" }, "remove-attester": { title: "Remove a score attester", rule: "who attests scores" },
+    "add-curator": { title: "Add a curator", rule: "who curates" }, "remove-curator": { title: "Remove a curator", rule: "who curates" },
+    // A one-way latch: imports cannot be reopened.
+    "seal-import": { title: "Permanently close listing imports", rule: "permanently closing listing imports" },
+    approve: { title: "Approve a listing", rule: LISTINGS }, reject: { title: "Reject a listing", rule: LISTINGS }, delist: { title: "Delist a listing", rule: LISTINGS },
+    restore: { title: "Restore a listing", rule: LISTINGS }, "clear-flags": { title: "Clear a listing's flags", rule: LISTINGS },
+    "refund-client": { title: "Refund the client", rule: DISPUTES }, "pay-freelancer": { title: "Pay the freelancer", rule: DISPUTES },
+    "add-admin": { title: "Add an admin", rule: "its admins" }, "remove-admin": { title: "Remove an admin", rule: "its admins" },
+    "add-moderator": { title: "Add a moderator", rule: "its moderators" }, "remove-moderator": { title: "Remove a moderator", rule: "its moderators" },
+    "add-member": { title: "Add a member", rule: "its members" }, "remove-member": { title: "Remove a member", rule: "its members" },
+    "set-roles": { title: "Set a member's roles", rule: "members' roles" }, "create-text-channel": { title: "Create a channel", rule: "creating channels" },
+}
+
+/** Every operation the DAO can vote on for one application, with the category the host assigns it. */
+export function policyOperations(key: ApplicationPolicyKey): { operation: string; category: WeightedCategory }[] {
+    const type = (Object.keys(POLICY_FOR) as WeightedApplicationAction["type"][]).find((t) => POLICY_FOR[t] === key)!
+    const schema = (applicationActions as readonly { shape: { type: { value: string }; operation: { options: readonly string[] } } }[]).find((a) => a.shape.type.value === type)!
+    return schema.shape.operation.options.map((operation) => ({ operation, category: expectedCategory({ type, operation }) }))
+}
 
 /** Configured destinations bind every staged return and treasury change. */
 export function applicationActionMatchesPolicy(action: WeightedApplicationAction, policies: { [K in ApplicationPolicyKey]: z.infer<(typeof applicationPolicySchemas)[K]> } & { realmPath: string }): boolean {
@@ -276,6 +314,22 @@ export const ACCEPT_FUNCS = {
     feedbackPolicy: "ProposeFeedbackAccept",
 } as const satisfies Record<ApplicationPolicyKey, string>
 
+/**
+ * The realm's exported proposal that an application pays its fees to the
+ * treasury the DAO's policy names; each takes no argument (the recipient is
+ * the policy's own). Only the Market and the App Store have a treasury.
+ */
+export const TREASURY_FUNCS = { marketPolicy: "ProposeMarketTreasury", appstorePolicy: "ProposeAppstoreTreasury" } as const
+export type TreasuryPolicyKey = keyof typeof TREASURY_FUNCS
+/** Action type the host records for each treasury proposal (operation "set-treasury"). */
+const TREASURY_ACTION_TYPES: Record<TreasuryPolicyKey, "market-config" | "appstore"> = { marketPolicy: "market-config", appstorePolicy: "appstore" }
+
+/** The application a stored action moves the treasury of, or null when it is no treasury change. */
+export function treasuryAdapterFor(action: { type: string; operation?: string }): TreasuryPolicyKey | null {
+    if (action.operation !== "set-treasury") return null
+    return (Object.keys(TREASURY_ACTION_TYPES) as TreasuryPolicyKey[]).find((key) => TREASURY_ACTION_TYPES[key] === action.type) ?? null
+}
+
 /** Action type and operation the host records for each acceptance. */
 export const ACCEPT_ACTIONS: Record<ApplicationPolicyKey, { type: string; operation: string }> = {
     marketPolicy: { type: "market-config", operation: "accept-admin" }, reviewsPolicy: { type: "reviews", operation: "accept-moderator" },
@@ -296,24 +350,53 @@ export const APPLICATION_LABELS: Record<WeightedApplicationAction["type"], strin
     escrow: "Escrow", badges: "Badges", feed: "Feed", channels: "DAO channels", feedback: "Feedback",
 }
 
-/** Operation parameters worth showing, in host field order; unset values are omitted. Invisible and bidi characters are made visible. */
+// The owner is the one when the state was frozen, not necessarily today's. Only Arcade lists addresses: its attesters.
+const WHO: Record<string, string> = { owner: "The owner", dao: "The DAO", successor: "The successor", subject: "The address concerned" }
+const IS: Record<string, string> = { Admin: "is an admin", Curator: "is a curator", Listed: "is an attester", Member: "is a member", Moderator: "is a moderator" }
+/** An action's own parameters named for a reader (top level only: nested state is labelled word by word). */
+const NAMED: Record<string, string> = { bps: "Fee (basis points)", id: "Item", contractId: "Contract", milestoneIndex: "Milestone", fee: "Fee (ugnot)", path: "Listing path", subject: WHO.subject }
+
+/**
+ * A contract field as a reader says it: "daoMember" is "The DAO is a
+ * member", "ownerRoles" is "The current owner's roles", "pendingAdmin" is
+ * "Pending admin". A nested field joins its parts with " · ".
+ */
+export function factLabel(key: string): string {
+    return key.split(".").map((part, i) => {
+        const who = /^(owner|dao|successor|subject)(Admin|Curator|Listed|Member|Moderator|Roles)$/.exec(part)
+        if (who) return who[2] === "Roles" ? `Roles of ${WHO[who[1]].replace(/^The/, "the")}` : `${WHO[who[1]]} ${IS[who[2]]}`
+        const words = (i === 0 ? NAMED[part] : undefined) ?? part.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().replace(/^id$/, "ID").replace(/\bbps\b/, "fee (basis points)")
+        return i === 0 ? words.charAt(0).toUpperCase() + words.slice(1) : words
+    }).join(" · ")
+}
+
+/** A contract value as a reader says it; invisible and bidi characters are made visible. */
+function factValue(value: unknown): string {
+    if (value === null) return "(none)"
+    if (value === "") return "(unset)"
+    if (typeof value === "boolean") return value ? "Yes" : "No"
+    return revealInvisibleFormatting(String(value))
+}
+
+/** Operation parameters worth showing, in host field order, labelled for a reader; unset values are omitted. */
 export function applicationDetails(action: WeightedApplicationAction): [string, string][] {
     const skip = new Set(["type", "target", "operation", "before"])
     const out: [string, string][] = []
     for (const [key, value] of Object.entries(action)) {
         if (skip.has(key) || value === "" || value === null || (action.type === "market-config" && key === "bps" && action.operation !== "set-fee") || (action.type === "appstore" && key === "fee" && action.operation !== "set-fee") || (action.type === "reviews" && key === "id" && value === "0")) continue
-        out.push([key, revealInvisibleFormatting(String(value))])
+        // Milestones are numbered from 1, as the frozen state lists them.
+        // The contract counts milestones from 0 (a uint64 string); the frozen state lists them from 1.
+        out.push([factLabel(key), key === "milestoneIndex" && typeof value === "string" ? String(BigInt(value) + 1n) : factValue(value)])
     }
     return out
 }
 
-/** Flatten the frozen pre-state into labelled rows (nested objects use dotted keys); invisible characters are made visible. */
+/** Flatten the frozen pre-state into rows labelled for a reader (a nested field joins its parts). */
 export function flattenBefore(value: unknown, prefix = ""): [string, string][] {
-    if (value === null) return [[prefix, "(none)"]]
-    if (typeof value !== "object") return [[prefix, value === "" ? "(unset)" : revealInvisibleFormatting(String(value))]]
+    if (value === null || typeof value !== "object") return [[factLabel(prefix), factValue(value)]]
     const rows: [string, string][] = []
-    const entries = Array.isArray(value) ? value.map((v, i) => [String(i), v] as const) : Object.entries(value)
-    if (entries.length === 0) return [[prefix, "(none)"]]
+    const entries = Array.isArray(value) ? value.map((v, i) => [String(i + 1), v] as const) : Object.entries(value)
+    if (entries.length === 0) return [[factLabel(prefix), "(none)"]]
     for (const [key, v] of entries) rows.push(...flattenBefore(v, prefix ? `${prefix}.${key}` : key))
     return rows
 }

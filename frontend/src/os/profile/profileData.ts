@@ -1,12 +1,12 @@
 /** Public profile reads from the deployed caller-keyed profile realm. */
-import { activationRealmFor, ACTIVE_NETWORK_KEY } from "../../lib/config"
+import { ACTIVE_NETWORK_KEY, profileRealmFor } from "../../lib/config"
 import { isValidGnoAddressChecksum } from "../../lib/dao/address"
 import { assertActiveRpcChain } from "../../lib/dao/chainIdentity"
 import { decodeGoQuoted } from "../../lib/goQuote"
 import { resilientAbciQuery } from "../../lib/rpcFallback"
 
 export const PROFILE_DOCUMENT_FIELD = "memba.profile.v1"
-export const PROFILE_REALM = activationRealmFor(ACTIVE_NETWORK_KEY)
+export const PROFILE_REALM = profileRealmFor(ACTIVE_NETWORK_KEY)
 const ABSENT = "__memba_profile_absent_7c4d93a3__"
 export const CORE_FIELDS = {
     displayName: "DisplayName",
@@ -20,7 +20,7 @@ export const CORE_FIELDS = {
 export const CORE_LIMITS = { displayName: 80, bio: 500, avatar: 256, homepage: 256, location: 100 } as const
 
 export type CoreField = keyof typeof CORE_FIELDS
-/** null means the key has never been set; "" is an explicit cleared value. */
+/** null means the key has never been set; "" was written, by a clear or, for Bio, by wallet activation. */
 export type ProfileCore = Record<CoreField, string | null>
 export type ProfileTemplate = "simple" | "builder" | "community"
 export type ProfileAccent = "indigo" | "teal" | "rose" | "amber"
@@ -39,18 +39,28 @@ export interface ProfileDocument {
 }
 
 export const ALL_SECTIONS: readonly ProfileSection[] = ["about", "links", "daos", "votes", "assets", "credentials", "feed", "reviews"]
+export const SECTION_LABELS: Record<ProfileSection, string> = {
+    about: "About", links: "Links", daos: "Memberships and roles", votes: "Governance votes", assets: "Public assets", credentials: "Credentials", feed: "Feed activity", reviews: "Reviews",
+}
+export type ProfileTab = "overview" | "home" | "daos" | "contributions" | "feed"
+export const TAB_NAMES: Record<ProfileTab, string> = { overview: "Overview", home: "Home", daos: "DAOs", contributions: "Contributions", feed: "Feed" }
+/** The tab each section is shown in. A section's position only matters among the sections of its tab. */
+export const SECTION_TAB: Record<ProfileSection, "overview" | "daos" | "feed"> = {
+    about: "overview", links: "overview", assets: "overview", credentials: "overview", reviews: "overview", daos: "daos", votes: "daos", feed: "feed",
+}
+/** A template is what a visitor meets after the overview, plus one column (simple) or two. */
+export const TEMPLATE_TABS: Record<ProfileTemplate, readonly ProfileTab[]> = {
+    simple: ["overview", "home", "daos", "contributions", "feed"],
+    builder: ["overview", "contributions", "home", "daos", "feed"],
+    community: ["overview", "daos", "feed", "home", "contributions"],
+}
 const TEMPLATES: readonly ProfileTemplate[] = ["simple", "builder", "community"]
 const ACCENTS: readonly ProfileAccent[] = ["indigo", "teal", "rose", "amber"]
 const MAX_DOCUMENT_BYTES = 4096
 const MAX_QEVAL_CHARS = 24_000
 
-export function defaultProfileDocument(template: ProfileTemplate = "simple"): ProfileDocument {
-    const sections: ProfileSection[] = template === "builder"
-        ? ["about", "links", "feed", "daos", "votes", "assets", "credentials", "reviews"]
-        : template === "community"
-            ? ["about", "daos", "feed", "links", "votes", "assets", "credentials", "reviews"]
-            : [...ALL_SECTIONS]
-    return { version: 1, template, accent: "indigo", title: "", company: "", cover: "", links: [], sections, hidden: [] }
+export function defaultProfileDocument(): ProfileDocument {
+    return { version: 1, template: "simple", accent: "indigo", title: "", company: "", cover: "", links: [], sections: [...ALL_SECTIONS], hidden: [] }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -70,6 +80,14 @@ export function safeProfileUrl(value: unknown): string | null {
         const url = new URL(value)
         if (url.protocol !== "https:" || !url.hostname || url.username || url.password) return null
         return url.href.length <= 256 ? url.href : null
+    } catch { return null }
+}
+
+/** The version of a stored layout that parses as one, whatever else it holds; null otherwise. */
+function storedLayoutVersion(raw: string): number | null {
+    try {
+        const value: unknown = JSON.parse(raw)
+        return isRecord(value) && typeof value.version === "number" ? value.version : null
     } catch { return null }
 }
 
@@ -107,9 +125,13 @@ export function parseProfileString(raw: string | null): string | null {
     try { return decodeGoQuoted(match[1]) } catch { return null }
 }
 
-async function readField(address: string, field: string): Promise<string | null> {
+/** The chain answered with a string too long to decode: a stored value exists and Memba cannot use it. */
+const OVERSIZE = Symbol("oversize")
+
+async function readField(address: string, field: string): Promise<string | null | typeof OVERSIZE> {
     const expression = `${PROFILE_REALM}.GetStringField(address(${JSON.stringify(address)}), ${JSON.stringify(field)}, ${JSON.stringify(ABSENT)})`
     const raw = await resilientAbciQuery("vm/qeval", expression, true)
+    if (raw !== null && raw.length > MAX_QEVAL_CHARS && /^\(\s*"/.test(raw) && /"\s+string\s*\)\s*$/.test(raw)) return OVERSIZE
     const value = parseProfileString(raw)
     if (value === null) throw new Error(`Couldn't read ${field} from the profile realm.`)
     return value === ABSENT ? null : value
@@ -119,9 +141,18 @@ export interface ProfileChainRead {
     core: ProfileCore
     document: ProfileDocument
     documentPresent: boolean
-    /** A missing document is normal; an unreadable one is reported without applying its values. */
-    documentProblem: boolean
+    /** The chain did not answer for the layout. A missing layout is normal and sets neither flag. */
+    documentUnreadable: boolean
+    /** A layout is stored but is not one this version reads (malformed, over the size cap, or not a valid v1 document): its values are not applied, and its owner can replace it. */
+    documentInvalid: boolean
+    /** A layout is stored under a later version number: its values are not applied, and this version never writes over it. */
+    documentNewer: boolean
+    /** A layout is stored whose answer is too long to decode, so its version cannot be checked: treated like a newer one. */
+    documentOversize: boolean
+    /** Fields the chain did not answer for. */
     missingCore: CoreField[]
+    /** Fields stored over Memba's limit: never shown, and replaceable by their owner. */
+    invalidCore: CoreField[]
 }
 
 export async function readProfileOnChain(address: string): Promise<ProfileChainRead> {
@@ -131,15 +162,28 @@ export async function readProfileOnChain(address: string): Promise<ProfileChainR
     const results = await Promise.allSettled([...keys.map((key) => readField(address, CORE_FIELDS[key])), readField(address, PROFILE_DOCUMENT_FIELD)])
     const core = {} as ProfileCore
     const missingCore: CoreField[] = []
+    const invalidCore: CoreField[] = []
     keys.forEach((key, index) => {
         const result = results[index]
         const value = result.status === "fulfilled" ? result.value : null
-        core[key] = value !== null && [...value].length <= CORE_LIMITS[key] ? value : null
-        if (result.status === "rejected" || (value !== null && core[key] === null)) missingCore.push(key)
+        core[key] = typeof value === "string" && [...value].length <= CORE_LIMITS[key] ? value : null
+        if (result.status === "rejected") missingCore.push(key)
+        else if (value !== null && core[key] === null) invalidCore.push(key)
     })
     if (missingCore.length === keys.length) throw new Error("The profile realm could not be read. Try again.")
     const layout = results[keys.length]
     const documentRaw = layout.status === "fulfilled" ? layout.value : null
-    const parsed = documentRaw ? parseProfileDocument(documentRaw) : null
-    return { core, document: parsed ?? defaultProfileDocument(), documentPresent: !!parsed, documentProblem: layout.status === "rejected" || (!!documentRaw && !parsed), missingCore }
+    const parsed = typeof documentRaw === "string" && documentRaw ? parseProfileDocument(documentRaw) : null
+    const documentNewer = typeof documentRaw === "string" && !parsed && (storedLayoutVersion(documentRaw) ?? 0) > 1
+    const documentOversize = documentRaw === OVERSIZE
+    return {
+        core, document: parsed ?? defaultProfileDocument(), documentPresent: !!parsed,
+        documentUnreadable: layout.status === "rejected", documentInvalid: !!documentRaw && !parsed && !documentNewer && !documentOversize, documentNewer, documentOversize,
+        missingCore, invalidCore,
+    }
+}
+
+/** A stored layout this version must never write over: saved under a later version, or too long to read. */
+export function layoutLocked(chain: ProfileChainRead): boolean {
+    return chain.documentNewer || chain.documentOversize
 }

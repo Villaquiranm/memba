@@ -32,7 +32,7 @@ export interface OsApp {
 
 export const OS_APPS: readonly OsApp[] = [
     { id: "daos", name: "DAOs", slug: "daos", summary: "Browse, create and govern DAOs", tier: "mvp", tint: ["#5B7CFA", "#3D5BE0"], dock: true,
-      routes: ["dao", "dao/create", "dao/*", "weighted-dao/*", "organizations", "candidature"] },
+      routes: ["dao", "dao/create", "dao/*", "organizations", "candidature"] },
     { id: "wallet", name: "Wallet", slug: "wallet", summary: "Balances, send, receive, history", tier: "mvp", tint: ["#2FC08E", "#12A07A"], dock: true,
       routes: ["tx/:id"] },
     { id: "multisig", name: "Multisig", slug: "multisig", summary: "Shared accounts that need several signatures", tier: "mvp", tint: ["#9C7CF5", "#7654E8"], dock: true,
@@ -51,7 +51,7 @@ export const OS_APPS: readonly OsApp[] = [
       routes: ["settings"] },
     { id: "tokens", name: "Tokens", slug: "tokens", summary: "Create, hold and trade GRC20 tokens", tier: "v1.1", tint: ["#F2B544", "#E08A1E"], dock: false,
       routes: ["tokens", "tokens/:symbol", "create-token"] },
-    { id: "nft", name: "NFT", slug: "nft", summary: "Collections, studio and launchpad", tier: "v1.1", tint: ["#EC6FCF", "#A34FE0"], dock: false,
+    { id: "nft", name: "NFT", slug: "nft", summary: "Browse Launchpad NFT collections", tier: "v1.1", tint: ["#EC6FCF", "#A34FE0"], dock: false,
       routes: ["nft", "nft/create", "nft/create/advanced", "nft/collection/:creator/:slug", "nft/token/:creator/:slug/:tokenId", "nft/creator",
           "nft/creator/:address", "nft/studio", "nft/studio/:creator/:slug", "nft/:realmPath"] },
     { id: "market", name: "Market", slug: "market", summary: "Hire with escrow, trade NFTs and tokens", tier: "v1.1", tint: ["#5AA9FF", "#6B5BFA"], dock: false,
@@ -82,6 +82,7 @@ export const OS_SYSTEM_ROUTES: readonly { route: string; handling: string }[] = 
     { route: "dashboard", handling: "The desktop (dashboard cards become widgets)" },
     { route: "github/callback", handling: "Sign-in callback, no window" },
     { route: "feedback", handling: "The Send feedback window (/os/feedback), from the start menu" },
+    { route: "weighted-dao/*", handling: "The weighted DAO's folder window (/os/dao/<name>), never a page in the DAOs app" },
     { route: "marketplace-v2-preview", handling: "Dropped: preview route, not carried over" },
     { route: "*", handling: "A not-found window that offers search" },
 ]

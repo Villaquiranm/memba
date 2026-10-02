@@ -22,9 +22,10 @@ test.describe('Memba OS pages in windows', () => {
     test.beforeEach(async ({ page }) => { await guest(page) })
 
     test('an app without a native window shows its Memba page inside the window', async ({ page }) => {
-        await page.goto(`${OS_ON}/os/news`)
-        const news = win(page, 'News')
-        await expect(news.locator('.os-classic')).toBeVisible()
+        // Dev Report has no native window (the Quests hub is native now).
+        await page.goto(`${OS_ON}/os/dev-report`)
+        const report = win(page, 'Dev Report')
+        await expect(report.locator('.os-classic')).toBeVisible()
         await expect(page.getByRole('link', { name: /in Memba$/ })).toHaveCount(0)
         // Memba's own navigation chrome stays out: the window holds the page only.
         await expect(page.locator('.os-classic nav[aria-label="Main navigation"], .os-classic .k-sidebar')).toHaveCount(0)
@@ -35,7 +36,7 @@ test.describe('Memba OS pages in windows', () => {
         const nft = win(page, 'NFT')
         // The default network is mainnet: the home names the missing registry
         // and the build flag instead of implying NFT actions are available.
-        await expect(nft.getByRole('note')).toContainText('collection registry is not deployed')
+        await expect(nft.getByRole('note')).toContainText('NFT ledger is not deployed')
         await expect.poll(() => new URL(page.url()).pathname).toBe('/os/nft')
         await expect(page.getByRole('region', { name: 'Market', exact: true })).toHaveCount(0)
         await nft.getByRole('button', { name: 'Open Market' }).click()
@@ -49,40 +50,82 @@ test.describe('Memba OS pages in windows', () => {
         await expect(win(page, 'NFT')).toBeVisible()
     })
 
-    test("a page's own query (a Validators tab) works in its window, follows the address bar and survives Back and reload", async ({ page }) => {
-        // A served roster (registered after the chain-read abort, so it wins): the tabs render with data.
+    test('the Explorer opens on its native realm directory; a tab or a realm opens the classic view in the same window', async ({ page }) => {
+        await page.goto(`${OS_ON}/os/explorer`)
+        const explorer = win(page, 'Explorer')
+        const home = explorer.getByRole('heading', { level: 1, name: 'Realm directory' })
+        await expect(home).toBeVisible()
+        await expect(explorer.locator('.os-classic')).toHaveCount(0)
+        // Chain reads are refused: the home says so instead of showing figures, over the curated realms.
+        await expect(explorer.getByText('The chain figures could not be read from the network.')).toBeVisible({ timeout: 30_000 })
+        await explorer.getByRole('button', { name: /^Packages/ }).click()
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=packages')
+        const tab = (name: string) => explorer.locator('.dir-tab', { hasText: name })
+        await expect(tab('Packages')).toHaveAttribute('aria-selected', 'true')
+        // The classic page keeps naming its tab: its default tab must not land on the native home.
+        await tab('DAOs').click()
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=daos')
+        await tab('Packages').click()
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=packages')
+        await expect(explorer.locator('.os-classic')).toBeVisible()
+        await explorer.getByRole('button', { name: 'Realm directory' }).click()
+        await expect(home).toBeFocused()
+        await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe('/os/explorer')
+        await explorer.getByRole('button', { name: 'Open GovDAO, gno.land/r/gov/dao' }).click()
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=explorer&realm=r%2Fgov%2Fdao')
+        await expect(explorer.locator('.os-classic')).toBeVisible()
+        await expect(page.getByRole('region', { name: 'Explorer', exact: true })).toHaveCount(1)
+        // Opening a realm is a history entry: Back returns to the home.
+        await page.goBack()
+        await expect(home).toBeVisible()
+        await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe('/os/explorer')
+    })
+
+    test("a window's own query (the Validators list) sits beside the other windows' key, and survives reload and a shared link", async ({ page }) => {
+        // A served roster (registered after the chain-read abort, so it wins): the lists render with data.
         await fulfillProValidatorRoster(page)
         await page.goto(`${OS_ON}/os/validators?w=app.feed`)
-        const val = win(page, 'Validators')
-        const selected = (id: string) => val.getByTestId(id)
-        await expect(selected('seg-validators')).toHaveAttribute('aria-selected', 'true')
-        await selected('seg-network').click()
-        await expect(selected('seg-network')).toHaveAttribute('aria-selected', 'true')
-        // The page's query sits beside the reserved w key; the Feed window stays open.
-        await expect.poll(() => new URL(page.url()).search).toBe('?tab=network&w=app.feed')
+        const list = (name: string) => win(page, 'Validators').getByRole('group', { name: 'Validator lists' }).getByRole('button', { name })
+        await expect(list('Active set')).toHaveAttribute('aria-pressed', 'true')
+        await list('Candidates').click()
+        await expect(list('Candidates')).toHaveAttribute('aria-pressed', 'true')
+        // The view's query sits beside the reserved w key; the Feed window stays open.
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=candidates&w=app.feed')
         await expect(win(page, 'Feed')).toBeVisible()
-        await page.goBack()
-        await expect(selected('seg-validators')).toHaveAttribute('aria-selected', 'true')
+        await list('Active set').click()
         await expect.poll(() => new URL(page.url()).search).toBe('?w=app.feed')
-        await page.goForward()
-        await expect(selected('seg-network')).toHaveAttribute('aria-selected', 'true')
+        await list('Candidates').click()
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=candidates&w=app.feed')
         await page.reload()
-        await expect(win(page, 'Validators').getByTestId('seg-network')).toHaveAttribute('aria-selected', 'true')
-        // A shared link opens straight on that tab.
+        await expect(list('Candidates')).toHaveAttribute('aria-pressed', 'true')
+        // A shared link opens straight on that list.
         await page.goto(`${OS_ON}/os/validators?tab=candidates`)
-        await expect(win(page, 'Validators').getByTestId('seg-candidates')).toHaveAttribute('aria-selected', 'true')
+        await expect(list('Candidates')).toHaveAttribute('aria-pressed', 'true')
+        // Network is still the classic page's view, in this window: a history entry, so Back returns to the list.
+        const classicTab = (id: string) => win(page, 'Validators').getByTestId(id)
+        await win(page, 'Validators').getByRole('button', { name: 'Network' }).click()
+        await expect(classicTab('seg-network')).toHaveAttribute('aria-selected', 'true')
+        await expect.poll(() => new URL(page.url()).search).toBe('?tab=network')
+        await page.goBack()
+        await expect(list('Candidates')).toHaveAttribute('aria-pressed', 'true')
+        await page.goForward()
+        // The classic page's own tabs lead back to the lists.
+        await classicTab('seg-validators').click()
+        await expect(list('Active set')).toHaveAttribute('aria-pressed', 'true')
     })
 
     test('a link inside the page stays in its window, and the address bar follows', async ({ page }) => {
-        await page.goto(`${OS_ON}/os/quests`)
+        // The leaderboard is a classic page in the Quests window (the hub is native).
+        await page.goto(`${OS_ON}/os/quests/leaderboard`)
         const quests = win(page, 'Quests')
-        const board = quests.getByRole('link', { name: 'View Leaderboard' })
-        await expect(board).toHaveAttribute('href', '/os/quests/leaderboard')
-        await board.click()
-        await expect.poll(() => new URL(page.url()).pathname).toBe('/os/quests/leaderboard')
-        await expect(page.getByRole('region', { name: 'Quests', exact: true })).toHaveCount(1)
-        await page.goBack()
+        const hub = quests.getByRole('link', { name: 'View Quests' })
+        await expect(hub).toHaveAttribute('href', '/os/quests')
+        await hub.click()
         await expect.poll(() => new URL(page.url()).pathname).toBe('/os/quests')
+        await expect(page.getByRole('region', { name: 'Quests', exact: true })).toHaveCount(1)
+        await expect(quests.getByRole('heading', { level: 1, name: 'Quests' })).toBeVisible()
+        await page.goBack()
+        await expect.poll(() => new URL(page.url()).pathname).toBe('/os/quests/leaderboard')
     })
 
     test('a link in Settings opens another system window beside it', async ({ page }) => {
@@ -98,7 +141,7 @@ test.describe('Memba OS pages in windows', () => {
         await expect(win(page, 'Settings')).toBeVisible()
     })
 
-    test('⌘K opens pages in the window that owns them; a wallet-only page asks a guest to connect', async ({ page }) => {
+    test('⌘K opens pages in the window that owns them; a guest sees the page, asked to connect where it needs a wallet', async ({ page }) => {
         await page.goto(`${OS_ON}/os`)
         await expect(page.getByRole('button', { name: 'Search (⌘K)' })).toBeVisible()
         await page.keyboard.press('ControlOrMeta+k')
@@ -109,8 +152,11 @@ test.describe('Memba OS pages in windows', () => {
         await expect(search).toHaveCount(0)
         await expect.poll(() => new URL(page.url()).pathname).toBe('/os/multisig/import')
         const multisig = win(page, 'Multisig')
-        await expect(multisig.getByText('Connect a wallet to use Multisig.')).toBeVisible()
-        await expect(multisig.getByRole('button', { name: 'Connect' })).toBeVisible()
+        // The import form itself, with its own prompt and a submit that needs a wallet.
+        await expect(multisig.getByText('Connect your wallet to import a multisig')).toBeVisible()
+        await expect(multisig.getByRole('button', { name: 'Import account', exact: true })).toBeDisabled()
+        await multisig.locator('.os-classic').getByRole('button', { name: 'Connect wallet', exact: true }).click()
+        await expect(page.getByRole('dialog', { name: 'Connect a wallet' })).toBeVisible()
     })
 
     test('⌘K turns a realm path into its DAO window, and Escape closes it', async ({ page }) => {
@@ -148,7 +194,7 @@ for (const view of [
         await page.setViewportSize({ width: view.width, height: view.height })
         await page.goto(`${OS_ON}/os/nft`)
         const nft = win(page, 'NFT')
-        await expect(nft.getByRole('note')).toContainText('collection registry is not deployed')
+        await expect(nft.getByRole('note')).toContainText('NFT ledger is not deployed')
         if ('windowWidth' in view) {
             await nft.evaluate((el, width) => { (el as HTMLElement).style.width = `${width}px` }, view.windowWidth)
         }

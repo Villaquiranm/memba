@@ -95,6 +95,8 @@ export function osTargetForClassic(pathname: string, network: string): OsTarget 
     if (rest === "dao") return { kind: "app", app: "daos", section: null }
     if (rest === "dao/create") return { kind: "app", app: "daos", section: "new" }
     if (rest.startsWith("dao/")) return daoTarget(rest.slice(4))
+    // A weighted DAO's classic page is its DAO folder here.
+    if (rest.startsWith("weighted-dao/")) return daoTarget(rest.slice("weighted-dao/".length))
     const ms = /^multisig\/([^/]+)$/.exec(rest)
     if (ms && ADDRESS.test(ms[1])) return { kind: "multisig", address: ms[1] }
     const app = OS_APPS.find((a) => owns(a, rest))
@@ -106,8 +108,9 @@ export function osTargetForClassic(pathname: string, network: string): OsTarget 
     return { kind: "app", app: app.id, section: sectionForClassic(app.id, rest), ...(search ? { query: params.toString() } : {}) }
 }
 
-/** Pages that send a guest away in the classic app (they need a signed-in wallet): the window asks to connect instead. */
+/** Pages that send a guest away in the classic app (they need a signed-in wallet): the window asks to connect instead.
+ *  Creating, importing and proposing a multisig are not here: those pages show a guest their form with its own connect prompt.
+ *  Nor are the App Store's submit, curator queue and own-listings pages: the native store window serves them, guests included. */
 export function pageNeedsWallet(page: string): boolean {
-    return page === "profile" || page === "multisig" || page === "create" || page === "import" || page.startsWith("multisig/")
-        || page === "apps/submit" || page === "apps/review" || page === "apps/my-submissions"
+    return page === "profile" || page === "multisig"
 }

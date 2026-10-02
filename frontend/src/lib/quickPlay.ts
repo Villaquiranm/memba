@@ -110,7 +110,7 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
-        } }], "Start Quick play", { retry: false })
+        } }], "Start Quick play")
     } catch (e) { remove(master); throw e }
     // The broadcast landed: from here the key is kept even if the read fails. quickPlayStatus/
     // quickPlayCall drop it once the chain says there is no session; hasLocalSession blocks a second Start.
@@ -166,6 +166,6 @@ export async function endQuickPlay(master: string): Promise<void> {
     checkMaster(master)
     const local = read(master)
     if (!local) return
-    await doContractBroadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(local.key.pub).slice(-35)) } } }], "End Quick play", { retry: false })
+    await doContractBroadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(local.key.pub).slice(-35)) } } }], "End Quick play")
     remove(master)
 }

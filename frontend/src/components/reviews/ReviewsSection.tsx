@@ -7,10 +7,6 @@
  *                              signing address, so reviews posted before it registered an
  *                              operator address still show). New reviews always post to
  *                              `subject` (the stable canonical identity).
- *   realmPath?: string       — which on-chain reviews realm to read/write. Defaults (undefined)
- *                              to the validator/profile web-of-trust realm; the App Store detail
- *                              page passes the reputation-isolated app-reviews realm path. Threaded
- *                              down to every ReviewCard so its actions hit the same realm.
  *
  * Responsibilities:
  * - On mount: fetch reviews for subject + aliases → merge/dedupe by author → attach
@@ -23,26 +19,31 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useAdena } from "../../hooks/useAdena"
 import {
   type OnChainReview,
+  type ReviewAction,
   fetchReviews,
   fetchSummary,
   attachUsernames,
-  buildPostReviewMsg,
-  submitMsg,
+  submitReview,
+  submitReviewAction,
+  reviewBodyBytes,
+  reviewStorageBytes,
+  reviewActionStorageBytes,
+  REVIEW_BODY_MAX_BYTES,
   mergeReviewsByAuthor,
   summaryFromReviews,
   makeOptimisticReview,
   upsertReviewByAuthor,
   type SubjectSummary,
 } from "../../lib/reviews"
+import { formatUgnot, STORAGE_PRICE_UGNOT } from "../../lib/dao/v2Budget"
 import { StarRating } from "./StarRating"
-import { ReviewCard } from "./ReviewCard"
+import { ReviewCard, type ReviewAct } from "./ReviewCard"
 import { ReviewsModeration } from "./ModerationPolicy"
 import "./reviews.css"
 
 interface ReviewsSectionProps {
   subject: string
   aliasSubjects?: string[]
-  realmPath?: string
   /**
    * Smallest number of reviews before the header shows a star average. Below it, the header
    * shows a neutral "New · N" chip instead — so a 1–2 review sample can't read as a confident
@@ -50,25 +51,43 @@ interface ReviewsSectionProps {
    * Store passes MIN_RATED_COUNT so the section matches its hero AppReviewStars.
    */
   minRatedCount?: number
-  /** The dedicated App Store realm pages visible items after moderation. */
+  /** Load further pages on request, until the realm's count of visible reviews is reached. */
   paginate?: boolean
   /** Use the realm's all-review summary instead of the loaded page's subtotal. */
   useOnchainSummary?: boolean
-  /** Hide classic wallet controls when a native surface handles its own writes. */
-  readOnly?: boolean
+  /**
+   * A Memba OS surface: its own composer posts reviews, so the form here is left out, and the
+   * actions on a review go through `act` (the OS signing sheet) for `viewer`, the session's address.
+   */
+  os?: { viewer: string | null; act: ReviewAct }
+  /** Called once the chain shows a review posted here, so summaries elsewhere on the page can be read again. */
+  onPosted?: () => void
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const actionDeposit = (action: ReviewAction) => formatUgnot(reviewActionStorageBytes(action) * STORAGE_PRICE_UGNOT)
 const REVIEW_PAGE_SIZE = 20
+const MAX_EMPTY_PAGES = 5
 
-export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCount = 0, paginate = false, useOnchainSummary = false, readOnly = false }: ReviewsSectionProps) {
+export function ReviewsSection({ subject, aliasSubjects, minRatedCount = 0, paginate = false, useOnchainSummary = false, os, onPosted }: ReviewsSectionProps) {
   const { address, connected, connect } = useAdena()
+  const viewer = os ? os.viewer : connected && address ? address : null
+  // A visitor can press any action: it asks for the wallet then, not before.
+  const act: ReviewAct = os ? os.act : async (action) => {
+    if (!connected || !address) { await connect(); return false }
+    await submitReviewAction(address, action)
+    return true
+  }
 
   const [reviews, setReviews] = useState<OnChainReview[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [chainSummary, setChainSummary] = useState<SubjectSummary | null>(null)
-  const [hasMore, setHasMore] = useState(false)
+  // The realm pages raw ids and then drops hidden reviews, so a page can come back short, or
+  // empty, with reviews still after it. The end is the realm's own count; only without it
+  // does a short page mean the end.
+  const [lastPageFull, setLastPageFull] = useState(false)
+  const [pagesExhausted, setPagesExhausted] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
   const loadedPagesRef = useRef(1)
@@ -88,6 +107,8 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
   // sleeping+fetching for up to ~6s after the user navigates away (and leaks
   // fetches into whatever test runs next).
   const aliveRef = useRef(true)
+  const onPostedRef = useRef(onPosted)
+  useEffect(() => { onPostedRef.current = onPosted }, [onPosted])
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -102,29 +123,35 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
     return all.join(",")
   }, [subject, aliasSubjects])
 
-  const fetchMerged = useCallback(async () => {
+  const fetchMerged = useCallback(async (total: SubjectSummary | null) => {
     const subs = subjectsKey.split(",").filter(Boolean)
     if (paginate && subs.length === 1) {
       const pages = await Promise.all(Array.from({ length: loadedPagesRef.current }, (_, index) =>
-        fetchReviews(subject, index * REVIEW_PAGE_SIZE, REVIEW_PAGE_SIZE, realmPath)))
-      return { items: mergeReviewsByAuthor(pages, subject), more: pages.at(-1)?.length === REVIEW_PAGE_SIZE }
+        fetchReviews(subject, index * REVIEW_PAGE_SIZE, REVIEW_PAGE_SIZE)))
+      // Pages that hold only hidden reviews come back empty: with the realm's count saying more
+      // follow, step over them here too (bounded), so a first page of hidden reviews is not "none".
+      for (let tries = 0; total && total.count > 0 && pages.every((page) => page.length === 0) && tries < MAX_EMPTY_PAGES; tries++) {
+        pages.push(await fetchReviews(subject, loadedPagesRef.current * REVIEW_PAGE_SIZE, REVIEW_PAGE_SIZE))
+        loadedPagesRef.current++
+      }
+      return { items: mergeReviewsByAuthor(pages, subject), fullPage: pages.at(-1)?.length === REVIEW_PAGE_SIZE, exhausted: pages.at(-1)?.length === 0 }
     }
-    const lists = await Promise.all(subs.map((s) => fetchReviews(s, 0, REVIEW_PAGE_SIZE, realmPath)))
-    return { items: mergeReviewsByAuthor(lists, subject), more: false }
-  }, [subjectsKey, subject, realmPath, paginate])
+    const lists = await Promise.all(subs.map((s) => fetchReviews(s, 0, REVIEW_PAGE_SIZE)))
+    return { items: mergeReviewsByAuthor(lists, subject), fullPage: false, exhausted: false }
+  }, [subjectsKey, subject, paginate])
 
   const load = useCallback(async () => {
     const reqId = ++reqIdRef.current
     setLoading(true)
     setLoadError(null)
     try {
-      const { items, more } = await fetchMerged()
-      const [withNames, total] = await Promise.all([
-        attachUsernames(items),
-        useOnchainSummary ? fetchSummary(subject, realmPath).catch(() => null) : Promise.resolve(null),
-      ])
+      // The count first: it says whether empty pages still have reviews after them.
+      const total = useOnchainSummary ? await fetchSummary(subject).catch(() => null) : null
+      const { items, fullPage, exhausted } = await fetchMerged(total)
+      const withNames = await attachUsernames(items)
       if (reqId !== reqIdRef.current) return // superseded by a newer load
-      setHasMore(more)
+      setLastPageFull(fullPage)
+      setPagesExhausted(exhausted)
       setChainSummary(total)
       // If a just-posted review is still pending, keep showing it until the chain confirms.
       const opt = optimisticRef.current
@@ -132,6 +159,7 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
         if (withNames.some((r) => r.author === opt.author && r.createdAt > 0)) {
           optimisticRef.current = null // chain caught up
           setReviews(withNames)
+          onPostedRef.current?.()
         } else {
           setReviews(upsertReviewByAuthor(withNames, opt))
         }
@@ -144,7 +172,7 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
     } finally {
       if (reqId === reqIdRef.current) setLoading(false)
     }
-  }, [fetchMerged, realmPath, subject, useOnchainSummary])
+  }, [fetchMerged, subject, useOnchainSummary])
 
   useEffect(() => {
     // Clear the previous subject's reviews immediately so they don't flash under the new
@@ -155,7 +183,8 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate clear-before-load in the optimistic pipeline
     setReviews([])
     setChainSummary(null)
-    setHasMore(false)
+    setLastPageFull(false)
+    setPagesExhausted(false)
     setLoadingMore(false)
     setLoadMoreError(null)
     loadedPagesRef.current = 1
@@ -164,23 +193,30 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
   }, [load])
 
   const loadMore = useCallback(async () => {
-    if (!paginate || !hasMore || loadingMore) return
+    if (!paginate || loadingMore) return
     const reqId = reqIdRef.current
     setLoadingMore(true)
     setLoadMoreError(null)
     try {
-      const page = await fetchReviews(subject, loadedPagesRef.current * REVIEW_PAGE_SIZE, REVIEW_PAGE_SIZE, realmPath)
+      // With the realm's count, step over pages that hold only hidden reviews (bounded).
+      let page: OnChainReview[] = []
+      for (let tries = 0; tries < MAX_EMPTY_PAGES && page.length === 0; tries++) {
+        page = await fetchReviews(subject, loadedPagesRef.current * REVIEW_PAGE_SIZE, REVIEW_PAGE_SIZE)
+        if (reqId !== reqIdRef.current) return
+        loadedPagesRef.current++
+        if (!chainSummary) break
+      }
       const withNames = await attachUsernames(page)
       if (reqId !== reqIdRef.current) return
-      loadedPagesRef.current++
       setReviews((previous) => mergeReviewsByAuthor([previous, withNames], subject))
-      setHasMore(page.length === REVIEW_PAGE_SIZE)
+      setLastPageFull(page.length === REVIEW_PAGE_SIZE)
+      setPagesExhausted(page.length === 0)
     } catch {
       if (reqId === reqIdRef.current) setLoadMoreError("Could not load more reviews. Please try again.")
     } finally {
       if (reqId === reqIdRef.current) setLoadingMore(false)
     }
-  }, [paginate, hasMore, loadingMore, subject, realmPath])
+  }, [paginate, loadingMore, subject, chainSummary])
 
   // Poll a few times after a post so the optimistic entry is swapped for the real one once
   // the chain reflects the write (bounded; load() clears optimisticRef when confirmed).
@@ -192,6 +228,10 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
     }
   }, [load])
 
+  const trimmedBody = body.trim()
+  const bodyBytes = reviewBodyBytes(trimmedBody)
+  const bodyTooLong = bodyBytes > REVIEW_BODY_MAX_BYTES
+
   const postReview = useCallback(async (caller: string) => {
     if (submittingRef.current) return // synchronous guard against a double-fire
     submittingRef.current = true
@@ -200,7 +240,7 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
     const trimmed = body.trim()
     const chosen = rating
     try {
-      await submitMsg(buildPostReviewMsg(caller, subject, chosen, trimmed, realmPath), "post review")
+      await submitReview(caller, subject, chosen, trimmed)
       // Optimistic: show it immediately (the realm edits an author's existing review on
       // re-post, so upsert-by-author matches that), then reconcile against the chain.
       const opt = makeOptimisticReview(caller, chosen, trimmed, subject)
@@ -215,11 +255,11 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [subject, rating, body, reconcileToChain, realmPath])
+  }, [subject, rating, body, reconcileToChain])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (rating === 0 || connecting || submitting) return
+    if (rating === 0 || bodyTooLong || connecting || submitting) return
     // Logged-out: the form is fully usable; "Post review" triggers the wallet. Once the
     // connection lands, the pending-post effect below fires the actual submit (one click).
     if (connected && address) { void postReview(address); return }
@@ -254,6 +294,12 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
   const visible = reviews.filter((r) => !r.deleted)
   const summary = useOnchainSummary && chainSummary ? chainSummary : summaryFromReviews(visible)
   const completeSummary = !useOnchainSummary || chainSummary !== null
+  // A just-posted review (id < 0) is not in the realm's count yet, and may stand in for the
+  // author's earlier one: nothing more to load until the chain has caught up.
+  const awaitingChain = visible.some((r) => r.id < 0)
+  const hasMore = paginate && !pagesExhausted && !awaitingChain && (chainSummary ? visible.length < chainSummary.count : lastPageFull)
+  // "None yet" only when the realm's count (where read) says so, not because the loaded pages are empty.
+  const noneYet = visible.length === 0 && (!chainSummary || chainSummary.count === 0)
   // Enough of a sample to show a star average? Below minRatedCount we show the count only.
   const rated = summary.count >= minRatedCount
 
@@ -287,7 +333,7 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
       </div>
 
       {/* Write form — always usable; the wallet is only triggered on "Post review". */}
-      {!readOnly && <form className="reviews-section__form" onSubmit={handleSubmit} noValidate>
+      {!os && <form className="reviews-section__form" onSubmit={handleSubmit} noValidate>
         <div>
           <span className="reviews-section__form-label" id="review-rating-label">Your rating</span>
           <StarRating value={rating} onChange={setRating} ariaLabelledBy="review-rating-label" />
@@ -302,11 +348,23 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
             onChange={(e) => setBody(e.target.value)}
             placeholder="Share your experience… (Markdown supported)"
             rows={4}
+            aria-invalid={bodyTooLong || undefined}
+            aria-describedby="review-body-size"
           />
+          <p id="review-body-size" className={bodyTooLong ? "reviews-section__error" : "reviews-section__hint"}>
+            {bodyTooLong
+              ? `Review text must be ${REVIEW_BODY_MAX_BYTES.toLocaleString("en-US")} bytes or fewer: this is ${bodyBytes.toLocaleString("en-US")}.`
+              : `${bodyBytes.toLocaleString("en-US")} of ${REVIEW_BODY_MAX_BYTES.toLocaleString("en-US")} bytes`}
+          </p>
         </div>
         <p className="reviews-section__permanence">
           Reviews are public chain transactions. You can remove a review from public view, but its chain history remains.
           {useOnchainSummary && " A wallet signature proves authorship, not that someone used the app."}
+        </p>
+        <p className="reviews-section__permanence">
+          Posting pays the network fee, shown before your wallet opens, and locks a storage deposit: up to {formatUgnot(reviewStorageBytes(subject, trimmedBody) * STORAGE_PRICE_UGNOT)} for the first review here, less for a later one.
+          Replacing your own review locks only what its text adds. Deleting a review returns a small part of its deposit; the rest stays locked.
+          If a moderator hid your review, posting again creates a new review with its own deposit.
         </p>
         {submitError && (
           <p className="reviews-section__error" role="alert">{submitError}</p>
@@ -315,7 +373,7 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
           <button
             type="submit"
             className="reviews-btn-primary"
-            disabled={submitting || connecting || rating === 0}
+            disabled={submitting || connecting || rating === 0 || bodyTooLong}
           >
             {submitting ? "Posting…" : connecting ? "Connecting…" : !connected ? "Connect & post review" : "Post review"}
           </button>
@@ -329,6 +387,10 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
 
       {/* List — show stale content while revalidating (so a post's optimistic entry and
           the background reconcile loads don't flash skeletons over the list). */}
+      {visible.length > 0 && <p className="reviews-section__permanence">
+        Liking, flagging and replying are chain transactions too, each paying the network fee. A first like or dislike on a review locks a storage deposit of up to {actionDeposit({ kind: "react", target: 0, on: "review", reaction: "like" })}, a flag up to {actionDeposit({ kind: "flag", target: 0, on: "review" })}, and a reply up to {actionDeposit({ kind: "reply", review: 0, body: "" })} plus its text.
+        Undoing a reaction returns about half of its deposit, and deleting a reply returns what its text took; the rest stays locked. A flag cannot be withdrawn, and Flag stays available after you flag: flagging the same review again fails on chain and still costs the fee.
+      </p>}
       <div className="reviews-section__list" aria-live="polite" aria-busy={loading || loadingMore}>
         {loading && visible.length === 0 && !loadError && (
           <div className="reviews-section__skeletons" data-testid="reviews-skeletons" aria-hidden="true">
@@ -338,18 +400,21 @@ export function ReviewsSection({ subject, aliasSubjects, realmPath, minRatedCoun
 
         {!loading && loadError && <div className="reviews-section__retry"><p className="reviews-section__error" role="alert">{loadError}</p><button type="button" className="reviews-btn-secondary" onClick={() => void load()}>Retry reviews</button></div>}
 
-        {!loading && !loadError && visible.length === 0 && (
+        {!loading && !loadError && noneYet && (
           <p className="reviews-section__empty">No reviews yet. Be the first!</p>
+        )}
+        {!loading && !loadError && visible.length === 0 && !noneYet && (
+          <p className="reviews-section__empty">The reviews read so far are hidden or removed.{hasMore && " Load more to read further."}</p>
         )}
 
         {visible.length > 0 &&
           visible.map((r) => (
-            <ReviewCard key={`${r.subject}:${r.id}`} review={r} onRefetch={load} realmPath={realmPath} readOnly={readOnly} />
+            <ReviewCard key={`${r.subject}:${r.id}`} review={r} onRefetch={load} viewer={viewer} act={act} plain={!!os} />
           ))}
         {loadMoreError && <p className="reviews-section__error" role="alert">{loadMoreError}</p>}
         {paginate && hasMore && !loading && <button type="button" className="reviews-btn-secondary reviews-section__load-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading…" : "Load more reviews"}</button>}
       </div>
-      <ReviewsModeration realmPath={realmPath} />
+      <ReviewsModeration />
     </section>
   )
 }

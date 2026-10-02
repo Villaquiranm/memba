@@ -118,12 +118,6 @@ interface NetworkConfig {
     explorerUrl: string
     /** When true, the network is reachable by URL/env but hidden from the selector. */
     hidden?: boolean
-    /** Set on a RETIRED network: the network key that replaces it. A URL naming
-     *  a retired network is redirected to the same route on this network (with a
-     *  one-time notice) instead of loading a chain that no longer serves the app.
-     *  The entry itself stays in NETWORKS so the redirect has something to read
-     *  and a future network can reuse its config. Must name a non-retired key. */
-    retiredTo?: string
     /** True for experimental test chains. Drives disclosures that only make sense
      *  off a production chain — e.g. Team Hub's "Data: mainnet" note, which says
      *  the gnolove roster comes from a mainnet-backed source rather than the chain
@@ -328,7 +322,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
         //
         // Visible 2026-08-27 → 2026-09-23, and the DEFAULT network 2026-08-27 →
         // 2026-09-17 (mainnet took over — see the `mainnet` entry).
-        // RETIRED 2026-09-23. Hidden, and `retiredTo: "mainnet"` (owner
+        // RETIRED 2026-09-23. Hidden, and listed in RETIRED_NETWORKS (owner
         // ruling): an old /pearl/… link redirects to the same route under
         // /mainnet/ with a one-time notice, and a stored pearl choice resolves
         // to the default. The entry, realmsDeployed and its REALM_ALLOWLIST
@@ -345,7 +339,6 @@ export const NETWORKS: Record<string, NetworkConfig> = {
         userDaos: { create: true, channelsCompanion: true },
         // Retired 2026-09-23 — see the header above.
         hidden: true,
-        retiredTo: "mainnet",
         // Flipped by the §6 completion PR: the combined Pearl ceremony (core
         // set + commerce set) records per-artifact vm/qfile evidence in
         // realm-versions.json's `pearl` section — same rule as sapphire's
@@ -460,10 +453,11 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     // Realms: wave 1 was published by the samcrew namespace multisig on
     // 2026-09-23 (realm-versions.json `mainnet`). What the app exposes is
     // exactly REALM_ALLOWLIST.mainnet — isRealmValidOn('mainnet', …) is true
-    // for those paths only. `realmsDeployed` stays false because memba_dao is
-    // not on mainnet (gno.land/r/samcrew/memba_dao → 404), so the DAO-backed
-    // surfaces keep the honest RealmsNotDeployedBanner; networkHasAllowlistedRealms
-    // is the finer signal for the wave-1 lanes. ugnot is transferable
+    // for those paths only. `realmsDeployed` stays false because Memba's realm
+    // set is only partly on mainnet (memba_dao went live at height 315078 on
+    // 2026-09-25; the realms listed as not deployed in realm-versions.json are
+    // not), so the classic surfaces that need the full set keep the honest
+    // RealmsNotDeployedBanner; networkHasAllowlistedRealms is the finer signal. ugnot is transferable
     // (bank restricted_denoms reads `[]`).
     //
     // Backend-pinned constants (FEED_INDEXED_NETWORK, SNAPSHOT_NETWORK,
@@ -557,6 +551,13 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     },
 }
 
+/** Whether `key` names a network in the registry. Only the registry's own keys
+ *  count: a key read from a URL, storage or a post (`constructor`, `toString`)
+ *  must not find the ones every object inherits. */
+export function isNetworkKey(key: string | null | undefined): key is string {
+    return !!key && Object.hasOwn(NETWORKS, key)
+}
+
 /** Networks shown in the selector (all non-hidden ones). NETWORKS stays the
  *  full map for resolution by URL/env/localStorage. */
 export const VISIBLE_NETWORKS: Record<string, NetworkConfig> = Object.fromEntries(
@@ -613,7 +614,7 @@ export function resolveDefaultNetwork(envKey: string | undefined): string {
     // (sapphire: 09-09), and every testnet this app has defaulted to so far
     // has eventually been one. `gnoland-1` is the production chain: it is the
     // one entry here with no announced end of life.
-    return envKey && NETWORKS[envKey] ? envKey : "mainnet"
+    return isNetworkKey(envKey) ? envKey : "mainnet"
 }
 
 /** Default network key (always a valid NETWORKS entry — see resolveDefaultNetwork). */
@@ -632,12 +633,23 @@ export const NETWORK_PREF_STORAGE_KEY = "memba_network_pref"
  *  `useNetworkKey` and `directory` all ignore it). */
 export const NETWORK_ECHO_STORAGE_KEY = "memba_network"
 
-/** The successor of a RETIRED network (its `retiredTo`), or null when `key` is
- *  not retired. Validated: a successor that is missing from NETWORKS, or is
- *  itself retired, yields null rather than a redirect into a dead end. */
+/**
+ * Networks Memba no longer serves, by the key their old links carry. A URL under
+ * one of these prefixes goes to the same route on `to` (with a one-time notice
+ * naming the retired network) instead of loading a chain that no longer serves
+ * the app. Kept apart from NETWORKS on purpose: a retired chain needs no
+ * registry entry for its old links to keep working.
+ */
+export const RETIRED_NETWORKS: Readonly<Record<string, { to: string; name: string }>> = Object.freeze({
+    pearl: { to: "mainnet", name: "Pearl testnet" },
+})
+
+/** The successor of a RETIRED network, or null when `key` is not retired.
+ *  Validated: a successor that is missing from NETWORKS, or is itself retired,
+ *  yields null rather than a redirect into a dead end. */
 export function retiredNetworkSuccessor(key: string | null | undefined): string | null {
-    const to = key ? NETWORKS[key]?.retiredTo : undefined
-    if (!to || !NETWORKS[to] || NETWORKS[to].retiredTo) return null
+    const to = key && Object.hasOwn(RETIRED_NETWORKS, key) ? RETIRED_NETWORKS[key].to : undefined
+    if (!isNetworkKey(to) || Object.hasOwn(RETIRED_NETWORKS, to)) return null
     return to
 }
 
@@ -673,8 +685,11 @@ export function resolveNetworkKey({ pathname, pref }: {
     pref?: string | null
 }): string {
     const urlKey = pathname?.split("/")[1]
-    if (urlKey && NETWORKS[urlKey]) return retiredNetworkSuccessor(urlKey) ?? urlKey
-    if (pref && NETWORKS[pref] && !NETWORKS[pref].hidden) return pref
+    // Retired first: a retired key resolves to its successor whether or not the registry still lists it.
+    const successor = retiredNetworkSuccessor(urlKey)
+    if (successor) return successor
+    if (isNetworkKey(urlKey)) return urlKey
+    if (isNetworkKey(pref) && !NETWORKS[pref].hidden) return pref
     return DEFAULT_NETWORK
 }
 
@@ -998,12 +1013,17 @@ const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
     ],
 }
 
+/** A network's allowlist. Own keys only, as for `isNetworkKey`. */
+function realmAllowlist(networkKey: string): readonly string[] | undefined {
+    return Object.hasOwn(REALM_ALLOWLIST, networkKey) ? REALM_ALLOWLIST[networkKey] : undefined
+}
+
 /**
  * Is a realm callable on the given network? Networks without an allowlist entry
  * gate everything — this fails CLOSED (see the body for why).
  */
 export function isRealmValidOn(networkKey: string, realmPath: string): boolean {
-    const allow = REALM_ALLOWLIST[networkKey]
+    const allow = realmAllowlist(networkKey)
     // FAIL CLOSED. This read `!allow || allow.includes(...)`, so a network with
     // no allowlist entry declared EVERY realm valid — and since these
     // predicates gate the commerce lanes (escrow, OTC, NFT market, token
@@ -1020,7 +1040,7 @@ export function isRealmValidOn(networkKey: string, realmPath: string): boolean {
  *  mainnet wave 1 keeps `realmsDeployed: false` while its REALM_ALLOWLIST is
  *  non-empty. An explicit empty list (gnoland1) or an absent key is false. */
 export function networkHasAllowlistedRealms(networkKey: string): boolean {
-    return (REALM_ALLOWLIST[networkKey]?.length ?? 0) > 0
+    return (realmAllowlist(networkKey)?.length ?? 0) > 0
 }
 
 /**
@@ -1143,27 +1163,16 @@ export function getTelemetryRpcUrls(): string[] {
 export const GNO_FAUCET_URL = NETWORKS[_activeNetwork]?.faucetUrl || ""
 
 /**
- * Realm the wallet-activation flow calls to register a fresh wallet's pubkey
- * on-chain (issue #1078). Any first transaction registers the key; this one is
- * chosen because Adena's DoContract only accepts VM message types (the old
- * bank/MsgSend self-send was rejected wholesale), and this vendored realm's
- * SetStringField writes a per-CALLER field — no cross-user effect, dust gas —
- * and ships in the same ceremony manifest as the rest of Memba, so it exists
- * on every chain the app serves by construction (sapphire: seq/height in
- * realm-versions.json; signature + field schema read back from the deployed
- * source via vm/qfile 2026-08-16). NOTE the realm validates field names — the
- * activation call must use a field from ITS schema ("Bio"), never an invented
- * key ("unknown string profile field" panic, caught live in Adena's gas sim).
+ * The profile realm Memba OS reads and publishes profiles in: SetStringField
+ * writes a field of the CALLER's own profile, no cross-user effect.
  */
-export function activationRealmFor(networkKey: string): string {
+export function profileRealmFor(networkKey: string): string {
     // Mainnet and Onyx have no samcrew deps/demo/profile vendor copy; gno core's
     // own gno.land/r/demo/profile is live on both with the same SetStringField
-    // and a schema that includes "Bio" (read back from the deployed source:
-    // gnoland-1 2026-09-23, onyx-1 2026-09-30).
-    return import.meta.env.VITE_ACTIVATION_REALM_PATH
+    // (read back from the deployed source: gnoland-1 2026-09-23, onyx-1 2026-09-30).
+    return import.meta.env.VITE_PROFILE_REALM_PATH
         || (networkKey === "mainnet" || networkKey === "onyx" ? "gno.land/r/demo/profile" : "gno.land/r/samcrew/deps/demo/profile")
 }
-export const ACTIVATION_PROFILE_REALM = activationRealmFor(ACTIVE_NETWORK_KEY)
 
 /** Explorer base URL for the active network (for user profile links, realm links, etc). */
 export function getExplorerBaseUrl(): string {
@@ -1452,9 +1461,6 @@ export const MEMBA_DAO = {
     badgesPath: "gno.land/r/samcrew/gnobuilders_badges_v2",
     reviewsPath: reviewsPathFor(ACTIVE_NETWORK_KEY),
     appStorePath: appStorePathFor(ACTIVE_NETWORK_KEY),
-    // Reputation-isolated App Store reviews realm (shares the reviews engine but keeps its
-    // reputation graph separate from the validator/profile web-of-trust). Deployed to test13.
-    appReviewsPath: import.meta.env.VITE_APPSTORE_REVIEWS_REALM_PATH || "gno.land/r/samcrew/memba_appstore_reviews_v1",
     feedPath: import.meta.env.VITE_FEED_REALM_PATH || "gno.land/r/samcrew/memba_feed_v1",
     tokenOtcPath: "gno.land/r/samcrew/memba_token_otc_v2",
     deployFee: 10_000_000, // 10 GNOT in ugnot
@@ -1595,12 +1601,12 @@ export const isReviewsEnabled = (): boolean => import.meta.env.VITE_ENABLE_REVIE
 export const isReviewsValid = (): boolean => isRealmValid(MEMBA_DAO.reviewsPath)
 /** Reviews surfaces render only when the flag is on AND the reviews realm is live on the active network. */
 export const isReviewsAvailable = (): boolean => isReviewsEnabled() && isReviewsValid()
-/** Community reviews on App Store listings (B2b). Ordinary flag — the App Store reviews
- * realm moves no funds (reputation graph only). Literal reader (prod-bundle safe). Gates the
- * ReviewsSection mount + AppReviewStars on the App Store detail page. */
+/** Community reviews on App Store listings. Ordinary flag: a review custodies no funds (its
+ * author pays a storage deposit). Literal reader (prod-bundle safe). Gates the reviews and the
+ * star summaries on App Store listings. */
 export const isAppReviewsEnabled = (): boolean => import.meta.env.VITE_ENABLE_APP_REVIEWS === "true"
-/** App Store reviews render only when the flag is on AND the app-reviews realm is live on the active network. */
-export const isAppReviewsAvailable = (): boolean => isAppReviewsEnabled() && isRealmValid(MEMBA_DAO.appReviewsPath)
+/** App reviews live in the network's reviews realm, beside validator and profile reviews: they render when the flag is on and that realm is live on the active network. */
+export const isAppReviewsAvailable = (): boolean => isAppReviewsEnabled() && isReviewsValid()
 /** Social feed (W7.2). Ordinary flag — no funds. Literal reader (dynamic
  * import.meta.env[key] is undefined in prod bundles). */
 export const isFeedEnabled = (): boolean => import.meta.env.VITE_ENABLE_FEED === "true"
@@ -1652,12 +1658,10 @@ export const isBarricade25DEnabled = (): boolean =>
 /** Realm Explorer (W9 P0). Ordinary flag — read-only (qrender/qfile/qfuncs), no
  * funds. Literal reader (dynamic import.meta.env[key] is undefined in prod bundles). */
 export const isExplorerEnabled = (): boolean => import.meta.env.VITE_ENABLE_EXPLORER === "true"
-/** App Store (W9). SAFETY-GATED — the realm's RegisterApp fee path is not yet
- * verified on-chain (see SAFETY_GATED_FLAGS). Literal reader (prod-bundle safe). */
+/** App Store registry. Ordinary, owner-controlled flag (de-gated in lib/safeFlags.ts). Literal reader (prod-bundle safe). */
 export const isAppStoreEnabled = (): boolean => import.meta.env.VITE_ENABLE_APPSTORE === "true"
-/** App Store self-service submission (B3). SAFETY-GATED — RegisterApp attaches real coins
- * and the memba_appstore_v3 fee path is not yet deployed/verified (see SAFETY_GATED_FLAGS).
- * Literal reader (prod-bundle safe). */
+/** App Store self-service submission: RegisterApp attaches the listing fee. Ordinary, owner-controlled
+ * flag (de-gated in lib/safeFlags.ts). Literal reader (prod-bundle safe). */
 export const isAppStoreSubmitEnabled = (): boolean => import.meta.env.VITE_ENABLE_APPSTORE_SUBMIT === "true"
 
 /** Token allocation percentages (total = 100%). */

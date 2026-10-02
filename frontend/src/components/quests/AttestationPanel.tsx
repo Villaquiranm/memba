@@ -23,7 +23,8 @@ import {
     type AttestationState,
 } from "../../lib/attestation"
 import { doContractBroadcast } from "../../lib/grc20"
-import { isUserCancellation, friendlyError } from "../../lib/errorMessages"
+import { friendlyError } from "../../lib/errorMessages"
+import { isUserCancellation } from "../../lib/userCancellation"
 import { formatUgnotExact } from "../../lib/dao/v2Budget"
 import "./attestationpanel.css"
 
@@ -60,12 +61,10 @@ export function AttestationPanel({ address }: { address: string }) {
         setBusy(questId)
         setError(null)
         try {
-            // No automatic retry: if a landed call's response is lost, a retry
-            // would prompt the wallet again only to fail on the used nonce.
             await doContractBroadcast(
                 [buildRecordCompletionMsg(address, state.realmPath, voucher)],
                 `Attest quest "${questId}" on-chain`,
-                { gasWanted: RECORD_COMPLETION_GAS_WANTED, retry: false },
+                { gasWanted: RECORD_COMPLETION_GAS_WANTED },
             )
         } catch (err) {
             // Silently dismiss a user-rejected/cancelled tx; surface real failures

@@ -1,9 +1,30 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { formatSend } from "../sign/decode"
+import { ACTIVATION_SEND_UGNOT } from "../../lib/activation"
+// Adena's own app icon, unaltered, from its brand kit (docs.adena.app → Resources → Brand Assets → Download Logo, "app icon").
+import adenaLogo from "./adena-logo.svg"
 import { shortAddr } from "./format"
-import { ThingTile } from "./icons"
+import { useDialogKeys } from "./useDialogKeys"
 import type { OsSession } from "./useOsSession"
+import { walletOnOtherChain } from "./walletLogin"
 
-const ADENA_TINT = ["#7E6CF2", "#4B3FD0"] as const
+/** GNOT exactly, never rounded: "0.0024 GNOT". */
+const exact = (ugnot: bigint | number) => formatSend(`${ugnot}ugnot`)
+
+/** What Adena shows for the activation, as Adena 1.21.6 renders a bank send (its default message view). */
+function AdenaShows() {
+    return (
+        <>
+            <dl className="os-kv os-card" aria-label="Adena should show">
+                <dt>Message</dt><dd>1. Transfer</dd>
+                <dt>type</dt><dd className="os-mono">/bank.MsgSend</dd>
+                <dt>function</dt><dd className="os-mono">Transfer</dd>
+                <dt>Memo</dt><dd>Memba Network Activation</dd>
+            </dl>
+            <p className="os-sub os-flush">Adena does not show a transfer’s recipient or amount: this one is {exact(ACTIVATION_SEND_UGNOT)} to your own address.</p>
+        </>
+    )
+}
 
 function Head({ title, sub }: { title: string; sub?: string }) {
     return (
@@ -27,21 +48,26 @@ export function ConnectModal({ session }: { session: OsSession }) {
     const { stage, error, note } = session
     const mobileBrowser = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
     const dialog = useRef<HTMLDivElement>(null)
+    // The network Adena was on when a switch to Memba's failed: the failure stands while Adena still reports it.
+    const [switchFailedOn, setSwitchFailedOn] = useState<string | null>(null)
+    const otherChain = stage === "login" ? walletOnOtherChain(session.walletChainId, session.network.chainId) : null
     useEffect(() => {
         if (!stage || !dialog.current) return
         if (dialog.current.contains(document.activeElement)) return
         const first = dialog.current.querySelector<HTMLElement>('button:not(:disabled), a[href]')
         ;(first ?? dialog.current).focus({ preventScroll: true })
     }, [stage])
+    const closeable = !!stage && !(stage === "activate" && session.activationForced) && stage !== "activatewait"
+    useDialogKeys(dialog, !!stage, "button:not(:disabled), a[href]", closeable ? session.cancel : undefined)
     if (!stage) return null
-    const closeable = !(stage === "activate" && session.activationForced) && stage !== "activatewait"
+    const cost = session.activationCost
     let body: ReactNode
     switch (stage) {
         case "pick":
             body = <>
                 <Head title="Connect a wallet" sub="Voting, signing and posting need your approval in the wallet. Memba never holds your keys." />
                 <button type="button" className="os-wopt" onClick={session.chooseAdena} autoFocus>
-                    <ThingTile icon="wal" tint={ADENA_TINT} size={36} />
+                    <img src={adenaLogo} alt="" width={36} height={36} className="os-wlogo" />
                     <span className="os-grow"><b>Adena</b><span className="os-sub os-block">The gno.land wallet · works with Ledger</span></span>
                 </button>
                 <div className="os-row os-end"><button type="button" className="os-btn os-quiet" onClick={session.cancel}>Not now</button></div>
@@ -71,7 +97,13 @@ export function ConnectModal({ session }: { session: OsSession }) {
                 <div className="os-row os-end"><button type="button" className="os-btn os-quiet" onClick={session.cancel}>Cancel</button></div>
             </>
             break
-        case "login":
+        case "login": {
+            const chain = session.network.chainId
+            const switchWallet = async () => {
+                const from = session.walletChainId
+                setSwitchFailedOn(null)
+                if (!(await session.switchWallet())) setSwitchFailedOn(from)
+            }
             body = <>
                 <Head title="Sign the login message" sub="It proves you own this address. It’s never sent to the chain and costs nothing." />
                 {note && <p className="os-note" role="status">{note}</p>}
@@ -80,12 +112,18 @@ export function ConnectModal({ session }: { session: OsSession }) {
                     <dt>Network</dt><dd>{session.network.chainId}</dd>
                     <dt>Cost</dt><dd>Free</dd>
                 </dl>
+                {otherChain && <p className="os-note os-err" role="alert">
+                    {switchFailedOn === session.walletChainId ? `Adena didn't switch to ${chain}. Switch it to ${chain} in Adena, then sign in.` : otherChain}
+                </p>}
                 <div className="os-row os-end">
                     <button type="button" className="os-btn os-quiet" onClick={session.cancel}>Cancel</button>
-                    <button type="button" className="os-btn" onClick={session.signIn} autoFocus>Sign in Adena</button>
+                    {otherChain
+                        ? <button type="button" className="os-btn" onClick={() => { void switchWallet() }} autoFocus>Switch Adena to {chain}</button>
+                        : <button type="button" className="os-btn" onClick={session.signIn} autoFocus>Sign in Adena</button>}
                 </div>
             </>
             break
+        }
         case "loginwait":
             body = <>
                 <Head title="Confirm in Adena" sub="Sign the login message." />
@@ -97,41 +135,29 @@ export function ConnectModal({ session }: { session: OsSession }) {
             body = <>
                 <Head title="Activate your address" sub="Your address has never sent a transaction, so the chain doesn’t know its public key yet. Memba needs it to check your signatures." />
                 <dl className="os-kv os-card">
-                    <dt>What happens</dt><dd>Saves an empty profile field</dd>
-                    <dt>Network</dt><dd>{session.network.chainId}</dd>
-                    <dt>Cost</dt><dd>≈ 0.01 GNOT</dd>
+                    <dt>What happens</dt><dd>Sends {exact(ACTIVATION_SEND_UGNOT)} from your address to itself</dd>
                     <dt>How often</dt><dd>Once, never again</dd>
+                    <dt>Network fee</dt><dd>{cost ? `${session.activationPriceEstimated ? "about " : ""}${exact(cost.feeUgnot)}` : "reading the network price…"}</dd>
                 </dl>
-                {session.noFunds && <p className="os-note os-warn" role="status">This address holds no GNOT yet. Send it a little (0.01 GNOT is enough), then activate.</p>}
+                <p className="os-sub os-flush">Your wallet sets the fee it signs from its own gas estimate, usually lower than the figure above. Check the fee in Adena before you approve.</p>
+                <AdenaShows />
+                {session.noFunds && cost && <p className="os-note os-warn" role="status">Activation needs at least {exact(BigInt(cost.feeUgnot) + ACTIVATION_SEND_UGNOT)} here: the network fee and the {exact(ACTIVATION_SEND_UGNOT)} sent to yourself. Send this address at least that much, then activate.</p>}
                 {session.balanceUnknown && <p className="os-note os-warn" role="status">{session.balanceError ? "Balance unavailable. Retry the check before activating." : "Checking this address's GNOT balance…"}</p>}
                 <div className="os-row os-end">
                     {closeable && <button type="button" className="os-btn os-quiet" onClick={session.cancel}>Later</button>}
                     {session.balanceUnknown && <button type="button" className="os-btn os-quiet" onClick={() => { void session.refreshBalance() }}>Retry balance check</button>}
-                    <button type="button" className="os-btn" onClick={session.activate} disabled={session.noFunds || session.balanceUnknown} autoFocus>Activate in Adena</button>
+                    <button type="button" className="os-btn" onClick={session.activate} disabled={session.noFunds || session.balanceUnknown || !cost} autoFocus>Activate in Adena</button>
                 </div>
             </>
             break
         case "activatewait":
-            body = <><Head title="Confirm in Adena" sub="Approve the activation." /><Waiting label="Waiting for Adena…" /></>
+            body = <><Head title="Confirm in Adena" sub="Approve the activation. Check Adena shows:" /><AdenaShows /><Waiting label="Waiting for Adena…" /></>
             break
     }
     const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
         if (e.key === "Escape" && closeable) {
             e.preventDefault()
             session.cancel()
-            return
-        }
-        if (e.key !== "Tab") return
-        const stops = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]') ?? [])
-        if (stops.length === 0) {
-            e.preventDefault()
-            dialog.current?.focus()
-        } else if (e.shiftKey && document.activeElement === stops[0]) {
-            e.preventDefault()
-            stops[stops.length - 1].focus()
-        } else if (!e.shiftKey && document.activeElement === stops[stops.length - 1]) {
-            e.preventDefault()
-            stops[0].focus()
         }
     }
     return (
@@ -139,7 +165,8 @@ export function ConnectModal({ session }: { session: OsSession }) {
             <div ref={dialog} className="os-modal os-glass" role="dialog" aria-modal="true" aria-label="Connect a wallet" tabIndex={-1}
                 onKeyDown={onKeyDown}>
                 {body}
-                {error && <p className="os-note os-err" role="alert">{error}</p>}
+                {/* The network note replaces an error from a sign-in it explains. */}
+                {error && !otherChain && <p className="os-note os-err" role="alert">{error}</p>}
             </div>
         </div>
     )

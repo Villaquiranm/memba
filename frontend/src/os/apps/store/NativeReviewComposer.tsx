@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react"
 import { StarRating } from "../../../components/reviews/StarRating"
-import { MEMBA_DAO } from "../../../lib/config"
 import { networkGasPriceFresh } from "../../../lib/grc20"
 import { REVIEW_BODY_MAX_BYTES } from "../../../lib/reviews"
 import type { OsSession } from "../../shell/useOsSession"
 import { useSigner } from "../../sign/signerContext"
+import { useAlive } from "../../shell/useAlive"
 import { storeReviewRequest } from "./reviewRequest"
 
 interface ReviewDraft { rating: number; body: string }
@@ -45,17 +45,17 @@ export function NativeReviewComposer({ session, subject, appName, onSubmitted }:
     const [notice, setNotice] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [quoting, setQuoting] = useState(false)
-    const alive = useRef(true)
+    const alive = useAlive()
     const toggle = useRef<HTMLButtonElement>(null)
     const refocus = useRef(false)
     const bodyBytes = new TextEncoder().encode(draft.body.trim()).length
     const tooLong = bodyBytes > REVIEW_BODY_MAX_BYTES
     const edit = (next: ReviewDraft) => { setDraft(next); saveDraft(key, next) }
 
-    useEffect(() => {
-        alive.current = true
-        return () => { alive.current = false }
-    }, [])
+
+    // The form a fee quote was asked from: closing it, or an earlier review settling, collapses it mid-read.
+    const formOpen = useRef(expanded)
+    useEffect(() => { formOpen.current = expanded }, [expanded])
 
     // A posted review collapses the form that held focus; hand it to the toggle, not <body>.
     useEffect(() => {
@@ -65,7 +65,7 @@ export function NativeReviewComposer({ session, subject, appName, onSubmitted }:
 
     const submit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
-        if (quoting || draft.rating < 1 || tooLong) return
+        if (quoting || session.status === "resuming" || draft.rating < 1 || tooLong) return
         if (session.status !== "member") { session.openConnect(); return }
         setNotice(null)
         setError(null)
@@ -74,11 +74,10 @@ export function NativeReviewComposer({ session, subject, appName, onSubmitted }:
             // Read from the chain at this click. A cached or fallback price would be refused at
             // the recheck, again on every retry.
             const price = await networkGasPriceFresh().catch(() => { throw new Error("The network fee could not be read. Try again in a moment.") })
-            // The window may have closed while the price was read: no sheet for a form that is gone.
-            if (!alive.current) return
+            // The window or the form may have closed while the price was read: no sheet for a form that is gone.
+            if (!alive.current || !formOpen.current) return
             signer.sign(storeReviewRequest({
                 subject, appName, caller: session.address, rating: draft.rating, body: draft.body,
-                realmPath: MEMBA_DAO.appReviewsPath,
                 networkKey: session.network.key, chainId: session.network.chainId, price,
                 onSettled: (outcome) => {
                     if (outcome === "submitted" || outcome === "confirmed") {
@@ -117,8 +116,9 @@ export function NativeReviewComposer({ session, subject, appName, onSubmitted }:
         {tooLong && <p className="os-store-review-error" role="alert">Review text is too long in UTF-8 bytes.</p>}
         {error && <p className="os-store-review-error" role="alert">{error}</p>}
         <div className="os-store-review-actions">
-            <button type="submit" className="os-btn" aria-disabled={quoting} disabled={draft.rating === 0 || tooLong || session.status === "resuming"}>{quoting ? "Checking fee…" : session.status === "member" ? "Review in Memba OS" : "Connect to review"}</button>
+            <button type="submit" className="os-btn" aria-disabled={quoting || session.status === "resuming"} disabled={draft.rating === 0 || tooLong}>{quoting ? "Checking fee…" : session.status === "resuming" ? "Restoring your session…" : session.status === "member" ? "Review in Memba OS" : "Connect to review"}</button>
             {draft.rating === 0 && <span className="os-sub">Select a rating to post.</span>}
+            <span className="os-sub" role="status">{quoting ? "Reading the network fee from the chain…" : ""}</span>
         </div>
         <p className="os-store-review-disclosure">Reviews are public chain transactions. Removing a review from public view does not erase its chain history. A signature proves wallet authorship, not app use.</p>
         </form>}

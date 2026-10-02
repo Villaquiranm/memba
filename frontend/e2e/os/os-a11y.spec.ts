@@ -1,9 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { settle, settleAnimations } from './settle'
-import { OS_FEED_ON, OS_ON } from '../../playwright.os.config'
+import { OS_FLAGS_ON, OS_ON } from '../../playwright.os.config'
 import { fulfillGovernance } from '../helpers/proGovernanceFixture'
 import { abortOnchainReads } from '../helpers/onchain'
+import { fulfillProValidatorRoster } from '../helpers/proValidatorsFixture'
 
 // No serious or critical WCAG 2.1 AA violations (contrast included) on the main
 // Memba OS surfaces, in the light and dark themes, desktop and phone. The scan
@@ -84,7 +85,7 @@ for (const scheme of ['light', 'dark'] as const) {
             await expect(page.getByRole('heading', { name: 'Fund the community education programme' })).toBeVisible()
             expect(await violations(page)).toEqual([])
             await page.goto(`${OS_ON}/os/daos/new`)
-            await expect(page.getByRole('region', { name: 'Create a DAO', exact: true }).getByText('Connect a wallet to create a DAO.')).toBeVisible()
+            await expect(page.getByRole('region', { name: 'Create a DAO', exact: true }).getByLabel('Name')).toBeVisible()
             expect(await violations(page)).toEqual([])
             expect(await accentFillContrasts(page)).toEqual([])
             await page.getByRole('button', { name: 'Memba menu' }).click()
@@ -106,8 +107,9 @@ for (const scheme of ['light', 'dark'] as const) {
 }
 
 /** Apps with no native OS window: they render their existing Memba page (.os-classic)
- * inside the window instead. */
-const CLASSIC_APPS = ['quests', 'validators', 'news', 'dev-report', 'explorer', 'feedback']
+ * inside the window instead. The Explorer's home is native (scanned below); its classic
+ * directory is still what a tab address shows. The Quests hub is native too (scanned below). */
+const CLASSIC_APPS = ['dev-report', 'explorer?tab=packages', 'feedback']
 
 for (const scheme of ['light', 'dark'] as const) {
     test.describe(`Memba OS classic pages accessibility · ${scheme}`, () => {
@@ -132,6 +134,16 @@ for (const scheme of ['light', 'dark'] as const) {
             })
         }
 
+        test('Explorer native home window', async ({ page }) => {
+            await page.goto(`${OS_ON}/os/explorer`)
+            const explorer = page.getByRole('region', { name: 'Explorer', exact: true })
+            await expect(explorer.getByRole('heading', { level: 1, name: 'Realm directory' })).toBeVisible()
+            // Chain reads are refused here: the curated rows show under the unreachable notices.
+            await expect(explorer.getByRole('button', { name: 'Open GovDAO, gno.land/r/gov/dao' })).toBeVisible({ timeout: 30_000 })
+            await expect(explorer.locator('.os-classic')).toHaveCount(0)
+            expect(await violations(page)).toEqual([])
+        })
+
         test('Feed native unavailable window', async ({ page }) => {
             await page.goto(`${OS_ON}/os/feed`)
             const feed = page.getByRole('region', { name: 'Feed', exact: true })
@@ -149,7 +161,7 @@ for (const scheme of ['light', 'dark'] as const) {
 
         test('Feed native enabled window', async ({ page }) => {
             await page.route(/memba\.v1\.|memba-backend\.fly\.dev/, route => route.fulfill({ status: 503, body: 'offline' }))
-            await page.goto(`${OS_FEED_ON}/os/feed`)
+            await page.goto(`${OS_FLAGS_ON}/os/feed`)
             const feed = page.getByRole('region', { name: 'Feed', exact: true })
             await expect(feed.getByRole('heading', { name: 'Community posts' })).toBeVisible()
             await expect(feed.getByText('The Feed could not be loaded. Your posts remain on-chain.')).toBeVisible()
@@ -159,8 +171,38 @@ for (const scheme of ['light', 'dark'] as const) {
         test('tokens native unavailable window', async ({ page }) => {
             await page.goto(`${OS_ON}/os/tokens`)
             const tokens = page.getByRole('region', { name: 'Tokens', exact: true })
-            await expect(tokens.getByRole('note')).toContainText('factory is not deployed')
+            await expect(tokens.getByRole('note')).toContainText('Token Launchpad is not deployed')
             await expect(tokens.locator('.os-classic')).toHaveCount(0)
+            expect(await violations(page)).toEqual([])
+        })
+
+        test('Validators native window', async ({ page }) => {
+            // Served after the chain-read abort, so it wins. The mixed roster has all four health
+            // states (every pill tone, each with its reason) and a validator nobody monitors.
+            await fulfillProValidatorRoster(page, 'mixed')
+            await page.goto(`${OS_ON}/os/validators`)
+            const validators = page.getByRole('region', { name: 'Validators', exact: true })
+            await expect(validators.getByRole('button', { name: 'Open validator Northstar' })).toBeVisible()
+            for (const health of ['Healthy', 'Degraded', 'Down', 'Unknown']) {
+                await expect(validators.getByRole('table').getByText(health, { exact: true })).toBeVisible()
+            }
+            await expect(validators.locator('.os-classic')).toHaveCount(0)
+            expect(await violations(page)).toEqual([])
+        })
+
+        test('Validators native window when the chain cannot be read', async ({ page }) => {
+            await page.goto(`${OS_ON}/os/validators`)
+            const validators = page.getByRole('region', { name: 'Validators', exact: true })
+            await expect(validators.getByRole('alert')).toContainText('The validator set could not be read')
+            expect(await violations(page)).toEqual([])
+        })
+
+        test('Quests native hub', async ({ page }) => {
+            await page.goto(`${OS_ON}/os/quests`)
+            const quests = page.getByRole('region', { name: 'Quests', exact: true })
+            await expect(quests.getByRole('heading', { level: 1, name: 'Quests' })).toBeVisible()
+            await expect(quests.getByRole('button', { name: /^First Package/ })).toBeVisible()
+            await expect(quests.locator('.os-classic')).toHaveCount(0)
             expect(await violations(page)).toEqual([])
         })
 

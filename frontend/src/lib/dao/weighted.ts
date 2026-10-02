@@ -3,7 +3,7 @@ import { z } from "zod"
 import { abciErrorPresent, directRpcCall } from "../rpcFallback"
 import type { AminoMsg } from "./shared"
 import { address, id, personID, realm, role, time, uint64 } from "./weightedPrimitives"
-import { ACCEPT_FUNCS, APPLICATION_LABELS, APPLICATION_POLICY_KEYS, APPLICATION_TARGETS, IMMEDIATE_THRESHOLDS, applicationActionMatchesPolicy, applicationPolicySchemas, expectedCategory, recoverMemberAction, setRoleAction, v12Action, type ApplicationPolicyKey } from "./weightedApplications"
+import { ACCEPT_FUNCS, APPLICATION_LABELS, APPLICATION_POLICY_KEYS, APPLICATION_TARGETS, IMMEDIATE_THRESHOLDS, applicationActionMatchesPolicy, applicationPolicySchemas, expectedCategory, recoverMemberAction, setRoleAction, v12Action, type ApplicationPolicyKey, OPERATION_WORDS, type WeightedApplicationAction, TREASURY_FUNCS, type TreasuryPolicyKey } from "./weightedApplications"
 import { v12BudgetWithinCeiling, v12CallBudget, v12ExecuteBudget } from "./weightedBudget"
 
 export const WEIGHTED_SCHEMA = "memba-weighted-host/v1"
@@ -122,7 +122,7 @@ export function isUnreadableProposal(p: WeightedPageEntry): p is UnreadableWeigh
 export type WeightedMember = z.infer<typeof member>
 export type WeightedPage = Omit<z.infer<typeof weightedPageSchema>, "proposals"> & { proposals: WeightedPageEntry[] }
 export type WeightedContext = { rpcUrl: string; chainId: string; realmPath: string }
-export type WeightedAction = { type: "recover"; personId: string; oldAddress: string; newAddress: string } | { type: "propose"; target: string; role: "admin" | "finance"; grant: boolean } | { type: "vote"; id: string; vote: "yes" | "no" | "abstain" } | { type: "execute"; id: string } | { type: "accept"; adapter: ApplicationPolicyKey }
+export type WeightedAction = { type: "recover"; personId: string; oldAddress: string; newAddress: string } | { type: "propose"; target: string; role: "admin" | "finance"; grant: boolean } | { type: "vote"; id: string; vote: "yes" | "no" | "abstain" } | { type: "execute"; id: string } | { type: "accept"; adapter: ApplicationPolicyKey } | { type: "treasury"; adapter: TreasuryPolicyKey }
 
 /** Decode the Go string literal, including non-JSON \x, \U and octal escapes. */
 export function parseWeightedQeval(raw: string): unknown {
@@ -270,13 +270,24 @@ export async function assertWeightedChain(ctx: Pick<WeightedContext, "rpcUrl" | 
     if (status.node_info.network !== ctx.chainId) throw new Error("RPC network does not match the selected chain")
 }
 
-/** One address's ballot on one proposal. Eligibility is the electorate frozen when the proposal was created. */
-export async function readWeightedBallot(ctx: WeightedContext, proposalId: string, voter: string, signal?: AbortSignal): Promise<WeightedBallot> {
-    id.parse(proposalId); address.parse(voter)
+/**
+ * The ballots of several addresses on one proposal, in the order asked, after
+ * one check of the RPC's chain. Eligibility is the electorate frozen when the
+ * proposal was created.
+ */
+export async function readWeightedBallots(ctx: WeightedContext, proposalId: string, voters: readonly string[], signal?: AbortSignal): Promise<WeightedBallot[]> {
+    id.parse(proposalId); voters.forEach(v => address.parse(v))
     await assertWeightedChain(ctx, signal)
-    const ballot = weightedBallotSchema.parse(await read(ctx, `GetBallotJSON("${proposalId}", "${voter}")`, signal))
-    if (ballot.proposalId !== proposalId || ballot.voter !== voter) throw new Error("Ballot does not match the request")
-    return ballot
+    return Promise.all(voters.map(async voter => {
+        const ballot = weightedBallotSchema.parse(await read(ctx, `GetBallotJSON("${proposalId}", "${voter}")`, signal))
+        if (ballot.proposalId !== proposalId || ballot.voter !== voter) throw new Error("Ballot does not match the request")
+        return ballot
+    }))
+}
+
+/** One address's ballot on one proposal. */
+export async function readWeightedBallot(ctx: WeightedContext, proposalId: string, voter: string, signal?: AbortSignal): Promise<WeightedBallot> {
+    return (await readWeightedBallots(ctx, proposalId, [voter], signal))[0]
 }
 
 /**
@@ -309,13 +320,18 @@ export async function readWeightedPendingVotes(ctx: WeightedContext, voter: stri
     return { voter, items, next: envelope.next }
 }
 
+/** What an application action does, in words: "Market config · Set a fee". */
+export function applicationActionTitle(a: { type: WeightedApplicationAction["type"]; operation: string }): string {
+    return `${APPLICATION_LABELS[a.type]} · ${OPERATION_WORDS[a.operation]?.title ?? a.operation}`
+}
+
 /** Short, display-only description of a proposal's action. */
 export function weightedProposalTitle(p: WeightedPageEntry): string {
     if (isUnreadableProposal(p)) return `Unreadable proposal #${p.id}`
     const a = p.action
     if (a.type === "set-role") return `${a.grant ? "Grant" : "Remove"} ${a.role}`
     if (a.type === "recover-member") return "Recover member key"
-    return `${APPLICATION_LABELS[a.type]} · ${a.operation}`
+    return applicationActionTitle(a)
 }
 
 /** Which calls Memba builds for a contract version on a chain. */
@@ -324,9 +340,10 @@ const NO_WRITES: ReadonlySet<WeightedWriteKind> = new Set()
 const WRITE_KINDS: Record<WeightedSchemaVersion, ReadonlySet<WeightedWriteKind>> = {
     [WEIGHTED_SCHEMA]: new Set(["propose", "vote", "execute"]),
     [WEIGHTED_RECOVERY_SCHEMA]: new Set(["propose", "recover", "vote", "execute"]),
-    // v12 (the mainnet governing DAO): adapter acceptance, ballots and
-    // execution. Role and key-recovery proposals arrive in a later slice.
-    [WEIGHTED_APPLICATIONS_SCHEMA]: new Set(["accept", "vote", "execute"]),
+    // v12 (the mainnet governing DAO): adapter acceptance, the Market and App
+    // Store treasury proposals, ballots and execution. Role and key-recovery
+    // proposals arrive in a later slice.
+    [WEIGHTED_APPLICATIONS_SCHEMA]: new Set(["accept", "treasury", "vote", "execute"]),
 }
 
 /** The gnoland-1 governance write hold: no weighted DAO call is built there unless released below. */
@@ -383,6 +400,10 @@ export function planWeightedTx(caller: string, realmPath: string, action: Weight
     else if (action.type === "accept") {
         if (!Object.hasOwn(ACCEPT_FUNCS, action.adapter)) throw new Error("Unknown application adapter")
         func = ACCEPT_FUNCS[action.adapter]; args = []
+    }
+    else if (action.type === "treasury") {
+        if (!Object.hasOwn(TREASURY_FUNCS, action.adapter)) throw new Error("This application has no treasury")
+        func = TREASURY_FUNCS[action.adapter]; args = []
     }
     else throw new Error("Unsupported weighted action")
     const value = { caller, send: "", pkg_path: realmPath, func, args }

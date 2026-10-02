@@ -11,7 +11,7 @@ import { afterEach, describe, it, expect, vi, beforeEach } from "vitest"
 // network is never restored from storage — only honoured when it is IN THE
 // URL. So the pin moved from localStorage to the jsdom URL: pearl keeps its
 // full realm allowlist, which is what this file needs.
-// Pearl links redirect to mainnet since the same day (`retiredTo`), so a
+// Pearl links redirect to mainnet since the same day (RETIRED_NETWORKS), so a
 // /pearl/ URL now initialises on mainnet; the pin moved to /test13/, a hidden
 // but NOT retired network that still resolves by URL with its realm allowlist.
 vi.hoisted(() => {
@@ -104,7 +104,7 @@ function setActivity(over: Partial<ReturnType<typeof useAddressActivity>> = {}) 
 }
 const actItem = (over: Partial<ActivityItem> = {}): ActivityItem => ({
     kind: "call", title: "Approve · gnoswap/gns", actor: OPERATOR, pkgPath: "gno.land/r/gnoswap/gns",
-    func: "Approve", txHash: "h1", blockHeight: 100, extraCount: 0, ...over,
+    func: "Approve", txHash: "h1", blockHeight: 100, extraCount: 0, msgIndex: 0, ...over,
 })
 
 function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
@@ -443,6 +443,20 @@ describe("ValidatorProfile — Contributions / Activity / Quests / Reviews", () 
         expect(within(panel).getByRole("link", { name: /Deployed r\/demo\/foo/i }).getAttribute("href")).toContain("/r/demo/foo")
     })
 
+    it("Activity tab says who a transfer came from or went to", async () => {
+        const other = "g1747t5m2f08plqjlrjk2q0qld7465hxz8gkx59c"
+        setActivity({ items: [
+            actItem({ txHash: "h1", kind: "transfer", title: "Received 1 GNOT", actor: other, to: OPERATOR, direction: "received", pkgPath: undefined, func: undefined }),
+            actItem({ txHash: "h2", kind: "transfer", title: "Sent 2 GNOT", actor: OPERATOR, to: other, direction: "sent", pkgPath: undefined, func: undefined }),
+        ] })
+        renderAt(OPERATOR)
+        await screen.findByRole("heading", { name: MONIKER })
+        fireEvent.click(screen.getByRole("tab", { name: "Activity" }))
+        const [received, sent] = within(screen.getByTestId("vp-tab-activity")).getAllByTestId("vp-activity-row")
+        expect(received).toHaveTextContent(/from g1747t…/)
+        expect(sent).toHaveTextContent(/to g1747t…/)
+    })
+
     it("Activity tab shows an honest empty state (not a fake coming-soon)", async () => {
         setActivity({ items: [] })
         renderAt(OPERATOR)
@@ -656,5 +670,66 @@ describe("ValidatorProfile — Quests owner-gate", () => {
         await screen.findByRole("heading", { name: MONIKER })
         fireEvent.click(screen.getByRole("tab", { name: "Quests" }))
         await waitFor(() => expect(within(screen.getByTestId("vp-tab-quests")).getByText(/350 XP/i)).toBeInTheDocument())
+    })
+})
+
+describe("ValidatorProfile — a read that outlives the RPC timeout", () => {
+    const timeout = () => new DOMException("The user aborted a request.", "AbortError")
+    beforeEach(() => { vi.clearAllMocks(); vi.mocked(fetchUserProfile).mockResolvedValue(null); setActivity(); setData([valoper({ status: "active" })], [SIGN]) })
+
+    it("is tried once more, so a slow first read does not fail the page", async () => {
+        vi.mocked(getValidators).mockRejectedValueOnce(timeout())
+        renderAt(OPERATOR)
+        await screen.findByRole("heading", { name: MONIKER })
+        expect(screen.queryByText("Failed to load validator")).toBeNull()
+        expect(getValidators).toHaveBeenCalledTimes(2)
+    })
+
+    it("is reported in plain words after the second timeout, and Retry loads the page", async () => {
+        vi.mocked(getValidators).mockRejectedValueOnce(timeout()).mockRejectedValueOnce(timeout())
+        renderAt(OPERATOR)
+        expect(await screen.findByText("The network took too long to answer.")).toBeInTheDocument()
+        expect(screen.queryByText(/aborted/i)).toBeNull()
+        expect(getValidators).toHaveBeenCalledTimes(2)
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+        await screen.findByRole("heading", { name: MONIKER })
+    })
+
+    it("does not retry another kind of failure", async () => {
+        vi.mocked(getValidators).mockRejectedValueOnce(new Error("Validator RPC chain mismatch: expected test-13, got other"))
+        renderAt(OPERATOR)
+        expect(await screen.findByText(/chain mismatch/)).toBeInTheDocument()
+        expect(getValidators).toHaveBeenCalledTimes(1)
+    })
+
+    it("says it is trying once more while the second read is under way", async () => {
+        const answer = vi.mocked(getValidators).getMockImplementation()!
+        let release!: () => void
+        const held = new Promise<void>((resolve) => { release = resolve })
+        vi.mocked(getValidators).mockRejectedValueOnce(timeout()).mockImplementationOnce(async (...args) => { await held; return answer(...args) })
+        renderAt(OPERATOR)
+        expect(await screen.findByText("The network is slow. Trying once more…")).toBeInTheDocument()
+        release()
+        await screen.findByRole("heading", { name: MONIKER })
+    })
+
+    it("does not retry a read the member abandoned by leaving the page", async () => {
+        let fail!: (e: unknown) => void
+        vi.mocked(getValidators).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+        const view = renderAt(OPERATOR)
+        await waitFor(() => expect(getValidators).toHaveBeenCalledTimes(1))
+        view.unmount()
+        fail(timeout())
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(getValidators).toHaveBeenCalledTimes(1)
+    })
+
+    it("treats the valoper scan's wrapped timeout the same way", async () => {
+        const wrapped = () => new Error("Valoper registry scan incomplete", { cause: timeout() })
+        vi.mocked(findValoperForProfile).mockRejectedValueOnce(wrapped()).mockRejectedValueOnce(wrapped())
+        renderAt(OPERATOR)
+        expect(await screen.findByText("The network took too long to answer.")).toBeInTheDocument()
+        expect(screen.queryByText(/scan incomplete/)).toBeNull()
+        expect(findValoperForProfile).toHaveBeenCalledTimes(2)
     })
 })

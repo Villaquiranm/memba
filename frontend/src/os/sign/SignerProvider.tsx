@@ -5,15 +5,19 @@
  *
  * @module os/sign/SignerProvider
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { clearGovernanceReceipt } from "../../lib/dao/governanceRecovery"
 import { beginWalletActivity } from "../../lib/walletActivity"
+import { assertActiveRpcChain } from "../../lib/dao/chainIdentity"
+import { assertLiveWalletNetwork, isAdenaUnlockOpen, subscribeAdenaUnlock, WALLET_LOCKED_MESSAGE, WalletNetworkError } from "../../lib/walletNetworkGuard"
+import { useDialogKeys } from "../shell/useDialogKeys"
 import type { OsSession } from "../shell/useOsSession"
+import { accountMark, accountMarkAfterBlocks } from "./accountMark"
 import { adenaChecklist, type SignRow } from "./decode"
 import { executeSignature, verifyWithRetries, type SettledOutcome, type SignRequest } from "./signer"
 import { SignerContext, type SignerApi, type TxNotice } from "./signerContext"
 
-type Stage = "review" | "checking" | "wallet"
+type Stage = "review" | "checking" | "wallet" | "settling"
 
 interface Review {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- requests carry their own choice type
@@ -33,6 +37,9 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
     const [unread, setUnread] = useState(0)
     const [version, setVersion] = useState(0)
     const busy = useRef(false)
+    // Set when a review opens and cleared when it closes, in the same tick: state is a render behind.
+    const shown = useRef(false)
+    const closeReview = useCallback(() => { shown.current = false; setReview(null) }, [])
     const reviewOpener = useRef<HTMLElement | null>(null)
     const owner = session.status === "member" ? `${session.network.chainId}:${session.address}` : null
     const ownerRef = useRef<string | null>(owner)
@@ -42,6 +49,13 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
         // this provider unmounts. It must never open Adena for the next account.
         return () => { ownerRef.current = null }
     }, [owner])
+    // Stops the account check of a "rejected" reply when this provider goes away.
+    const gone = useRef<AbortController | null>(null)
+    useEffect(() => {
+        const controller = new AbortController()
+        gone.current = controller
+        return () => controller.abort()
+    }, [])
     const holdReload = review !== null || pending.length > 0
     const reviewOpen = review !== null
 
@@ -74,11 +88,15 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- requests carry their own choice type
     const sign = useCallback((req: SignRequest<any>) => {
-        if (session.status !== "member") { session.openConnect(); return }
-        if (ownerRef.current !== owner) return
-        if (busy.current) { toast("Finish the signature that's open first."); return }
+        if (session.status !== "member") { session.openConnect(); return false }
+        if (ownerRef.current !== owner) return false
+        // A review on screen is never replaced: the member is reading it, and a second request
+        // (another window, or a quote that returned late) would change the sheet under them.
+        if (shown.current) { toast("A signature review is already open. Finish or cancel it first."); return false }
+        shown.current = true
         reviewOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
         setReview({ req, choice: req.choice?.initial, acked: (req.acks ?? []).map(() => false), stage: "review", error: null })
+        return true
     }, [session, toast, owner])
 
     const settle = useCallback((req: SignRequest<string>, choice: string | undefined, outcome: SettledOutcome) => {
@@ -103,29 +121,42 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
         busy.current = true
         setReview((r) => r && { ...r, stage: "checking", error: null })
         const label = req.label(choice)
+        const signerAddress = session.address
         const sameOwner = () => ownerRef.current === requestOwner
         const res = await executeSignature(req, choice, msgs, () => {
             if (sameOwner()) setReview((r) => r && { ...r, stage: "wallet" })
-        }, sameOwner)
+        }, sameOwner, {
+            before: () => accountMark(signerAddress),
+            after: () => accountMarkAfterBlocks(signerAddress, gone.current?.signal),
+            onSettling: () => { if (sameOwner()) setReview((r) => r && { ...r, stage: "settling" }) },
+        })
         busy.current = false
         if (!sameOwner()) return
         if (res.outcome === "failed" || res.outcome === "cancelled") {
-            if (res.outcome === "cancelled") { setReview(null); toast(res.error); settle(req, choice, "cancelled"); return }
+            if (res.outcome === "cancelled") { closeReview(); toast(res.error); settle(req, choice, "cancelled"); return }
             setReview((r) => r && { ...r, stage: "review", error: res.error })
             return
         }
+        if (res.outcome === "refused") {
+            // The same request would be refused again: close the review and keep the reason in the tray.
+            closeReview()
+            notify({ kind: "fail", title: `Refused by the network · ${label}`, sub: res.error })
+            toast(`Refused by the network: ${label}. The reason is in the notifications.`)
+            settle(req, choice, "failed")
+            return
+        }
         if (res.outcome === "unknown") {
-            setReview(null)
-            notify({ kind: "warn", title: `Outcome unknown · ${label}`, sub: "Check before trying again." })
+            closeReview()
+            notify({ kind: "warn", title: `Outcome unknown · ${label}`, sub: res.error || "Check before trying again." })
             toast(`Outcome unknown: ${label}. Check before retrying.`)
             settle(req, choice, "unknown")
             return
         }
-        if (res.outcome !== "sent") { setReview(null); return }
+        if (res.outcome !== "sent") { closeReview(); return }
         const hash = res.hash
         const id = ++seq
         setPending((p) => [...p, { id, label }])
-        setReview(null)
+        closeReview()
         // A wallet return alone is submission, not chain confirmation.
         const ok = req.verify ? await verifyWithRetries(() => req.verify!(choice, hash, res.result), req.verifyAttempts) : null
         if (!sameOwner()) return
@@ -136,19 +167,23 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
             try { clearGovernanceReceipt(req.receipt) } catch { /* retain the conservative lock if storage refuses */ }
         }
         const where = `${session.network.chainId} · ${hash.slice(0, 10)}…`
+        const pendingNote = ok === false ? req.pendingNote?.() : undefined
         notify(ok === true
             ? { kind: "ok", title: `Confirmed · ${label}`, sub: where }
-            : ok === null
-                ? { kind: "ok", title: `Submitted · ${label}`, sub: where }
-                : { kind: "warn", title: `Submitted · ${label}`, sub: "The chain hasn't shown it yet. Don't send it again." })
-        if (ok === false) toast(`Submitted: ${label}. Not visible on chain yet.`)
-        settle(req, choice, ok === true ? "confirmed" : "submitted")
-    }, [review, notify, toast, settle, session.network.chainId, session.walletChainId, session.status, owner])
+            : ok === "failed"
+                ? { kind: "fail", title: `Refused by the network · ${label}`, sub: `${where}: ${req.failedNote?.() ?? "the chain ran it and refused it. It did not take effect; the network fee was still charged."}` }
+                : ok === null
+                    ? { kind: "ok", title: `Submitted · ${label}`, sub: where }
+                    : { kind: "warn", title: `Submitted · ${label}`, sub: pendingNote ?? "The chain hasn't shown it yet. Don't send it again." })
+        if (ok === false) toast(`Submitted: ${label}. ${pendingNote ?? "Not visible on chain yet."}`)
+        if (ok === "failed") toast(`Refused by the network: ${label}. It did not take effect; the network fee was still charged.`)
+        settle(req, choice, ok === true ? "confirmed" : ok === "failed" ? "failed" : "submitted")
+    }, [review, notify, toast, settle, session.network.chainId, session.walletChainId, session.status, session.address, owner, closeReview])
 
     const cancel = useCallback(() => {
-        if (review?.stage === "checking" || review?.stage === "wallet") return // the wallet request is in flight
-        setReview(null)
-    }, [review])
+        if (review && review.stage !== "review") return // the wallet request is in flight, or its outcome is being checked
+        closeReview()
+    }, [review, closeReview])
 
     const api = useMemo<SignerApi>(() => ({
         sign, pending, notices, unread, version, markRead: () => setUnread(0),
@@ -191,8 +226,34 @@ function ReviewSheet({ review, session, onChoice, onAck, onGo, onCancel }: {
     let checklist: SignRow[] = []
     let prepareError: string | null = null
     try { checklist = adenaChecklist(req.prepare(choice).msgs, chain) } catch (err) { prepareError = err instanceof Error ? err.message : String(err) }
+    const lines = req.lines(choice)
     const allAcked = review.acked.every(Boolean)
     const canGo = stage === "review" && session.status === "member" && !wrongNet && !prepareError && allAcked
+    // Adena's unlock window, whichever wallet check opened it (before or after Memba's rechecks).
+    const unlocking = useSyncExternalStore(subscribeAdenaUnlock, isAdenaUnlockOpen) && stage !== "review"
+    // While the person reads: the wallet, so a locked or switched one shows before the click, and the
+    // node, so the rechecks after the click find its chain verified. The checks before Adena opens still run.
+    // A note belongs to the moment it was read: back on the review after a refusal, with another
+    // session account, or once the session ends, an older answer is not shown.
+    const [walletNote, setWalletNote] = useState<{ at: string; text: string | null } | null>(null)
+    const member = session.status === "member" ? session.address : null
+    const noteAt = [chain, member ?? "", stage, error ?? "", req.summary].join("|")
+    useEffect(() => {
+        if (!member || stage !== "review") return
+        let alive = true
+        const read = () => {
+            void assertActiveRpcChain().catch(() => {})
+            assertLiveWalletNetwork(chain, { address: member }).then(() => { if (alive) setWalletNote({ at: noteAt, text: null }) }, (err: unknown) => {
+                if (!alive || !(err instanceof WalletNetworkError)) return
+                setWalletNote({ at: noteAt, text: err.message === WALLET_LOCKED_MESSAGE ? "Adena is locked. It asks for your password when you sign." : err.message })
+            })
+        }
+        read()
+        // Unlocking or switching accounts happens in Adena's own window: read again when this one is back.
+        window.addEventListener("focus", read)
+        return () => { alive = false; window.removeEventListener("focus", read) }
+    }, [noteAt, chain, member, stage])
+    const shownWalletNote = walletNote?.at === noteAt ? walletNote.text : null
 
     useLayoutEffect(() => {
         const el = dialog.current
@@ -200,19 +261,13 @@ function ReviewSheet({ review, session, onChoice, onAck, onGo, onCancel }: {
         el.focus({ preventScroll: true })
     }, [stage])
 
+    // The radios that are not the chosen one are reached with the arrow keys, not Tab.
+    useDialogKeys(dialog, true, 'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), summary, [tabindex="0"]', onCancel)
+
     return (
         <div className="os-scrim os-scrim-center">
             <div ref={dialog} className="os-review os-glass" role="dialog" aria-modal="true" aria-label={`Review · ${req.title}`} tabIndex={-1}
-                onKeyDown={(e) => {
-                    if (e.key === "Escape") { e.preventDefault(); onCancel() }
-                    if (e.key !== "Tab") return
-                    const stops = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), summary, [tabindex="0"]') ?? [])]
-                    if (!stops.length) { e.preventDefault(); dialog.current?.focus(); return }
-                    const first = stops[0]
-                    const last = stops[stops.length - 1]
-                    if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { e.preventDefault(); last.focus() }
-                    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
-                }}>
+                onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel() } }}>
                 {stage === "review" && (
                     <>
                         <div className="os-rvh">
@@ -239,7 +294,10 @@ function ReviewSheet({ review, session, onChoice, onAck, onGo, onCancel }: {
                                     ))}
                                 </div>
                             )}
-                            <Rows rows={req.lines(choice).map(([label, value]) => ({ label, value }))} />
+                            <Rows rows={lines.map(([label, value]) => ({ label, value }))} />
+                            {lines.some(([label]) => label === "Network fee") && (
+                                <p className="os-sub os-flush">Your wallet sets the fee it signs from its own gas estimate, usually lower than the figure above. Check the fee in Adena before you approve.</p>
+                            )}
                             {(req.warns ?? []).map((w, i) => <p key={i} className="os-note os-warn">{w}</p>)}
                             {(req.acks ?? []).map((a, i) => (
                                 <label key={i} className="os-ack"><input type="checkbox" checked={review.acked[i]} onChange={(e) => onAck(i, e.target.checked)} /> {a}</label>
@@ -252,6 +310,7 @@ function ReviewSheet({ review, session, onChoice, onAck, onGo, onCancel }: {
                                 <p className="os-note os-err" role="alert">Adena is on {session.walletChainId}, but Memba is on {chain}. Switch Adena to {chain} before signing.</p>
                             )}
                             {session.status !== "member" && <p className="os-note os-err" role="alert">Your Memba session ended. Cancel this review, then connect again before signing.</p>}
+                            {shownWalletNote && !wrongNet && <p className="os-note os-warn" role="status">{shownWalletNote}</p>}
                             {error && <p className="os-note os-err" role="alert">{error}</p>}
                             {req.note && <p className="os-sub os-flush">{req.note}</p>}
                             <p className="os-sub os-flush">Next, Adena opens. Check it shows the same details.</p>
@@ -266,11 +325,14 @@ function ReviewSheet({ review, session, onChoice, onAck, onGo, onCancel }: {
                 )}
                 {stage !== "review" && (
                     <>
-                        <div className="os-rvh">
-                            <div className="os-row"><span className="os-spin" aria-hidden="true" /><h2 className="os-rv-title">{stage === "checking" ? "Checking before you sign…" : "Confirm in Adena"}</h2></div>
-                            <div className="os-sub">{stage === "checking" ? "Memba re-reads the chain so what you sign still applies." : "Adena opened in its own window. Check it shows:"}</div>
+                        <div className="os-rvh" role="status">
+                            <div className="os-row"><span className="os-spin" aria-hidden="true" /><h2 className="os-rv-title">{unlocking ? "Unlock Adena" : stage === "checking" ? "Checking before you sign…" : stage === "settling" ? "Checking your account…" : "Confirm in Adena"}</h2></div>
+                            <div className="os-sub">{unlocking ? "Adena is locked. Enter your password in the window it opened; Memba then continues to the signature."
+                                : stage === "checking" ? "Memba re-reads the chain so what you sign still applies."
+                                : stage === "settling" ? "Adena reported a cancellation. It says the same when its window is closed after you confirm, so Memba waits three blocks and compares your account first. This can take half a minute."
+                                    : "Adena opened in its own window. Check it shows:"}</div>
                         </div>
-                        {stage === "wallet" && (
+                        {stage === "wallet" && !unlocking && (
                             <div className="os-rvb">
                                 <Rows rows={checklist} />
                                 <p className="os-sub os-flush">If anything differs, reject it in Adena.</p>

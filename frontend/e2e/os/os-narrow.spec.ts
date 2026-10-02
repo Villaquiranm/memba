@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { OS_FEED_ON, OS_ON } from '../../playwright.os.config'
+import { OS_FLAGS_ON, OS_ON } from '../../playwright.os.config'
 import { fulfillGovernance } from '../helpers/proGovernanceFixture'
 
 // Memba pages in a narrow window on a desktop screen. Their phone layouts are
@@ -16,7 +16,7 @@ async function spill(page: Page): Promise<string[]> {
         const scrolls = (el: Element) => /auto|scroll/.test(getComputedStyle(el).overflowX)
         const out: string[] = []
         if (body.scrollWidth > body.clientWidth + 1) out.push(`window body scrolls sideways by ${body.scrollWidth - body.clientWidth}px`)
-        body.querySelectorAll<HTMLElement>('.os-classic *, .os-store-home *, .os-store-detail *').forEach((el) => {
+        body.querySelectorAll<HTMLElement>('.os-classic *, .os-store-home *, .os-store-detail *, .os-validators *, .os-explorer *, .os-quests *').forEach((el) => {
             if (el instanceof SVGElement) return
             for (let p = el.parentElement; p && p !== body; p = p.parentElement) if (scrolls(p)) return
             const r = el.getBoundingClientRect()
@@ -31,9 +31,10 @@ async function spill(page: Page): Promise<string[]> {
 const PAGES = [
     ['feed', 'Feed', '.os-feed__stack', 'flex'],
     ['store', 'App Store', '.os-store-grid', 'grid'],
-    ['validators', 'Validators', '.val-stats-grid', 'grid'],
-    ['quests', 'Quests', '.k-questhub-hero', 'flex'],
+    ['validators', 'Validators', '.os-validators-head', 'flex'],
+    ['quests', 'Quests', '.os-quests-head', 'flex'],
     ['dev-report', 'Dev Report', '.gl-subnav', 'flex'],
+    ['explorer', 'Explorer', '.os-explorer-search', 'grid'],
 ] as const
 
 test.describe('Memba OS pages in a narrow window', () => {
@@ -66,7 +67,7 @@ test.describe('Memba OS pages in a narrow window', () => {
                 localStorage.setItem('memba_os_windows:guest:gnoland-1', JSON.stringify([{ token: `app.${app}`, x: 40, y: 20, width: 360, height: 640, z: 1, min: false, max: false }]))
             }, app)
             await page.setViewportSize({ width: 1280, height: 800 })
-            await page.goto(`${app === 'feed' ? OS_FEED_ON : OS_ON}/os`)
+            await page.goto(`${app === 'feed' ? OS_FLAGS_ON : OS_ON}/os`)
             const win = page.getByRole('region', { name, exact: true })
             await expect(win).toBeVisible()
             await win.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))

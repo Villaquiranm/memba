@@ -71,6 +71,8 @@ describe("osTargetForClassic", () => {
         expect(osTargetForClassic("/mainnet/dao/gno.land/r/alice/team/proposal/7", "mainnet")).toEqual({ kind: "proposal", dao: "alice.team", n: 7 })
         expect(osTargetForClassic("/mainnet/dao/gno.land/r/alice/team/propose", "mainnet")).toEqual({ kind: "new-proposal", dao: "alice.team" })
         expect(osTargetForClassic("/mainnet/dao/create", "mainnet")).toEqual({ kind: "app", app: "daos", section: "new" })
+        // A weighted DAO's classic page is its DAO folder, not a page in the DAOs window.
+        expect(osTargetForClassic("/mainnet/weighted-dao/gno.land/r/samcrew/memba_dao", "mainnet")).toEqual({ kind: "dao", name: "memba_dao", section: "overview" })
     })
 
     it("maps a multisig page to the multisig window, and its other pages to the app", () => {
@@ -110,7 +112,13 @@ describe("osTargetForClassic", () => {
 
 describe("pageNeedsWallet", () => {
     it("covers the pages that send guests away in the classic app", () => {
-        expect(["profile", "multisig", "create", "import", `multisig/${ADDR}`, `multisig/${ADDR}/propose`, "apps/submit", "apps/review", "apps/my-submissions"].every(pageNeedsWallet)).toBe(true)
+        expect(["profile", "multisig"].every(pageNeedsWallet)).toBe(true)
+        // Native App Store sections: the store window serves guests itself.
+        expect(["apps/submit", "apps/review", "apps/my-submissions"].some(pageNeedsWallet)).toBe(false)
         expect(["feed", "validators", "profile/g1x", "apps", "apps/gno.land/r/alice/example"].some(pageNeedsWallet)).toBe(false)
+    })
+
+    it("lets a guest open the multisig forms, which carry their own connect prompt and a disabled submit", () => {
+        expect(["create", "import", `multisig/${ADDR}`, `multisig/${ADDR}/propose`].some(pageNeedsWallet)).toBe(false)
     })
 })

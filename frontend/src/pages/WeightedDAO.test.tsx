@@ -7,6 +7,8 @@ import { readOpenWeightedProposals, readWeightedBallot, readWeightedProposal, re
 import { assertLiveWalletChain } from "../lib/dao/weightedWallet"
 import { doContractBroadcast } from "../lib/grc20"
 import { WalletNetworkError } from "../lib/walletNetworkGuard"
+import { clearGovernanceMemory, saveGovernanceReceipt } from "../lib/dao/governanceRecovery"
+import { weightedScope } from "../lib/dao/weightedActions"
 import { bech32Encode } from "../lib/dao/realmAddress"
 import { weightedFixture, weightedRealm } from "../lib/dao/testdata/weighted"
 import v12Native from "../lib/dao/testdata/weighted-v12/native.json"
@@ -72,7 +74,6 @@ it("allows a developer without admin labels to propose governed role changes", a
     fireEvent.click(screen.getByRole("button", { name: "Review role proposal" }))
     await screen.findByText(/Transaction submitted:/)
     expect(vi.mocked(doContractBroadcast).mock.calls[0][0][0].value).toMatchObject({ func: "ProposeRole", args: [fixture.members[1].address, "admin", "true"], send: "" })
-    expect(vi.mocked(doContractBroadcast).mock.calls[0][2]?.retry).toBe(false)
     expect(readWeightedSnapshot).toHaveBeenCalledTimes(4)
 })
 it("reports the transaction when the browser address changed during signing but the page's own route did not", async () => {
@@ -99,10 +100,68 @@ it("refuses a stale proposal before broadcasting and retains unavailable histori
     await screen.findByRole("alert")
     expect(doContractBroadcast).not.toHaveBeenCalled()
 })
+it("refuses a vote while an attempt from the Memba OS proposal window has an unknown outcome", async () => {
+    saveGovernanceReceipt(weightedScope("pearl", weightedRealm, fixture.members[5].address, "execute", fixture.proposal.id), { phase: "submitted", hash: "ab".repeat(32), label: "Execute" })
+    try {
+        render(<App />)
+        await screen.findByText(fixture.members[0].personId)
+        fireEvent.click(screen.getByRole("button", { name: "Vote yes" }))
+        expect(await screen.findByRole("alert")).toHaveTextContent(`An earlier attempt on proposal #${fixture.proposal.id} has an unknown outcome`)
+        expect(readWeightedSnapshot).toHaveBeenCalledTimes(1)
+        expect(doContractBroadcast).not.toHaveBeenCalled()
+    } finally { clearGovernanceMemory(); localStorage.clear() }
+})
+it("refuses an acceptance while a Memba OS acceptance attempt has an unknown outcome", async () => {
+    vi.mocked(readWeightedSnapshot).mockImplementation(async () => v12Snapshot())
+    const data = v12Snapshot()
+    acceptance.marketPolicy = { current: PUBLISHER, pending: DAO, failed: [] }
+    saveGovernanceReceipt(weightedScope("pearl", weightedRealm, data.members[1].address, "accept", "handover"), { phase: "submitted", hash: "ab".repeat(32), label: "Propose accepting Badges" })
+    try {
+        render(<App network="pearl" address={data.members[1].address} />)
+        const market = await screen.findByRole("listitem", { name: "marketPolicy adapter" })
+        expect(await within(market).findByText("Ready to accept")).toBeTruthy()
+        const button = within(market).getByRole("button", { name: "Propose acceptance" })
+        fireEvent.click(button)
+        expect(await screen.findByRole("alert")).toHaveTextContent("An earlier acceptance proposal has an unknown outcome")
+        expect(doContractBroadcast).not.toHaveBeenCalled()
+    } finally { clearGovernanceMemory(); localStorage.clear() }
+})
+it("refuses at the wallet an acceptance locked while its checks ran", async () => {
+    vi.mocked(readWeightedSnapshot).mockImplementation(async () => v12Snapshot())
+    const data = v12Snapshot()
+    acceptance.marketPolicy = { current: PUBLISHER, pending: DAO, failed: [] }
+    // A Memba OS acceptance attempt is recorded while this click's chain reads are running.
+    vi.mocked(doContractBroadcast).mockImplementationOnce(async (_msgs, _memo, opts) => {
+        saveGovernanceReceipt(weightedScope("pearl", weightedRealm, data.members[1].address, "accept", "handover"), { phase: "submitted", hash: "ab".repeat(32), label: "Propose accepting Badges" })
+        await opts?.beforeSign?.()
+        return { hash: "a".repeat(64) }
+    })
+    try {
+        render(<App network="pearl" address={data.members[1].address} />)
+        const market = await screen.findByRole("listitem", { name: "marketPolicy adapter" })
+        expect(await within(market).findByText("Ready to accept")).toBeTruthy()
+        fireEvent.click(within(market).getByRole("button", { name: "Propose acceptance" }))
+        expect(await screen.findByRole("alert")).toHaveTextContent("An earlier acceptance proposal has an unknown outcome")
+    } finally { clearGovernanceMemory(); localStorage.clear() }
+})
+it("refuses at the wallet a vote locked while its checks ran", async () => {
+    // Another window records an unknown outcome while this click's chain reads are still running.
+    vi.mocked(doContractBroadcast).mockImplementationOnce(async (_msgs, _memo, opts) => {
+        saveGovernanceReceipt(weightedScope("pearl", weightedRealm, fixture.members[5].address, "vote", fixture.proposal.id), { phase: "submitted", hash: "ab".repeat(32), label: "Vote Yes" })
+        await opts?.beforeSign?.()
+        return { hash: "a".repeat(64) }
+    })
+    try {
+        render(<App />)
+        await screen.findByText(fixture.members[0].personId)
+        fireEvent.click(screen.getByRole("button", { name: "Vote yes" }))
+        expect(await screen.findByRole("alert")).toHaveTextContent(`An earlier attempt on proposal #${fixture.proposal.id} has an unknown outcome`)
+    } finally { clearGovernanceMemory(); localStorage.clear() }
+})
 it("blocks writes on mainnet even for authenticated members", async () => {
     render(<App network="mainnet" />)
     await screen.findByText(fixture.members[0].personId)
-    expect(screen.getByText(/Mainnet governance is read-only/)).toBeTruthy()
+    expect(screen.getByText(/read-only in Memba on gnoland-1: Memba builds no governance transaction/)).toBeTruthy()
     for (const name of ["Vote yes", "Execute proposal"]) expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true)
     expect(screen.getByLabelText("Member").closest("fieldset")?.disabled).toBe(true)
     expect(doContractBroadcast).not.toHaveBeenCalled()
@@ -213,27 +272,36 @@ it("renders the v12 adapter policies, categories, operations and frozen state re
     expect(await screen.findByRole("heading", { name: "Application adapters" })).toBeTruthy()
     expect(screen.getAllByRole("listitem", { name: /adapter$/ })).toHaveLength(10)
     expect(screen.getByText("Target: gno.land/r/samcrew/escrow_v4")).toBeTruthy()
-    expect(screen.getByText(/Financial actions .* require/)).toBeTruthy()
-    expect(screen.getByText(/Routine moderation requires/)).toBeTruthy()
+    // Each adapter's rules come from the policy, in the same words as the Memba OS window.
+    const escrow = screen.getByRole("listitem", { name: "escrowPolicy adapter" })
+    expect(within(escrow).getByText("Financial votes cover settling disputes (refunding the client or paying the freelancer) and nominating the fallback fee recipient.")).toBeTruthy()
+    expect(within(escrow).getByText("While the DAO controls it, any member can pause it at once; unpausing takes a financial vote.")).toBeTruthy()
+    expect(within(escrow).getByText(`Handing it back takes a critical vote and goes only to ${data.config.schema === "memba-weighted-host/v12" ? data.config.escrowPolicy.successor : ""}, who must accept.`)).toBeTruthy()
+    expect(within(screen.getByRole("listitem", { name: "appstorePolicy adapter" })).getByText("A fee vote can set at most 100 GNOT.")).toBeTruthy()
+    expect(screen.getByText("7 seats · 8 voting points. The founder's seat carries 2 points; each developer's carries 1 point.")).toBeTruthy()
+    const rule = (start: RegExp) => screen.getByText((_text, el) => el?.tagName === "P" && start.test(el.textContent ?? ""))
+    expect(rule(/^Critical decisions \(role changes, key recoveries, authority handoffs and appointments\) pass with 6 points and at least 4 people, then 24 hours, or 5 developers, then 72 hours\.$/)).toBeTruthy()
+    expect(rule(/^Financial decisions \(fees, treasuries, unpausing and escrow disputes\) pass with 5 points and at least 3 people and can execute as soon as they pass\.$/)).toBeTruthy()
+    expect(rule(/^Routine decisions \(moderation\) pass with 3 points and at least 2 people and can execute as soon as they pass\.$/)).toBeTruthy()
     // The mainnet DAO is released from the hold; here it is read-only because pearl is the selected network.
-    expect(screen.queryByText(/Mainnet governance is read-only/)).toBeNull()
+    expect(screen.queryByText(/Memba builds no governance transaction/)).toBeNull()
     const fee = screen.getByRole("article", { name: "Proposal 17" })
-    expect(within(fee).getByRole("heading", { name: "Market config · set-fee" })).toBeTruthy()
+    expect(within(fee).getByRole("heading", { name: "Market config · Set a fee" })).toBeTruthy()
     expect(within(fee).getByText("Financial")).toBeTruthy()
-    expect(within(fee).getByText("READY")).toBeTruthy()
+    expect(within(fee).getByText("Ready to execute")).toBeTruthy()
     expect(within(fee).getByText("150")).toBeTruthy()
     expect(within(fee).getByText("State frozen at proposal time")).toBeTruthy()
-    expect(within(fee).getByText("pendingAdmin")).toBeTruthy()
-    expect(within(fee).getAllByText("bps")).toHaveLength(2)
+    expect(within(fee).getByText("Pending admin")).toBeTruthy()
+    expect(within(fee).getAllByText("Fee (basis points)")).toHaveLength(2)
     expect(within(fee).getByRole("note").textContent).toMatch(/invalidates every other outstanding proposal/)
     expect(within(fee).getByRole("button", { name: "Execute proposal" }).hasAttribute("disabled")).toBe(true)
     const hide = screen.getByRole("article", { name: "Proposal 18" })
     expect(within(hide).getByText("Routine")).toBeTruthy()
-    expect(within(hide).getByText(/Routine proposals can execute as soon as they qualify/)).toBeTruthy()
+    expect(within(hide).getByText(/Routine proposals can execute as soon as they pass/)).toBeTruthy()
     const room = screen.getByRole("article", { name: "Proposal 26" })
     expect(within(room).getByText("Critical")).toBeTruthy()
-    expect(within(room).getByText(/Weighted route matures/)).toBeTruthy()
-    expect(within(room).getByText(/Developer route matures/)).toBeTruthy()
+    expect(within(room).getByText(/Executable from \(points vote\)/)).toBeTruthy()
+    expect(within(room).getByText(/Executable from \(developers' vote\)/)).toBeTruthy()
     expect(within(screen.getByRole("article", { name: "Proposal 14" })).queryByRole("note")).toBeNull()
     for (const button of screen.getAllByRole("button", { name: /^Vote / })) expect(button.hasAttribute("disabled")).toBe(true)
     expect(doContractBroadcast).not.toHaveBeenCalled()
@@ -244,7 +312,7 @@ it("explains invalidated and executed v12 history on the older page", async () =
     const invalidated = await screen.findByRole("article", { name: "Proposal 2" })
     expect(within(invalidated).getByText(/^Invalidated at block \d+: proposal #4 executed \(gno\.land\/r\/samcrew\/memba_market_config\)\.$/)).toBeTruthy()
     const accept = screen.getByRole("article", { name: "Proposal 4" })
-    expect(within(accept).getByRole("heading", { name: "Market config · accept-admin" })).toBeTruthy()
+    expect(within(accept).getByRole("heading", { name: "Market config · Accept the handover" })).toBeTruthy()
     expect(within(accept).getByText("Historical vote totals are unavailable.")).toBeTruthy()
     expect(within(accept).queryByRole("note")).toBeNull()
 })
@@ -278,7 +346,7 @@ it("shows each target's handoff state and offers acceptance only when the DAO is
     expect(within(adapterCard("questPolicy")).getByText(`The publisher must first nominate the DAO (${DAO}) as pending owner.`)).toBeTruthy()
     expect(within(adapterCard("feedPolicy")).getByText("The current owner is still a feed moderator.")).toBeTruthy()
     expect(within(adapterCard("escrowPolicy")).getByText("DAO controls")).toBeTruthy()
-    expect(within(adapterCard("escrowPolicy")).getByText(`The DAO is the current admin. A return to ${PUBLISHER} is staged.`)).toBeTruthy()
+    expect(within(adapterCard("escrowPolicy")).getByText(`The DAO is the current admin. A handover back to ${PUBLISHER} is pending.`)).toBeTruthy()
     for (const key of ["questPolicy", "feedPolicy", "escrowPolicy", "badgesPolicy"] as const) expect(within(adapterCard(key)).queryByRole("button", { name: "Propose acceptance" })).toBeNull()
     expect(screen.getByText(/One open acceptance at a time/)).toBeTruthy()
 
@@ -287,7 +355,7 @@ it("shows each target's handoff state and offers acceptance only when the DAO is
     const [msgs, memo, opts] = vi.mocked(doContractBroadcast).mock.calls[0]
     expect(msgs).toEqual([{ type: "vm/MsgCall", value: { caller: v12Snapshot().members[1].address, send: "", pkg_path: weightedRealm, func: "ProposeMarketAccept", args: [], max_deposit: "2130000ugnot" } }])
     expect(memo).toBe("Propose that the DAO accepts authority over gno.land/r/samcrew/memba_market_config")
-    expect(opts).toMatchObject({ retry: false, gasWanted: 24_000_000 })
+    expect(opts).toMatchObject({ gasWanted: 24_000_000 })
     // Checked once when preparing and again right before signing.
     expect(vi.mocked(readTargetAuthority).mock.calls.filter(c => c[1] === "marketPolicy")).toHaveLength(2)
 })
@@ -345,7 +413,7 @@ it("offers a changed ballot but never the same one, and nothing to an ineligible
     await screen.findByText(/Transaction submitted:/)
     const [msgs, , opts] = vi.mocked(doContractBroadcast).mock.calls[0]
     expect(msgs[0].value).toMatchObject({ func: "Vote", args: ["17", "no"], max_deposit: "40000ugnot" })
-    expect(opts).toMatchObject({ gasWanted: 24_800_000, retry: false })
+    expect(opts).toMatchObject({ gasWanted: 24_800_000 })
 })
 it("refuses a repeated ballot found on chain before signing", async () => {
     vi.mocked(readWeightedSnapshot).mockImplementation(async () => v12Snapshot())
@@ -367,7 +435,8 @@ it("warns which open proposals an execution invalidates before building it", asy
     const confirm = within(fee).getByRole("group", { name: "Confirm execution of proposal 17" })
     const open = data.page.proposals.filter(p => !("unreadable" in p) && ["VOTING", "TIMELOCKED", "READY"].includes(p.status) && p.id !== "17").map(p => `#${p.id}`)
     expect(open.length).toBeGreaterThan(1)
-    expect(within(confirm).getByText(`Executing #17 invalidates ${open.length} open proposals ${open.join(", ")}. They cannot be revived; their proposers would need to propose again.`)).toBeTruthy()
+    // Older proposals exist and were not read, so the list is not claimed to be complete.
+    expect(within(confirm).getByText(`Executing #17 invalidates ${open.length} open proposals ${open.join(", ")} and any other open proposal. They cannot be revived; their proposers would need to propose again.`)).toBeTruthy()
     expect(doContractBroadcast).not.toHaveBeenCalled()
     fireEvent.click(within(confirm).getByRole("button", { name: "Keep proposals open" }))
     expect(within(fee).queryByRole("group", { name: "Confirm execution of proposal 17" })).toBeNull()
@@ -406,7 +475,7 @@ it("lists an unreadable proposal by ID and keeps the rest of the page", async ()
     expect(within(item).getByRole("heading", { name: "Unreadable proposal #24" })).toBeTruthy()
     expect(within(item).queryByRole("button")).toBeNull()
     expect(screen.getAllByRole("article")).toHaveLength(20)
-    expect(screen.getByRole("heading", { name: "Market config · set-fee" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Market config · Set a fee" })).toBeTruthy()
 })
 it("reveals bidi and zero-width characters in realm-controlled text", async () => {
     const r = v12Native.records as unknown as Record<string, { proposal: { action: Record<string, unknown> } }>
@@ -592,6 +661,7 @@ it("numbers the adapters in the handoff order, marks the next one and explains t
     expect(within(adapterCard("appstorePolicy")).getByText(/makes the DAO the curator/)).toBeTruthy()
     expect(within(adapterCard("escrowPolicy")).getByText(/only real-money path: accept it last/)).toBeTruthy()
     const path = screen.getByRole("heading", { name: "Handing a target over to the DAO" }).parentElement!
-    expect(within(path).getByText("At least 4 people with 6 points vote yes, then 24 hours pass. Or 5 core developers vote yes, then 72 hours pass.")).toBeTruthy()
+    expect(within(path).getByText("It passes with 6 points and at least 4 people, then 24 hours, or 5 developers, then 72 hours.")).toBeTruthy()
+    expect(within(path).getByText("Voting lasts 7 days; a proposal that passes before voting closes keeps its delay.")).toBeTruthy()
     expect(within(path).getByRole("note").textContent).toMatch(/One open acceptance at a time: executing any application action invalidates every other open proposal/)
 })

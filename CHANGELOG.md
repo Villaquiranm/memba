@@ -20,6 +20,171 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Memba OS: execute DAO proposals (2026-10-02)
+- Members can execute an accepted proposal of a DAO made from Memba's template from its Memba OS window, through the review sheet: Memba checks membership, the execution window, the action and the fee before Adena opens, and confirms the member's own transaction on chain. The link to the classic page is gone.
+
+### Memba OS: who voted, and what a multisig received (2026-10-02)
+- A proposal window in Memba OS now lists who voted and how, read from the chain, for Memba DAO (every seat, with its points) and for DAOs made from Memba's template (every voter, with their voting power). Guests see it too.
+- A multisig's window lists what it received and sent on chain, for guests too, names the proposal a send executed, and links each transaction on gnoscan; a validator's activity now says when a transfer was received.
+- Transaction links open on gnoscan only for the networks it shows today (mainnet and staging).
+- Fixed: in the Market, the ← Market lanes control stays visible and keeps focus while a lane's page loads.
+
+### Memba OS: multisig receipts (2026-10-02)
+- Fixed: Memba no longer sends a multisig transaction when its server cannot check the chain; it checks receipts on Memba's own node, with the public RPC as a fallback that can only confirm, retries over two blocks, says why a broadcast could not be recorded, and shows a recorded transaction as executed or failed instead of ready to broadcast.
+
+### Memba OS: wallet activation and signing (2026-10-01)
+- Fixed: activating a new address in Memba OS sends 0.000001 GNOT to itself: it costs only the network fee (about 0.002 GNOT) instead of locking a storage deposit, is reviewed in its own step with what Adena shows, and no longer opens the old confirmation window.
+- Activating a new wallet from the classic page also sends 1 ugnot to itself, the network fee only, instead of writing to a profile and locking a storage deposit; its confirmation shows the transfer, and a cancel says nothing was sent.
+- Fixed: "Reload to update" now finishes the update even when the page was opened with a hard reload, instead of failing with "The update could not start".
+- The DAO vote and proposal reviews no longer show a gas limit: Adena sets the gas when it signs.
+- Signing in Memba OS opens Adena sooner: Memba reads the chain and the network price together in one round instead of several, and the review sheet checks your wallet while you read it.
+
+### Memba OS: signing in (2026-10-01)
+- Fixed: signing in with Adena on another network now says so and offers to switch; after a switch Memba reads the account's key on the new network. Sign-in now says whether Adena declined, can't sign with a session account, needs an update, or the account must be activated, and tells a server outage apart from a refused login. Arcade and Block Party sign in the same way.
+
+### Memba OS: multisig (2026-10-01)
+- After you create a multisig, its wallet opens and the form cannot be sent twice; the Multisig app explains what a multisig is, and Fetch Key says how a member's key reaches the chain.
+- Fixed: a multisig's page shows the name you gave it, instead of "Unnamed multisig".
+
+### Memba OS: token claims (2026-10-01)
+- Claim vested tokens and airdrop leaves from the Tokens window, with the airdrop manifest checked against the chain before any claim is offered.
+
+### Memba OS: fair-sale actions (2026-10-01)
+- Order in a fair sale, settle it, claim an order and release the creator's proceeds from the Tokens window.
+
+### Memba OS: create a Launchpad token (2026-10-01)
+- Create a Launchpad token in the Tokens window, with vesting allocations and an optional airdrop, paying the creation fee read from the network's live launch terms.
+
+### Memba OS: Token Launchpad in the Tokens window (2026-10-01)
+- The Tokens window shows Token Launchpad tokens, their fair sales, airdrops and vesting, and a member's balance and order, on networks where the Launchpad is published; elsewhere it says the Launchpad is not deployed there.
+
+### Memba OS: Memba DAO treasury (2026-10-01)
+- A Memba DAO seat holder can propose, from the Treasury tab, moving the Market's or the App Store's fees to the treasury the DAO's policy names; it is offered only while the DAO controls that application, and the tab says why otherwise.
+
+### Memba OS: Adena (2026-10-01)
+- When Adena has locked itself, signing in Memba OS asks you to unlock it in Adena's own window and then continues, instead of stopping with an error.
+- The connect dialog shows Adena's official logo.
+- The review sheet says that your wallet sets the fee it signs, usually lower than Memba's figure.
+
+### Memba OS: review sheet (2026-10-01)
+- Fixed: the Memba OS review sheet is wider on desktop and wraps long values, so every row shows what Adena should show without scrolling sideways.
+
+### BARRICADE (2026-10-01)
+- Fixed: the shop's To the wall button stays readable under the pointer, a Practice run is labelled Practice, and the 2.5D wave counter matches the status line.
+
+### Memba OS: Memba DAO accepts applications natively (2026-10-01)
+- A Memba DAO seat holder can propose accepting an application the DAO has been nominated to control, from that application's row in the DAO window's Overview, through the Memba review. Memba offers one acceptance at a time and confirms it from the member's own proposal on chain.
+- Changed: the Memba DAO window no longer embeds the classic DAO page. Earlier versions of the DAO's contract are read-only in Memba OS, and the classic page still acts on them. Application details show their recorded state in plain words.
+
+### Gnolove milestones (2026-10-01)
+- Fixed: a Gnolove milestone description is sanitised like every other rendered markdown, so in-app links stay in the tab.
+
+### Memba OS: DAO creation for guests (2026-10-01)
+- Guests can fill in the whole DAO creation wizard in Memba OS and connect only at Deploy; the DAOs window lists the DAO deploys this browser parked, re-checked on the chain; the execution delay is worded truly, and a wallet's saved draft is never replaced unasked.
+
+### Memba OS: App Store report, curator queue and listings (2026-10-01)
+- Report an App Store listing from Memba OS, with its deposit and the five-report hide rule stated on both pages; a read-only curator queue shows pending listings, who decides, and how many reports hide.
+- App Store submissions, edits and delists send measured gas limits and capped deposits, state the deposit, are checked on chain before the wallet, and count field limits in bytes like the registry.
+- Submit an app, and edit or delist your listings, natively in Memba OS through the signing sheet, with the listing fee, deposit and network fee stated; guests can fill in a listing and connect to send it.
+
+### Memba OS: multisig window (2026-10-01)
+- Fixed: the multisig window no longer tells you that you are not a member when the address is a single-key account.
+
+### Memba OS: DAO creation tells the truth (2026-10-01)
+- Fixed: a DAO deploy the network ran and refused now shows as refused in the signing tray, instead of staying unconfirmed.
+- Fixed: creating a DAO in Memba OS checks your balance for the network fee and the most the storage deposit can take, says when the deposit leaves your balance, always gives the DAO a valid address, and reports a deploy waiting for network approval the same way in the wizard and the signing tray.
+
+### Memba OS: DAO sheets show and send the exact fee (2026-10-01)
+- Fixed: Memba OS's DAO vote and proposal reviews now show the exact network fee, check it again just before the wallet opens, and send exactly that fee; a fee set in Settings is checked against what the network charges.
+
+### Block Party: readable amber tiles (2026-10-01)
+- Fixed: in Memba OS's light theme, Block Party's amber tiles keep their numbers readable.
+
+### Curation inbox (backend, off until its key is set) (2026-10-01)
+- Curation inbox (backend, off until its key is set): a collection's founder and the curation managers share a private, encrypted message thread per collection; who may read or write is read from the curation realm on the chain at every request, from a caught-up node, and the answer must name the expected chain and be at most a minute old.
+- The curation inbox keeps messages 12 months: older ones are deleted at boot and then hourly.
+
+### Memba OS: Profile templates visitors can see (2026-10-01)
+- Changed: a Profile template now sets the tab order a visitor meets after Overview, and one column (simple) or two on wide windows; picking one keeps your sections, their order, hidden sections and links. Sections move only within their own tab, the order visitors see.
+
+### Memba OS: native Quests window (2026-10-01)
+- Added: the Quests window opens on a native hub: rank and XP recorded for a connected address, every quest browsable without a wallet, filters by category, difficulty and state, and the quests mainnet cannot complete named. A quest's page and the leaderboard open in the same window, and Back returns to the hub. On-chain quest attestation stays in the window for a connected wallet.
+
+### Memba DAO: a proposal stays locked after an unknown outcome (2026-10-01)
+- In Memba OS, a Memba DAO proposal stays locked after a vote or execution whose outcome is unknown, even across browser tabs, until you check it; a vote's lock lifts by itself once the chain shows the ballot or voting has closed.
+
+### Memba DAO: proposals in plain words (2026-10-01)
+- Memba DAO proposals are titled in plain words (for example "DAO channels · Accept the handover"), the classic page and Memba OS word the same facts the same way, and an old Memba DAO workspace address opens its window in Memba OS.
+
+### Memba OS: a live meeting always stays in sight (2026-10-01)
+- Fixed: a meeting in Memba OS stays connected when its window is covered, minimised, dragged off the desk or replaced by another sheet, and Memba always shows it then: a small player with the room code, Restore and Leave, so a live camera and microphone are never out of sight. Under a dialog, even with its window in front, the player shrinks to a label and Leave at the top of the screen, and Leave gives focus back to the dialog. Another window can no longer go full screen over a live meeting; Memba says why when it takes the screen back. Closing the Meet window, or locking Memba, leaves the meeting, and the window says so.
+
+### Memba OS: the NFT window's own home (2026-10-01)
+- The Memba OS NFT window has its own home. Where the Launchpad NFT ledger is deployed it lists the newest collections, newest first, reads each row strictly, and tells a failed read (with Retry) from data that breaks the ledger's rules; where the ledger is not on the network it says so instead of showing an empty list.
+
+### Memba OS: a refused transaction is reported as refused (2026-10-01)
+- Fixed: Memba OS says when the network ran a transaction and refused it (it did not take effect, and its network fee was still charged) instead of "not visible on chain yet", reads that outcome only from a node of the current network, and a refused send no longer holds the Send window.
+
+### Rendered text: links and images read as written (2026-10-01)
+- Fixed: an address inside a link or in code is no longer turned into a second link; a gno.land link written without https opens on the current network's gno.land site instead of a broken Memba address; a linked badge renders as one link; and an image that is not loaded shows as a link to it instead of a stray "!".
+
+### Memba OS: Memba DAO in its own window (2026-09-30)
+- Memba DAO opens natively in its Memba OS window: Overview (how decisions pass, open proposals, each governed application with its rules and who controls it), Proposals with a window per proposal, Members, and a Treasury that says the DAO holds and spends nothing and where application fees go today. Guests read all of it; the window re-reads the chain each minute and says when it shows a previous read.
+- Members of Memba DAO vote on and execute its proposals from the proposal's window in Memba OS, through the Memba review: only choices the DAO would record, the exact network fee re-checked before the wallet, a warning naming the proposals an execution invalidates, and the result checked on chain.
+### Native Gno multisig on memba.club (2026-10-01)
+- Added: native Gno multisig on memba.club. Create a multisig from members' public keys, propose, collect signatures to the threshold and broadcast, with a chain check before any re-send.
+- Native multisig: a transaction's bytes and hash stay fixed once it has its quorum; a proposal the chain refused while running is shown as failed with the chain's reason and closed; a refusal before execution keeps the signed transaction valid to broadcast again; and a node that could not answer is never read as the transaction being absent.
+- Fixed: if the network's reply to a multisig broadcast is lost or times out, Memba keeps the warning, the transaction's hash and what to do next on the page, and the next press checks the chain before sending anything.
+- Changed: Memba OS Multisig opens to guests. The app and any account's address and balance are visible, the chain says whether an address is a multisig, and a connect prompt appears only where your own multisigs, members and transactions would show.
+- Changed: a multisig proposal's fee defaults to twice the network gas price for its gas limit instead of a fixed 1 GNOT, so it still pays if the price rises while signatures are collected; it can be changed until the proposal is made, and Memba sends nothing when a fresh price has outgrown the signed fee.
+### Memba OS: the cooperation engine in About (2026-10-01)
+- Added: About explains all 20 tools, their onchain and offchain layers, Memba DAO stewardship, and the proposed community fee and reward model through four inspectable views. Published sources and existing shared accounts open in new tabs; future wallet roles stay marked as planned.
+- The short tour pauses while you read or interact and respects reduced motion. EVM and Bitcoin appear as parallel planned directions without release dates or order. A short manifesto and contribution/contact options explain the community vision.
+
+### Memba OS: native Explorer window (2026-09-30)
+- Added: the Explorer window opens on a native realm directory with the chain's current figures, search and paging, and a direct field for any realm or package path. A realm or a directory tab opens in the same window, and Back returns to the directory. The figures poll only while the window is in front.
+
+### Memba OS: native Validators window (2026-09-30)
+- Added: the Validators window opens on a native view of the consensus set (health, participation, uptime, search, a health filter and sortable columns) and of the registered candidates. A validator's page, Network, Hacker mode and Alerts open in the same window, and Back returns to the list. A figure the monitoring service did not give shows as missing, never as zero, and the window says which sources could not be read. It polls only while in front.
+
+### Memba OS: review likes, flags, replies, edits and deletes at measured costs (2026-09-30)
+- Fixed: likes, dislikes, flags, replies, and the edits and deletes of reviews and replies were sent with a flat 1 GNOT fee and no deposit cap. They now go out at a measured gas limit, with a fee read at the click and shown exactly before signing, a storage-deposit cap, and a fresh check, as the confirmation closes, that the review or reply still exists and is yours to change.
+- Memba OS sends them through the signing sheet, which states the deposit each action locks and what a later undo or delete returns. Visitors can press every action; it asks for the wallet at that point.
+
+### Memba OS: App Store reviews in the network's reviews realm (2026-09-30)
+- Changed: App Store reviews live in the network's reviews realm (memba_reviews_v2 on mainnet), beside validator and profile reviews, with one shared author reputation.
+- Fixed: reviews are read only from a node checked to serve this network, and a list that cannot be read shows an error, never "No reviews yet". One unusual character in a review no longer hides its whole page. A page of hidden reviews is stepped over, and "No reviews yet" appears only when the realm's count is zero.
+- Fixed: posting a review states the network fee exactly before the wallet opens, and stops if the fee rose meanwhile. It also states the storage deposit (up to about 1.2 to 1.4 GNOT for the first review on a subject, less for a later one; a replacement locks only what its text adds; deleting returns a small part). It refuses text over 2,000 bytes before anything is sent, and sends at a measured gas limit with a deposit cap.
+
+### Memba OS: an open News article survives a reload (2026-09-30)
+- A News article open in Memba OS stays open after a reload or Back when another window is in front.
+
+### Memba OS: News is a native window (2026-09-30)
+- News opens in a native Memba OS window: the Blog, each article and the Changelogs, with the browser's Back stepping through them.
+
+### Memba OS: warning labels readable in the light theme (2026-09-30)
+- Warning labels in the light theme (testnet badge, "Target" tags, warning pills) now meet the WCAG AA contrast minimum.
+
+### Profile: the earlier bio survives wallet activation, and unusable stored data can be replaced (2026-09-30)
+- Profile no longer loses the earlier Memba or GitHub bio after wallet activation: an empty on-chain Bio counts as unset.
+- An owner whose stored profile data Memba cannot show (too long, or a layout this version does not read) can replace it by entering a new value; the review sheet marks each replacement, and what is left empty is not touched. Clearing a Bio is not published while an earlier bio would show in its place.
+- A draft is kept with the read it was made on, so fields its owner did not touch follow the chain in the draft, in Undo and in the saved copy. A layout saved by a newer version, or too large to read, is locked instead of overwritten.
+
+### Links: a word such as `constructor` is not a network (2026-09-30)
+- A link whose first part is a word like `constructor` no longer opens a broken page, and a feed post linking `/constructor/…` no longer shows as a Memba card.
+
+### Signing: one wallet request per action, the reviewed fee, and what was observed (2026-09-30)
+- Memba asks the wallet once per action and no longer reopens Adena by itself after a failure. When the network refuses a transaction, the Memba OS signing sheet says so with the network's reason, and that nothing changed and no fee was charged.
+- Creating a DAO, in the classic page and in Memba OS, hands the wallet the fee shown in the review, keeps Deploy disabled until that fee has been read from the network, says when the figure is only an estimate because the network price could not be read, and stops before the wallet if the price rose or cannot be confirmed. The signing sheet now says that Adena shows the fee it signs, which can differ from Memba's figure.
+- If Adena reports a cancellation after its window opened, Memba waits three blocks and compares your account: if nothing changed it says so ("Cancelled in Adena. Your account shows no change three blocks later."); if it cannot check, it says the outcome is unknown, explains why in the notifications, and keeps the action locked. A signature review on screen is never replaced by another request.
+
+### Native multisig: a lost broadcast reply is recovered instead of sent twice (2026-09-30)
+- If the network's reply to a broadcast is lost, pressing Broadcast again first checks whether the transaction is already on chain and records it, instead of broadcasting a second time and leaving the transaction marked as ready. The button says when it is checking the chain and when it is broadcasting.
+- Known limit: a member on another browser does not have the earlier transaction hash; after such a lost reply their broadcast is refused by the network and the proposal stays ready until the member who broadcast first presses Broadcast again.
+
+### Validators: a slow read is tried again, and a timeout is said in plain words (2026-09-30)
+- A validator's page no longer fails with "The user aborted a request." when the network answers slowly: Memba tries once more and says so, and if that also times out it says "The network took too long to answer." with a Retry button.
+
 ### Reviews: moderation policy shown with every review list (2026-09-30)
 - Review lists state how reviews are moderated when the reviews realm names its moderator: flags are recorded and never hide anything by themselves, every hide is a public chain event, and who the moderator is. When the moderator is the Samourai team multisig, the list also gives its grounds for a hide and how to appeal.
 - The in-app Hide button is removed: the moderator acts by its own transaction.
@@ -136,7 +301,7 @@ Full changelogs are split by version range for easier navigation:
 - Check `/status` chain identity and synchronization state, and cross-check `/block` metadata against the full header before using its reported block, parent hashes and timestamp in future Launchpad indexing.
 ### Memba OS: gated onchain App Store reviews (2026-09-28)
 
-- Read App Store reviews inside the native detail window when the dedicated realm is verified and enabled. Keep wallet authorship distinct from proof of app use.
+- Read App Store reviews inside the native detail window when app reviews are enabled and the network's reviews realm is live. Keep wallet authorship distinct from proof of app use.
 - Page through visible reviews after moderation, show the full onchain review count, and calculate decimal ratings from the exact sum. Offer retry when a review read fails.
 
 ### Memba OS: native Settings

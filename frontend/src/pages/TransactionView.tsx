@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useParams, useOutletContext } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Code, ConnectError } from "@connectrpc/connect"
 import { useNetworkNav } from "../hooks/useNetworkNav"
 import { MagnifyingGlass } from "@phosphor-icons/react"
 import { api } from "../lib/api"
@@ -12,14 +13,15 @@ import { SkeletonCard, SkeletonRow } from "../components/ui/LoadingSkeleton"
 import { ErrorToast } from "../components/ui/ErrorToast"
 import { ProgressBar } from "../components/multisig/ProgressBar"
 import { CopyableAddress } from "../components/ui/CopyableAddress"
-import type { Transaction } from "../gen/memba/v1/memba_pb"
+import type { Token, Transaction } from "../gen/memba/v1/memba_pb"
 import { API_BASE_URL, ENABLE_NATIVE_GNO_MULTISIG, GNO_CHAIN_ID } from "../lib/config"
 import { completeQuest } from "../lib/quests"
 import type { LayoutContext } from "../types/layout"
 import "./txview.css"
-import { isNativeMultisig } from "../lib/nativeMultisig"
-import { assertNativeAction, broadcastNativeTransaction } from "../lib/nativeMultisigBroadcast"
-import { assertReceiptStorage, clearNativeReceipt, nativeReceiptKey, readNativeReceipt, saveNativeReceipt, subscribeNativeReceipts, validReceiptHash } from "../lib/nativeReceipt"
+import { isNativeMultisig, nativeFeeCovers } from "../lib/nativeMultisig"
+import { networkGasPriceFresh } from "../lib/grc20"
+import { assertNativeAction, broadcastNativeTransaction, NativeOutcomeUnknownError, nativeTxHash, waitOneBlock } from "../lib/nativeMultisigBroadcast"
+import { assertReceiptStorage, clearNativeReceipt, nativeReceiptKey, readBroadcastAttempts, readNativeReceipt, saveBroadcastAttempt, saveNativeReceipt, subscribeNativeReceipts, validReceiptHash } from "../lib/nativeReceipt"
 
 const LEGACY_READ_ONLY_MESSAGE = "Legacy multisig records are read-only history: this proposal cannot be signed or broadcast from Memba."
 
@@ -44,6 +46,67 @@ function buildSignDoc(tx: Transaction): Record<string, unknown> {
 export function TransactionRoute() {
     const { id } = useParams<{ id: string }>()
     return <TransactionView key={id} />
+}
+
+/**
+ * Asks the backend to record `hash` for a proposal. It answers "recorded" only
+ * after finding that transaction on chain (executed, or executed and refused:
+ * the refreshed proposal then carries the chain's reason); "absent" when the
+ * node answered that it is not there;
+ * "completed" when the proposal already has its hash (another member was
+ * faster); "unanswered" for anything else (rate limit, chain node unreachable):
+ * that is not a "no".
+ */
+async function askWhetherOnChain(authToken: Token, transactionId: number, hash: string): Promise<"recorded" | "absent" | "completed" | "unanswered"> {
+    try {
+        await api.completeTransaction({ authToken, transactionId, finalHash: hash })
+        return "recorded"
+    } catch (err) {
+        const code = ConnectError.from(err).code
+        return code === Code.FailedPrecondition ? "absent" : code === Code.NotFound ? "completed" : "unanswered"
+    }
+}
+
+/** A broadcast hash the backend did not record: the member reads why, in full, until they act. */
+class ReceiptNotRecordedError extends Error {}
+
+/**
+ * Records a broadcast's hash. A refusal keeps the saved hash, and nothing is sent again from
+ * here; "already recorded" (another member was faster) is not a refusal: the refresh shows it.
+ * The node Memba checks may be a block behind the one that took the broadcast, so "not there
+ * yet" and "could not look" are asked again over about two blocks first.
+ */
+async function recordReceipt(authToken: Token, transactionId: number, hash: string): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            await api.completeTransaction({ authToken, transactionId, finalHash: hash })
+            return
+        } catch (err) {
+            const e = ConnectError.from(err)
+            if (e.code === Code.NotFound) return
+            if ((e.code === Code.FailedPrecondition || e.code === Code.Unavailable) && attempt < 2) {
+                await waitOneBlock()
+                continue
+            }
+            throw new ReceiptNotRecordedError(receiptRefusal(e))
+        }
+    }
+}
+
+function receiptRefusal(e: ConnectError): string {
+    const kept = "Nothing was sent again; the saved hash stays here."
+    switch (e.code) {
+        case Code.FailedPrecondition:
+            return `Memba could not record it: ${e.rawMessage || "the chain does not show it"}. ${kept}`
+        case Code.Unauthenticated:
+            return `Your Memba session has ended. Sign in again, then retry. ${kept}`
+        case Code.PermissionDenied:
+            return `Memba records it only for a member of this multisig, signed in on its network. Check the wallet and network you are signed in with. ${kept}`
+        case Code.Internal:
+            return `Memba's server failed while recording it. ${kept} Report it if it repeats.`
+        default:
+            return `Memba couldn't check this transaction on chain right now. ${kept} Try again in a moment.`
+    }
 }
 
 export function TransactionView() {
@@ -88,6 +151,9 @@ export function TransactionView() {
     // local; the fetch error comes from the query, with a dismissal flag so
     // the toast doesn't resurrect itself on the next render.
     const [actionError, setActionError] = useState<string | null>(null)
+    // Not a passing error: what the member must read before pressing Broadcast again (an unknown outcome and its hash,
+    // an unreadable recovery record) stays on the page in full until they act.
+    const [broadcastAlert, setBroadcastAlert] = useState("")
     const [fetchErrorDismissed, setFetchErrorDismissed] = useState(false)
     const fetchError = txQuery.isError && !fetchErrorDismissed
         ? (txQuery.error instanceof Error ? txQuery.error.message : "Failed to load transaction")
@@ -96,6 +162,8 @@ export function TransactionView() {
     const dismissError = () => { setActionError(null); setFetchErrorDismissed(true) }
 
     const [actionLoading, setActionLoading] = useState(false)
+    const [broadcastStep, setBroadcastStep] = useState<"asking" | "sending">("sending")
+    const [actionNotice, setActionNotice] = useState("")
     const [manualSig, setManualSig] = useState("")
     const [showManualSig, setShowManualSig] = useState(false)
     const [linkCopied, setLinkCopied] = useState(false)
@@ -203,6 +271,9 @@ export function TransactionView() {
         broadcastBusy.current = true
         setActionLoading(true)
         setActionError(null)
+        setBroadcastAlert("")
+        setActionNotice("")
+        setBroadcastStep("sending")
         try {
             if (isNativeMultisig(tx.multisigPubkeyJson)) {
                 assertNativeAction(tx.chainId)
@@ -219,15 +290,47 @@ export function TransactionView() {
                     return
                 }
                 let hash = readNativeReceipt(receiptKey)
-                if (hash && !validReceiptHash(hash)) throw new Error("Recovery record is unavailable or invalid. Inspect it before any further broadcast")
+                if (hash && !validReceiptHash(hash)) {
+                    setBroadcastAlert("Recovery record is unavailable or invalid. Inspect it before any further broadcast.")
+                    return
+                }
                 if (!hash) {
                     if (reviewError) throw new Error(reviewError)
                     if (!fresh.nativeTxBytes.length) throw new Error(fresh.nativeExportError || "Native aggregate is not ready")
-                    assertReceiptStorage(receiptKey)
-                    hash = await broadcastNativeTransaction(tx.chainId, fresh.nativeTxBytes)
-                    if (!saveNativeReceipt(receiptKey, hash)) setRecoveryWarning("Browser storage failed after broadcast. Copy the hash before leaving this tab; receipt retry is still available here.")
+                    // An earlier broadcast whose reply was lost may already be on chain, and no
+                    // receipt was kept for it. The backend records a hash only after finding that
+                    // transaction on chain and checking it against this proposal, so it is asked
+                    // first and the bytes are sent only if it answers "not on chain". The backend
+                    // assembles from the earliest signatures, so today's bytes are the bytes any
+                    // member sent since quorum; the hashes this browser sent are asked about too,
+                    // for a broadcast made before the backend kept them fixed.
+                    const expected = nativeTxHash(fresh.nativeTxBytes)
+                    setBroadcastStep("asking")
+                    let answer: Awaited<ReturnType<typeof askWhetherOnChain>> = "absent"
+                    for (const sent of new Set([...readBroadcastAttempts(receiptKey), expected])) {
+                        answer = await askWhetherOnChain(token, tx.id, sent)
+                        if (answer !== "absent") break
+                    }
+                    if (answer === "unanswered") throw new Error("Couldn't check whether this transaction is already on chain. Nothing was sent; try again in a moment.")
+                    if (answer === "recorded") setActionNotice("This transaction was already executed on chain. Nothing was sent; Memba recorded the result.")
+                    // "completed": another member recorded it meanwhile. Nothing to send; the refresh below shows it.
+                    if (answer === "absent") {
+                        // The fee was fixed when the proposal was made, maybe days ago: the chain refuses one the price has outgrown.
+                        const price = await networkGasPriceFresh().catch(() => null)
+                        if (!price || !nativeFeeCovers(fresh.transaction.feeJson, price)) {
+                            setBroadcastAlert(price
+                                ? "The network price rose above the fee this proposal was signed with; the chain would refuse it. Nothing was sent. Create a new proposal with a higher fee."
+                                : "Couldn't read the network price to check this proposal's fee. Nothing was sent; try again in a moment.")
+                            return
+                        }
+                        assertReceiptStorage(receiptKey)
+                        saveBroadcastAttempt(receiptKey, expected)
+                        setBroadcastStep("sending")
+                        hash = await broadcastNativeTransaction(tx.chainId, fresh.nativeTxBytes)
+                        if (!saveNativeReceipt(receiptKey, hash)) setRecoveryWarning("Browser storage failed after broadcast. Copy the hash before leaving this tab; receipt retry is still available here.")
+                    }
                 }
-                await api.completeTransaction({ authToken: token, transactionId: tx.id, finalHash: hash })
+                if (hash) await recordReceipt(token, tx.id, hash)
                 const refreshed = await txQuery.refetch()
                 // Keep the hint if refresh fails or remains stale: never turn
                 // a successful broadcast back into a broadcast-ready button.
@@ -241,7 +344,8 @@ export function TransactionView() {
             // cannot execute on Gno and the backend refuses to complete them.
             throw new Error(LEGACY_READ_ONLY_MESSAGE)
         } catch (err) {
-            setActionError(err instanceof Error ? err.message : "Broadcast failed")
+            if (err instanceof NativeOutcomeUnknownError || err instanceof ReceiptNotRecordedError) setBroadcastAlert(err.message)
+            else setActionError(err instanceof Error ? err.message : "Broadcast failed")
         } finally {
             broadcastBusy.current = false
             setActionLoading(false)
@@ -350,7 +454,7 @@ export function TransactionView() {
                 <DetailRow label="Memo" value={tx.memo ? <SignedText value={tx.memo} /> : "—"} />
                 <DetailRow label="Fee" value={fee.amount !== "—" ? `${fee.amount} (gas: ${fee.gas})` : `Gas: ${fee.gas}`} />
                 <DetailRow label="Account #" value={String(tx.accountNumber)} />
-                <DetailRow label="Sequence" value={String(tx.sequence)} />
+                <DetailRow label="Signed at sequence" value={String(tx.sequence)} />
             </div>
 
             {/* ── Signature Progress ──────────────────────────── */}
@@ -361,6 +465,7 @@ export function TransactionView() {
                     verified={tx.signatures.filter(s => s.verified).length}
                     threshold={tx.threshold}
                     total={tx.membersCount}
+                    outcome={!tx.finalHash ? undefined : native && tx.onchainError ? "failed" : native && tx.verified ? "executed" : "recorded"}
                 />
             </div>
 
@@ -398,6 +503,8 @@ export function TransactionView() {
 
             {/* ── Actions ─────────────────────────────────────── */}
             {reviewError && <p role="alert">{reviewError}</p>}
+            {actionNotice && <p role="status">{actionNotice}</p>}
+            {broadcastAlert && !tx.finalHash && <p role="alert" style={{ overflowWrap: "anywhere" }}>{broadcastAlert}</p>}
             {native && !ENABLE_NATIVE_GNO_MULTISIG && !tx.finalHash && <p role="status">Native signing and broadcasting are on hold pending release approval.</p>}
             {native && receipt && !tx.finalHash && <div className="k-card" role="status">
                 <p>Broadcast receipt recovery — this saved hash is not proof of completion. The backend must verify it on-chain.</p>
@@ -410,6 +517,10 @@ export function TransactionView() {
             </div>}
             {native && txQuery.data?.nativeExportError && <p role="status">{txQuery.data.nativeExportError}</p>}
             {!native && !tx.finalHash && <p role="status">{LEGACY_READ_ONLY_MESSAGE}</p>}
+            {native && !tx.finalHash && tx.onchainError && <p role="status">
+                The network refused this transaction before executing it: <code style={{ overflowWrap: "anywhere" }}>{tx.onchainError}</code>.
+                The signed transaction is still valid and can be broadcast again.
+            </p>}
             {!tx.finalHash && auth.isAuthenticated && native && ENABLE_NATIVE_GNO_MULTISIG && (
                 <div className="k-txview__actions">
                     <button
@@ -427,7 +538,7 @@ export function TransactionView() {
                             disabled={actionLoading || !!reviewError}
                             onClick={event => { reviewOpener.current = event.currentTarget; restoreReviewFocus.current = false; setPendingAction("broadcast") }}
                         >
-                            {actionLoading ? "Broadcasting..." : "Broadcast to Chain"}
+                            {actionLoading ? (broadcastStep === "asking" ? "Checking the chain..." : "Broadcasting...") : "Broadcast to Chain"}
                         </button>
                     )}
                     <button
@@ -579,7 +690,13 @@ export function TransactionView() {
                             receipt to this proposal. Legacy rows may carry
                             verified=true from an older lookup that only found
                             the hash somewhere, so they never claim more. */}
-                        {tx.verified && !native ? (
+                        {native && tx.onchainError ? (
+                            <span style={{
+                                fontSize: "var(--pro-caption, 10px)", padding: "2px 8px", borderRadius: 4,
+                                background: "rgba(239,68,68,0.1)", color: "var(--color-danger, #ef4444)",
+                                fontFamily: "var(--font-ui, JetBrains Mono, monospace)",
+                            }}>✗ FAILED ON-CHAIN</span>
+                        ) : tx.verified && !native ? (
                             <span style={{
                                 fontSize: "var(--pro-caption, 10px)", padding: "2px 8px", borderRadius: 4,
                                 background: "var(--color-k-amber-subtle, rgba(255,193,7,0.12))", color: "var(--color-text-secondary)",
@@ -602,6 +719,10 @@ export function TransactionView() {
                     <p className="k-txview__hash-value">
                         {tx.finalHash}
                     </p>
+                    {native && tx.onchainError && <p role="status">
+                        The network refused this transaction: <code style={{ overflowWrap: "anywhere" }}>{tx.onchainError}</code>.
+                        The multisig's sequence number has moved past this proposal's, so it can never run and this proposal is closed. To try again, create a new proposal.
+                    </p>}
                 </div>
             )}
 

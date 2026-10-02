@@ -8,6 +8,7 @@ import {
     DEFAULT_NETWORK,
     resolveDefaultNetwork,
     resolveNetworkKey,
+    retiredNetworkSuccessor,
     GNO_BECH32_PREFIX,
     GNOLOVE_API_URL,
     isTrustedRpcDomain,
@@ -25,7 +26,7 @@ import {
     FEED_INDEXED_NETWORK,
     selectableNetworksFor,
     reviewsPathFor,
-    activationRealmFor,
+    profileRealmFor,
     isReviewsAvailable,
     isRealmValid,
     ACTIVE_NETWORK_KEY,
@@ -207,16 +208,16 @@ describe('config constants', () => {
             expect(isRealmValidOn('mainnet', `gno.land/r/samcrew/${base}`), `${base} must stay gated on mainnet`).toBe(false)
         }
         // Not deployed on mainnet: the v1/v2 predecessors must never validate there.
-        for (const base of ['memba_reviews_v1', 'memba_appstore_v2', 'memba_appstore_reviews_v1']) {
+        for (const base of ['memba_reviews_v1', 'memba_appstore_v2']) {
             expect(isRealmValidOn('mainnet', `gno.land/r/samcrew/${base}`)).toBe(false)
         }
     })
 
-    it('activates new wallets through a profile realm that is live on each network', () => {
-        expect(activationRealmFor('mainnet')).toBe('gno.land/r/demo/profile')
+    it('reads profiles from a profile realm that is live on each network', () => {
+        expect(profileRealmFor('mainnet')).toBe('gno.land/r/demo/profile')
         // onyx-1 has gno core's realm and not the samcrew vendor copy (vm/qfuncs, 2026-09-30).
-        expect(activationRealmFor('onyx')).toBe('gno.land/r/demo/profile')
-        expect(activationRealmFor('pearl')).toBe('gno.land/r/samcrew/deps/demo/profile')
+        expect(profileRealmFor('onyx')).toBe('gno.land/r/demo/profile')
+        expect(profileRealmFor('pearl')).toBe('gno.land/r/samcrew/deps/demo/profile')
     })
 
     it('chooses the reviews realm per network and gates review surfaces on it', () => {
@@ -229,6 +230,18 @@ describe('config constants', () => {
         vi.stubEnv('VITE_ENABLE_REVIEWS', 'true')
         expect(isReviewsAvailable()).toBe(isRealmValid(reviewsPathFor(ACTIVE_NETWORK_KEY)))
         vi.unstubAllEnvs()
+    })
+
+    it('shows app reviews only where the network\'s reviews realm is live, whatever the flag says', async () => {
+        vi.stubEnv('VITE_ENABLE_APP_REVIEWS', 'true')
+        vi.resetModules()
+        expect((await import('./config')).isAppReviewsAvailable()).toBe(true)
+        // A reviews realm this network has not verified: the flag alone must not show app reviews.
+        vi.stubEnv('VITE_REVIEWS_REALM_PATH', 'gno.land/r/samcrew/not_deployed_reviews')
+        vi.resetModules()
+        expect((await import('./config')).isAppReviewsAvailable()).toBe(false)
+        vi.unstubAllEnvs()
+        vi.resetModules()
     })
 
     it('mainnet is both a valid default key AND the hard fallback', () => {
@@ -595,7 +608,7 @@ describe('network reduction — test13 + topaz + gnoland1 + sapphire + pearl + m
         const keys = Object.keys(NETWORKS).sort()
         // mainnet (`gnoland-1`) is the default and only visible network since
         // 2026-09-23. onyx (`onyx-1`) is the testnet, hidden until Memba
-        // publishes there. pearl (retired that day, `retiredTo: "mainnet"`),
+        // publishes there. pearl (retired that day, see RETIRED_NETWORKS),
         // sapphire, topaz, test13 and gnoland1 (BETANET) stay as hidden
         // entries so old links and stored keys resolve. See the live/dark
         // contract blocks below.
@@ -605,7 +618,7 @@ describe('network reduction — test13 + topaz + gnoland1 + sapphire + pearl + m
     it('onyx is a hidden, realm-free testnet that gates every realm and every user DAO', () => {
         const onyx = NETWORKS.onyx
         expect(onyx).toMatchObject({ chainId: 'onyx-1', hidden: true, isTestnet: true, realmsDeployed: false })
-        expect(onyx.retiredTo).toBeUndefined()
+        expect(retiredNetworkSuccessor('onyx')).toBeNull()
         expect(onyx.userDaos).toEqual({ create: false, channelsCompanion: false })
         expect(VISIBLE_NETWORKS.onyx).toBeUndefined()
         expect(networkHasRealms('onyx')).toBe(false)

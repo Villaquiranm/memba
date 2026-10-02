@@ -18,6 +18,7 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { AminoMsg } from "../../lib/grc20"
 import { setTxConfirmationCallback } from "../../lib/grc20"
+import { formatUgnotExact } from "../../lib/dao/v2Budget"
 import { callDepositCap, deployEffect } from "../../lib/parseMsgs"
 import { SignedAddress, SignedArgs, SignedText } from "./SigningValue"
 import "./tx-confirmation.css"
@@ -29,6 +30,8 @@ export interface TxSummary {
     memo: string
     /** Amino messages being broadcast */
     messages: AminoMsg[]
+    /** The exact network fee, when the caller set one (the wallet is asked for this amount). */
+    feeUgnot?: number
 }
 
 interface ConfirmationRequest {
@@ -52,8 +55,8 @@ export function TxConfirmationProvider({ children }: { children: React.ReactNode
 
     // A6: Register the confirmation callback so doContractBroadcast can invoke it
     useEffect(() => {
-        setTxConfirmationCallback(async (msgs: AminoMsg[], memo: string) => {
-            return requestConfirmation({ memo, messages: msgs })
+        setTxConfirmationCallback(async (msgs: AminoMsg[], memo: string, details?: { feeUgnot?: number }) => {
+            return requestConfirmation({ memo, messages: msgs, feeUgnot: details?.feeUgnot })
         })
         return () => {
             setTxConfirmationCallback(null)
@@ -99,7 +102,7 @@ function TxConfirmationModal({
     onConfirm: () => void
     onCancel: () => void
 }) {
-    const { messages, memo } = summary
+    const { messages, memo, feeUgnot } = summary
 
     // Revokes inside a create are Start's cleanup of expired sessions; alone they are End.
     const withCreate = messages.some((m) => m.type === "/auth.m_create_session")
@@ -116,6 +119,11 @@ function TxConfirmationModal({
         if (msg.type === "/auth.m_revoke_session") {
             return { index: i, func: withCreate ? "Remove expired Quick play session" : "End Quick play session", caller: String(v.creator ?? ""), send: "", args: [] as string[], pkgPath: "", depositCap: "" }
         }
+        if (msg.type === "/bank.MsgSend") {
+            const amount = String(v.amount ?? "")
+            const ugnot = /^(\d+)ugnot$/.exec(amount)
+            return { index: i, func: "Transfer", caller: String(v.from_address ?? ""), to: String(v.to_address ?? ""), send: ugnot ? formatUgnotExact(Number(ugnot[1])) : amount, args: [] as string[], pkgPath: "", depositCap: undefined }
+        }
         const deploy = deployEffect(msg)
         const func = deploy ? `Deploy realm ${deploy.path}` : (v.func as string) || "unknown"
         const caller = (v.caller as string) || (v.creator as string) || ""
@@ -124,7 +132,7 @@ function TxConfirmationModal({
         const pkgPath = deploy ? "" : (v.pkg_path as string) || ""
         const depositCap = deploy ? deploy.depositCap : callDepositCap(msg)
 
-        return { index: i, func, caller, send, args, pkgPath, depositCap }
+        return { index: i, func, caller, to: "", send, args, pkgPath, depositCap }
     })
 
     // Detect if any message involves sending funds
@@ -180,6 +188,13 @@ function TxConfirmationModal({
                         <span className="tx-confirm-value">{messages.length}</span>
                     </div>
 
+                    {feeUgnot !== undefined && (
+                        <div className="tx-confirm-detail-row">
+                            <span className="tx-confirm-label">Network fee</span>
+                            <span className="tx-confirm-value">{formatUgnotExact(feeUgnot)}</span>
+                        </div>
+                    )}
+
                     {effects.map((e) => (
                         <div key={e.index} className="tx-confirm-msg">
                             <div className="tx-confirm-detail-row">
@@ -194,6 +209,14 @@ function TxConfirmationModal({
                                     </span>
                                 </div>
                             )}
+                            {e.to && (
+                                <div className="tx-confirm-detail-row">
+                                    <span className="tx-confirm-label">To</span>
+                                    <span className="tx-confirm-value">
+                                        <SignedAddress value={e.to} />
+                                    </span>
+                                </div>
+                            )}
                             {e.depositCap && (
                                 <div className="tx-confirm-detail-row">
                                     <span className="tx-confirm-label">Storage deposit cap</span>
@@ -202,7 +225,7 @@ function TxConfirmationModal({
                             )}
                             {e.send && (
                                 <div className="tx-confirm-detail-row">
-                                    <span className="tx-confirm-label">Send</span>
+                                    <span className="tx-confirm-label">{e.to ? "Amount" : "Send"}</span>
                                     <span className="tx-confirm-value tx-confirm-send">{e.send}</span>
                                 </div>
                             )}

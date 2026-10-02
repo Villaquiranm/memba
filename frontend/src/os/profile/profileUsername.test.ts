@@ -20,8 +20,9 @@ describe("OS username registration review", () => {
         const request = await usernameRegistrationRequest(ADDRESS, "nym-builder042", FALLBACK_GAS_PRICE, vi.fn())
         expect(request.prepare(undefined).msgs[0].value).toMatchObject({ caller: ADDRESS, send: "17ugnot", func: "Register", args: ["nym-builder042"], max_deposit: "660000ugnot" })
         expect(request.lines(undefined)).toContainEqual(["Registration price", "0.000017 GNOT"])
+        // The registry is read alongside the price; a changed price is what refuses, even with the name free.
+        vi.mocked(resolveUsernameToAddress).mockResolvedValue("")
         await expect(request.recheck?.(undefined)).rejects.toThrow("price changed")
-        expect(resolveUsernameToAddress).not.toHaveBeenCalled()
     })
 
     it("refuses a name that became registered", async () => {
@@ -46,6 +47,6 @@ describe("OS username registration review", () => {
         vi.mocked(doContractBroadcast).mockResolvedValueOnce({ hash: "hash" })
         const beforeSign = vi.fn()
         await request.send(undefined, beforeSign)
-        expect(doContractBroadcast).toHaveBeenCalledWith(request.prepare(undefined).msgs, "Register @nym-builder042", { gasWanted: 90_000_000, gasFee: 108_000, retry: false, beforeSign })
+        expect(doContractBroadcast).toHaveBeenCalledWith(request.prepare(undefined).msgs, "Register @nym-builder042", { gasWanted: 90_000_000, gasFee: 108_000, beforeSign })
     })
 })

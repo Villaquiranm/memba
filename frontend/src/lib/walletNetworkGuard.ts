@@ -11,12 +11,14 @@
  * or a chain other than the page's all refuse.
  */
 import { ACTIVE_NETWORK_KEY, GNO_CHAIN_ID, NETWORKS, isTrustedRpcDomain } from "./config"
+import { withWalletActivity } from "./walletActivity"
 
 type WalletReply = { status?: unknown; type?: unknown; data?: { address?: unknown; chainId?: unknown; rpcUrl?: unknown } | null } | null | undefined
 
 type AdenaNetworkApi = {
     GetAccount?: () => Promise<WalletReply>
     GetNetwork?: () => Promise<WalletReply>
+    AddEstablish?: (name: string) => Promise<WalletReply>
 }
 
 /** What the wallet reported when the check passed. */
@@ -30,6 +32,22 @@ export interface LiveWalletNetwork {
 /** How long the wallet has to answer before the check refuses. */
 export const LIVE_NETWORK_TIMEOUT_MS = 15_000
 
+/** How long Adena's unlock window may stay open: a person types a password there. */
+export const UNLOCK_TIMEOUT_MS = 300_000
+
+// Whether Adena's unlock window is open now: only the unlock below sets it, so a sheet can say so.
+let unlockOpen = 0
+const unlockListeners = new Set<() => void>()
+export const isAdenaUnlockOpen = () => unlockOpen > 0
+export function subscribeAdenaUnlock(listener: () => void) {
+    unlockListeners.add(listener)
+    return () => { unlockListeners.delete(listener) }
+}
+function setUnlockOpen(delta: number) {
+    unlockOpen += delta
+    for (const listener of unlockListeners) listener()
+}
+
 /**
  * A refusal by this check. It is thrown before the wallet is asked anything
  * that could sign, so a caller can treat it as "nothing was sent".
@@ -42,6 +60,9 @@ export class WalletNetworkError extends Error {
 }
 
 const text = (v: unknown): string => (typeof v === "string" ? v.trim() : "")
+
+/** The refusal for a locked Adena that was not, or could not be, unlocked. */
+export const WALLET_LOCKED_MESSAGE = "Adena is locked — unlock it, then try again."
 
 /** "gno.land (gnoland-1)" for a known chain, the bare chain id otherwise. */
 export function networkLabelForChain(chainId: string): string {
@@ -64,7 +85,7 @@ function unreported(expectedChainId: string): WalletNetworkError {
  */
 function failedReply(replies: WalletReply[], expectedChainId: string): WalletNetworkError {
     const types = replies.map((r) => (r?.status === "failure" ? text(r.type) : ""))
-    if (types.includes("WALLET_LOCKED")) return new WalletNetworkError("Adena is locked — unlock it, then try again.")
+    if (types.includes("WALLET_LOCKED")) return new WalletNetworkError(WALLET_LOCKED_MESSAGE)
     if (types.includes("NOT_CONNECTED")) return new WalletNetworkError("Adena is not connected to Memba — reconnect your wallet, then try again.")
     return unreported(expectedChainId)
 }
@@ -92,24 +113,37 @@ async function ask(call: (() => Promise<WalletReply>) | undefined, timeoutMs: nu
  * account's, and when it reports an RPC that RPC must be trusted. When
  * `opts.address` is given (the connected session's account), the wallet's
  * current account must be that one: a silent account switch refuses too.
+ * With `opts.unlock` (a signature the person just asked for), a locked Adena
+ * is asked to unlock in its own window before the check refuses.
  */
 export async function assertLiveWalletNetwork(
     expectedChainId: string = GNO_CHAIN_ID,
-    opts: { timeoutMs?: number; address?: string | null } = {},
+    opts: { timeoutMs?: number; address?: string | null; unlock?: boolean } = {},
 ): Promise<LiveWalletNetwork> {
     const adena = (window as unknown as { adena?: AdenaNetworkApi }).adena
     if (!adena || typeof adena.GetAccount !== "function") throw unreported(expectedChainId)
     const timeoutMs = opts.timeoutMs ?? LIVE_NETWORK_TIMEOUT_MS
+    const read = async (): Promise<[WalletReply, WalletReply]> => {
+        try {
+            return await Promise.all([
+                ask(adena.GetAccount!.bind(adena), timeoutMs),
+                ask(typeof adena.GetNetwork === "function" ? adena.GetNetwork.bind(adena) : undefined, timeoutMs),
+            ])
+        } catch {
+            throw unreported(expectedChainId)
+        }
+    }
 
-    let account: WalletReply
-    let network: WalletReply
-    try {
-        ;[account, network] = await Promise.all([
-            ask(adena.GetAccount.bind(adena), timeoutMs),
-            ask(typeof adena.GetNetwork === "function" ? adena.GetNetwork.bind(adena) : undefined, timeoutMs),
-        ])
-    } catch {
-        throw unreported(expectedChainId)
+    let [account, network] = await read()
+    // Adena locks itself after its own idle timer. Right before a signature, its connect window asks
+    // for the password and then answers; the wallet is read again, and every check below still applies.
+    const locked = [account, network].some((r) => r?.status === "failure" && text(r.type) === "WALLET_LOCKED")
+    if (opts.unlock && locked && typeof adena.AddEstablish === "function") {
+        setUnlockOpen(1)
+        const reply = await withWalletActivity(() => ask(adena.AddEstablish!.bind(adena, "Memba"), UNLOCK_TIMEOUT_MS))
+            .catch(() => null)
+            .finally(() => setUnlockOpen(-1))
+        if (reply && (reply.status !== "failure" || text(reply.type) === "ALREADY_CONNECTED")) [account, network] = await read()
     }
     if (!account || account.status === "failure" || network?.status === "failure") throw failedReply([account, network], expectedChainId)
 

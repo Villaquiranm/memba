@@ -8,10 +8,10 @@
 import { lazy, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import { useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { getSavedDAOsForOrg, FEATURED_DAO } from "../../lib/daoSlug"
-import { clearGovernanceReceipt, readGovernanceReceipt } from "../../lib/dao/governanceRecovery"
+import { readGovernanceReceipt } from "../../lib/dao/governanceRecovery"
 import { invalidateProposalCache } from "../../lib/dao/proposals"
 import { hasInvisibleFormatting, revealInvisibleFormatting } from "../../lib/dao/v2Text"
-import { canVoteNow, executionState, formatChainTime, relativeTime, V2_STATUS_EXPLANATIONS } from "../../lib/dao/v2Lifecycle"
+import { canVoteNow, formatChainTime, relativeTime, V2_STATUS_EXPLANATIONS } from "../../lib/dao/v2Lifecycle"
 import { ACTIVE_NETWORK_KEY, DAO_REALM_PATH } from "../../lib/config"
 import { shortAddr } from "../shell/format"
 import { ThingTile } from "../shell/icons"
@@ -21,10 +21,17 @@ import { daoSpec, newDaoSpec, specForTarget, type WindowSpec } from "../shell/wi
 import { useSigner } from "../sign/signerContext"
 import { daoKindKey, useDaoKind } from "../../hooks/useDaoKind"
 import { nameForRealm, realmForName } from "./daoNames"
-import { useDaoConfig, useDaoMembers, useDaoProposals, useMyVote, useProposal } from "./useOsDao"
+import { useDaoConfig, useDaoMembers, useDaoProposals, useMyVote, useProposal, useV2Votes } from "./useOsDao"
+import { Voters } from "./Voters"
 import { voteRequest, voteScope } from "./voteRequest"
+import { executeRequest, executeScope, executeWindow } from "./executeRequest"
+import { quoteSheetGasPrice } from "./sheetFee"
+import { useAlive } from "../shell/useAlive"
 import { JoinMembaDao } from "./JoinMembaDao"
+import { ParkedDaos } from "./ParkedDaos"
+import { UnknownOutcome } from "./UnknownOutcome"
 import { WeightedDaoFolder } from "./WeightedDaoFolder"
+import { WeightedProposalWindow } from "./WeightedProposal"
 
 const ProposeWizard = lazy(() => import("./ProposeWizard").then((m) => ({ default: m.ProposeWizard })))
 
@@ -59,20 +66,21 @@ function refreshDaoState(queryClient: QueryClient) {
 
 /**
  * The proposal windows of the equal-headcount DAO kinds. Their loaders read
- * nothing until the contract is known to be one of theirs; a weighted DAO
- * keeps its proposals in its own DAO window.
+ * nothing until the contract is known to be one of theirs. A weighted DAO
+ * shows `weighted` instead, or a pointer to its DAO window when it has no
+ * window of this kind.
  */
-function StandardDaoOnly({ dao, realmPath, what, open, children }: { dao: string; realmPath: string; what: string; open: (spec: WindowSpec) => void; children: ReactNode }) {
+function StandardDaoOnly({ dao, realmPath, what, open, weighted, children }: { dao: string; realmPath: string; what: string; open: (spec: WindowSpec) => void; weighted?: ReactNode; children: ReactNode }) {
     const kind = useDaoKind(realmPath)
     if (kind.loading) return <Loading what={what} />
     if (kind.error) return <ContractUnknown realmPath={realmPath} />
     if (kind.kind === "weighted") {
-        return (
+        return weighted ?? (
             <div className="os-holding">
                 <ThingTile icon="folder" tint={DAO_TINT} size={44} />
                 <div className="os-holding-title">This DAO votes by points</div>
-                <p className="os-sub">Its proposals, and proposing, voting and executing, are in its DAO window.</p>
-                <button type="button" className="os-btn" onClick={() => open(daoSpec(dao))}>Open {dao}</button>
+                <p className="os-sub">Its proposals are in its DAO window, under Proposals.</p>
+                <button type="button" className="os-btn" onClick={() => open(daoSpec(dao, "proposals"))}>Open {dao}</button>
             </div>
         )
     }
@@ -93,6 +101,8 @@ function NotADao({ name }: { name: string }) {
 
 export function DaosApp({ open }: { open: (spec: WindowSpec) => void }) {
     const [path, setPath] = useState("")
+    // A parked DAO that the network enabled joins the saved list: re-read it.
+    const [, setSavedRev] = useState(0)
     const [err, setErr] = useState<string | null>(null)
     const featured = [
         { realmPath: FEATURED_DAO.realmPath, name: FEATURED_DAO.name },
@@ -134,6 +144,7 @@ export function DaosApp({ open }: { open: (spec: WindowSpec) => void }) {
                     <ul className="os-list">{saved.map(row)}</ul>
                 </section>
             )}
+            <ParkedDaos onEnabled={() => setSavedRev((r) => r + 1)} />
             <form className="os-stack os-tight" onSubmit={submit}>
                 <label className="os-h" htmlFor="os-dao-path">Open a DAO by address</label>
                 <div className="os-row os-nowrap">
@@ -152,7 +163,7 @@ const TABS: { id: DaoSection; label: string }[] = [
     { id: "overview", label: "Overview" }, { id: "proposals", label: "Proposals" }, { id: "members", label: "Members" }, { id: "treasury", label: "Treasury" },
 ]
 
-interface DaoFolderProps { name: string; section: DaoSection; open: (spec: WindowSpec) => void; session: OsSession; active?: boolean }
+interface DaoFolderProps { name: string; section: DaoSection; open: (spec: WindowSpec) => void; session: OsSession }
 
 export function DaoFolder(props: DaoFolderProps) {
     const realmPath = realmForName(props.name)
@@ -160,7 +171,7 @@ export function DaoFolder(props: DaoFolderProps) {
     return <DaoFolderBody {...props} realmPath={realmPath} />
 }
 
-function DaoFolderBody({ name, realmPath, section, open, session, active }: DaoFolderProps & { realmPath: string }) {
+function DaoFolderBody({ name, realmPath, section, open, session }: DaoFolderProps & { realmPath: string }) {
     const kind = useDaoKind(realmPath)
     // The equal-headcount loaders below read nothing until the contract is known to be one of theirs.
     const standard = !kind.loading && !kind.error && kind.kind !== "weighted"
@@ -192,17 +203,9 @@ function DaoFolderBody({ name, realmPath, section, open, session, active }: DaoF
             </div>
         )
     }
-    // A weighted DAO is one workspace (points, members, adapters, proposals), not the four sections below.
-    if (kind.kind === "weighted") {
-        return (
-            <>
-                <WeightedDaoFolder realmPath={realmPath} session={session} active={active} />
-                {join}
-            </>
-        )
-    }
     let body: ReactNode
-    if (config.isPending) body = <Loading what="the DAO" />
+    if (kind.kind === "weighted") body = <WeightedDaoFolder name={name} realmPath={realmPath} section={section} open={open} session={session} />
+    else if (config.isPending) body = <Loading what="the DAO" />
     else if (config.isError) body = <Failed what="this DAO" retry={() => void config.refetch()} />
     else if (!config.data) body = <p className="os-note os-warn">No DAO answers at {realmPath} on this network.</p>
     else if (section === "overview") {
@@ -288,7 +291,11 @@ function DaoFolderBody({ name, realmPath, section, open, session, active }: DaoF
 export function ProposalWindow({ dao, n, session, open }: { dao: string; n: number; session: OsSession; open: (spec: WindowSpec) => void }) {
     const realmPath = realmForName(dao)
     if (!realmPath) return <NotADao name={dao} />
-    return <StandardDaoOnly dao={dao} realmPath={realmPath} what={`proposal #${n}`} open={open}><ProposalBody dao={dao} realmPath={realmPath} n={n} session={session} /></StandardDaoOnly>
+    return (
+        <StandardDaoOnly dao={dao} realmPath={realmPath} what={`proposal #${n}`} open={open} weighted={<WeightedProposalWindow realmPath={realmPath} dao={dao} id={String(n)} session={session} />}>
+            <ProposalBody dao={dao} realmPath={realmPath} n={n} session={session} />
+        </StandardDaoOnly>
+    )
 }
 
 /** The New proposal wizard, behind the same contract check as the proposal window. */
@@ -297,6 +304,8 @@ export function NewProposalWindow({ dao, session, open, close }: { dao: string; 
     if (!realmPath) return <NotADao name={dao} />
     return <StandardDaoOnly dao={dao} realmPath={realmPath} what="the DAO contract" open={open}><ProposeWizard dao={dao} session={session} open={open} close={close} /></StandardDaoOnly>
 }
+
+const CHOICE_WORDS = { YES: "Yes", NO: "No", ABSTAIN: "Abstain" } as const
 
 /** Chain-style seconds, refreshed every 30 s (relative "ends in" times). */
 function useNowSeconds(): number {
@@ -320,6 +329,9 @@ function Bar({ label, value, whole }: { label: string; value: number; whole: num
 
 function ProposalBody({ dao, realmPath, n, session }: { dao: string; realmPath: string; n: number; session: OsSession }) {
     const signer = useSigner()
+    const alive = useAlive()
+    const [quoting, setQuoting] = useState(false)
+    const [execError, setExecError] = useState<string | null>(null)
     const queryClient = useQueryClient()
     const { kind, ...q } = useProposal(realmPath, n)
     const config = useDaoConfig(realmPath)
@@ -327,7 +339,7 @@ function ProposalBody({ dao, realmPath, n, session }: { dao: string; realmPath: 
     const v2 = kind.kind === "memba-v2"
     const members = useDaoMembers(realmPath, config.data?.memberstorePath, member && !config.isPending)
     const myVote = useMyVote(realmPath, n, session.address, v2)
-    const [checkedScope, setCheckedScope] = useState<string | null>(null)
+    const votes = useV2Votes(realmPath, n, v2)
     const [, rerender] = useState(0)
     const now = useNowSeconds()
 
@@ -343,7 +355,6 @@ function ProposalBody({ dao, realmPath, n, session }: { dao: string; realmPath: 
     const p = q.data!
     const openNow = p.v2 ? canVoteNow(p.v2, now) : p.open
     const scope = member ? voteScope(realmPath, session.address, n) : null
-    const scopeKey = scope ? JSON.stringify(scope) : null
     const receipt = scope ? readGovernanceReceipt(scope) : null
     const me = members.data?.find((m) => m.address === session.address)
     const invisible = hasInvisibleFormatting(p.title) || hasInvisibleFormatting(p.description)
@@ -351,28 +362,78 @@ function ProposalBody({ dao, realmPath, n, session }: { dao: string; realmPath: 
     let action: ReactNode
     if (!kind.capabilities.vote) action = <p className="os-sub">Memba can't vote on this kind of DAO.</p>
     else if (!member) action = <button type="button" className="os-btn" onClick={session.openConnect}>Connect to vote</button>
-    else if (receipt) {
-        action = (
-            <div className="os-note os-warn os-stack os-tight" role="status">
-                <b>Outcome unknown.</b>
-                <span>A previous vote attempt is saved. Check its outcome before voting again.</span>
-                {receipt.hash && <code className="os-mono os-break">Transaction {receipt.hash}</code>}
-                <label className="os-ack"><input type="checkbox" checked={checkedScope === scopeKey} onChange={(e) => setCheckedScope(e.target.checked ? scopeKey : null)} /> I checked the transaction and want to review this vote again.</label>
-                <button type="button" className="os-btn os-quiet" disabled={checkedScope !== scopeKey} onClick={() => {
-                    try { clearGovernanceReceipt(scope!); setCheckedScope(null); rerender((x) => x + 1); void refreshDaoState(queryClient) } catch { /* a request is still in flight */ }
-                }}>Review the vote again</button>
-            </div>
-        )
-    } else if (myVote.data?.voted) action = <p className="os-note">{myVote.data.choice === null ? "Your vote is recorded; the choice could not be read right now." : <>You voted <b>{myVote.data.choice === "YES" ? "Yes" : myVote.data.choice === "NO" ? "No" : "Abstain"}</b>. Votes are final.</>}</p>
+    else if (receipt) action = <UnknownOutcome key={JSON.stringify(scope)} scope={scope!} receipt={receipt} attempt="vote" onCleared={() => { rerender((x) => x + 1); void refreshDaoState(queryClient) }} />
+    else if (myVote.data) {
+        const mine = votes.data?.find((v) => v.voter === session.address)
+        action = <p className="os-note">{mine ? <>You voted <b>{CHOICE_WORDS[mine.choice]}</b>. Votes are final.</> : votes.isError ? "Your vote is recorded; the choice could not be read right now." : "Your vote is recorded."}</p>
+    }
     else if (!openNow) action = <p className="os-sub">Voting is closed.</p>
     else if (members.isSuccess && !me) action = <p className="os-sub">Only members of this DAO can vote.</p>
     else {
         action = (
-            <button type="button" className="os-btn" disabled={!members.isSuccess || !config.isSuccess} onClick={() => signer.sign(voteRequest({
-                kind: kind.kind!, realmPath, daoName: config.data?.name || dao, proposal: p, caller: session.address,
-                electorateVersion: config.data?.v2?.electorate_version ?? null, power: me?.votingPower || null,
-            }))}>Vote…</button>
+            <button type="button" className="os-btn" disabled={quoting || !members.isSuccess || !config.isSuccess} onClick={() => {
+                setQuoting(true)
+                void quoteSheetGasPrice().then((gasPrice) => {
+                    if (!alive.current) return
+                    setQuoting(false)
+                    signer.sign(voteRequest({
+                        kind: kind.kind!, realmPath, daoName: config.data?.name || dao, proposal: p, caller: session.address,
+                        electorateVersion: config.data?.v2?.electorate_version ?? null, power: me?.votingPower || null, gasPrice,
+                    }))
+                })
+            }}>{quoting ? "Reading the fee…" : "Vote…"}</button>
         )
+    }
+
+    // An accepted version-2 proposal: any member executes it inside its window.
+    let execute: ReactNode = null
+    if (p.v2?.status === "ACCEPTED") {
+        const state = executeWindow(p.v2, now)
+        const execScope = member ? executeScope(realmPath, session.address, n) : null
+        const execReceipt = execScope ? readGovernanceReceipt(execScope) : null
+        const v2Config = config.data?.v2
+        if (state === "too-early") execute = <p className="os-note">Execution opens {relativeTime(p.v2.executable_at, now)} ({formatChainTime(p.v2.executable_at)}).</p>
+        else if (state === "closing") execute = <p className="os-note">The execution window closes in under a minute, too soon to execute from here.</p>
+        else if (state === "closed") execute = <p className="os-note">The execution window has closed.</p>
+        else if (v2Config?.archived) execute = <p className="os-note">This DAO is archived, so its proposals can no longer be executed.</p>
+        else {
+            const proposal = p.v2
+            let control: ReactNode
+            if (!member) control = <button type="button" className="os-btn" onClick={session.openConnect}>Connect to execute</button>
+            else if (execReceipt) control = <UnknownOutcome key={JSON.stringify(execScope)} scope={execScope!} receipt={execReceipt} attempt="execution" onCleared={() => { rerender((x) => x + 1); void refreshDaoState(queryClient) }} />
+            else if (members.isError) control = <p className="os-note os-err" role="alert">Members couldn't be read; Execute is unavailable right now.</p>
+            else if (config.isError) control = <p className="os-note os-err" role="alert">This DAO's settings couldn't be read; Execute is unavailable right now.</p>
+            else if (members.isSuccess && !me) control = <p className="os-sub">Only members of this DAO can execute it.</p>
+            else {
+                control = (
+                    <button type="button" className="os-btn" disabled={quoting || !members.isSuccess || !v2Config} onClick={() => {
+                        if (!v2Config) return
+                        setQuoting(true)
+                        setExecError(null)
+                        void quoteSheetGasPrice().then((gasPrice) => {
+                            if (!alive.current) return
+                            setQuoting(false)
+                            try {
+                                signer.sign(executeRequest({
+                                    realmPath, daoName: config.data?.name || dao, proposal, caller: session.address,
+                                    electorateVersion: v2Config.electorate_version, gasPrice,
+                                    refresh: () => { invalidateProposalCache(realmPath); void refreshDaoState(queryClient) },
+                                }))
+                            } catch (err) {
+                                setExecError(`Couldn't prepare this execution: ${err instanceof Error ? err.message : String(err)}`)
+                            }
+                        })
+                    }}>{quoting ? "Reading the fee…" : "Execute…"}</button>
+                )
+            }
+            execute = (
+                <>
+                    <p className="os-note">Any member can execute it until {formatChainTime(proposal.execute_by)} ({relativeTime(proposal.execute_by, now)}).</p>
+                    {control}
+                    {execError && <p className="os-note os-err" role="alert">{execError}</p>}
+                </>
+            )
+        }
     }
 
     return (
@@ -393,16 +454,15 @@ function ProposalBody({ dao, realmPath, n, session }: { dao: string; realmPath: 
                 </div>
             ) : <p className="os-sub">The votes couldn't be read right now.</p>}
             <div className="os-vote">{action}</div>
-            {p.v2?.status === "ACCEPTED" && (
-                <p className="os-note">
-                    {executionState(p.v2, now) === "open" ? "This proposal can now be executed. "
-                        : executionState(p.v2, now) === "too-early" ? `Execution opens ${relativeTime(p.v2.executable_at, now)}. `
-                            : "The execution window has closed. "}
-                    <a href={`/${ACTIVE_NETWORK_KEY}/dao/${realmPath}/proposal/${n}`}>
-                        {executionState(p.v2, now) === "open" ? "Execute on the DAO page" : "View execution details on the DAO page"}
-                    </a>
-                </p>
+            {v2 && (
+                <Voters error={votes.isError} none={openNow ? "No one has voted yet." : "No one voted."} rows={votes.data?.map((v) => ({
+                    address: v.voter,
+                    name: v.username ? revealInvisibleFormatting(v.username) : null,
+                    choice: CHOICE_WORDS[v.choice],
+                    weight: `${v.power} voting power`,
+                }))} />
             )}
+            {execute && <div className="os-vote">{execute}</div>}
             {!p.v2 && p.statusLabel === "Passed" && kind.capabilities.execute && (
                 <p className="os-note">This proposal passed. A DAO member can execute it on the <a href={`/${ACTIVE_NETWORK_KEY}/dao/${realmPath}/proposal/${n}`}>DAO proposal page</a>.</p>
             )}

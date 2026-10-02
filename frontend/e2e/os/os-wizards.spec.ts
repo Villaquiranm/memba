@@ -19,6 +19,8 @@ const V2_PROPOSAL = {
     electorate_power: 3, electorate_version: 0, created_at: NOW - 3600, voting_ends_at: NOW + 2 * 86400,
     status: 'ACTIVE', yes: 1, no: 0, abstain: 0, accepted_at: 0, executable_at: 0, execute_by: 0,
 }
+const EXECUTE_HASH = 'e'.repeat(64)
+const V2_ACCEPTED = { ...V2_PROPOSAL, id: 2, title: 'Apply the roadmap', status: 'ACCEPTED', accepted_at: NOW - 1800, executable_at: NOW - 900, execute_by: NOW + 86400, description: 'Ready to execute.' }
 const V2_READS: Record<string, string> = {
     'GetTemplateVersion()': '("memba-dao/2" string)',
     'GetConfigJSON()': wire({
@@ -31,7 +33,8 @@ const V2_READS: Record<string, string> = {
     'GetProposalsJSON(0, 50)': wire({ proposals: [V2_PROPOSAL], next_before: 0 }),
     'GetProposalsJSON(0, 20)': wire({ proposals: [V2_PROPOSAL], next_before: 0 }),
     'GetProposalJSON(1)': wire({ ...V2_PROPOSAL, description: 'A plan for the DAO.' }),
-    'GetProposalJSON(2)': wire({ ...V2_PROPOSAL, id: 2, title: 'Apply the roadmap', status: 'ACCEPTED', accepted_at: NOW - 1800, executable_at: NOW - 900, execute_by: NOW + 86400, description: 'Ready to execute.' }),
+    // A stale ACCEPTED read past execute_by (the chain would now report LAPSED): the window must not offer Execute.
+    'GetProposalJSON(3)': wire({ ...V2_ACCEPTED, id: 3, execute_by: NOW - 60 }),
 }
 
 // ── The Create DAO path: absent until Adena signs, then live ──
@@ -61,13 +64,15 @@ async function member(page: Page) {
     }, { address: ALICE })
 }
 
-type AdenaCall = { messages: { type: string; value: Record<string, unknown> }[] }
+type AdenaCall = { messages: { type: string; value: Record<string, unknown> }[]; gasFee?: number; gasWanted?: number }
 const adenaCalls = (page: Page) => page.evaluate(() => (window as unknown as { __adenaCalls: AdenaCall[] }).__adenaCalls)
 const win = (page: Page, name: string) => page.getByRole('region', { name, exact: true })
 
 test.describe('Memba OS wizards', () => {
     // Flipped when the stub Adena signs: the new DAO's package is absent before, live after.
     let signed = false
+    // Cleared to make the connected account a non-member.
+    let aliceMember = true
 
     test.beforeEach(async ({ page }) => {
         await offline(page)
@@ -75,14 +80,22 @@ test.describe('Memba OS wizards', () => {
         await member(page)
         await fulfillOnchainReads(page, ({ method, path, arg }) => {
             if (method === 'status') return mockAppChainStatus('gnoland-1')
+            // The execution's own transaction, delivered without error.
+            if (method === 'tx' && signed) return { hash: EXECUTE_HASH, height: '10', tx_result: { ResponseBase: { Error: null } } }
             if (path === 'vm/qeval' && arg.startsWith(`${V2_DAO}.`)) {
                 const call = arg.slice(V2_DAO.length + 1)
                 if (call === `HasVoted(1, address("${ALICE}"))`) return signed ? '(true bool)' : '(false bool)'
                 if (call === 'GetVotesJSON(1, 0, 50)') return wire({ total: signed ? 1 : 0, offset: 0, votes: signed ? [{ voter: ALICE, choice: 'NO', power: 2 }] : [] })
+                if (call === 'GetProposalJSON(2)') return wire({ ...V2_ACCEPTED, status: signed ? 'EXECUTED' : 'ACCEPTED' })
+                if (call === 'GetMembersJSON(0, 50)' && !aliceMember) return wire({ total: 1, offset: 0, members: [{ address: BOB, power: 1, roles: [] }] })
                 return V2_READS[call] ?? null
             }
             if (path === 'vm/qeval' && arg.includes('IsAuthorizedAddressForNamespace')) return arg.includes(ALICE) ? '(true bool)' : '(false bool)'
             if (path === 'params/vm:p:code_submission_policy') return '"permissionless"'
+            // A deploy reads the network price for its fee, and again right before the wallet.
+            if (path === 'auth/gasprice') return '{"gas":1000,"price":"1ugnot"}'
+            // A deploy needs the fee and the storage deposit in the balance.
+            if (path === `bank/balances/${ALICE}`) return '"50000000ugnot"'
             if (path === 'vm/qpkgmeta_json' && arg === NEW_DAO_PATH) {
                 return JSON.stringify(signed ? { path: NEW_DAO_PATH, status: 'live', creator: ALICE, height: 10 } : { path: NEW_DAO_PATH, status: 'absent' })
             }
@@ -95,6 +108,7 @@ test.describe('Memba OS wizards', () => {
             a.DoContract = async (tx) => { await (window as unknown as { __signed: () => Promise<void> }).__signed(); return send(tx) }
         })
         signed = false
+        aliceMember = true
     })
 
     test('a 320px Create DAO member editor keeps the address usable', async ({ page }) => {
@@ -205,22 +219,56 @@ test.describe('Memba OS wizards', () => {
         await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith('memba_governance:') && key.includes('"proposal"')))).toBe(false)
     })
 
-    test('a version-2 vote reviews its gas limit and confirms the chosen vote', async ({ page }) => {
+    test('a version-2 vote reviews its fee and confirms the chosen vote', async ({ page }) => {
         await page.goto(`${OS_ON}/os/dao/test.teamv2/proposals/1`)
         const proposal = win(page, 'test.teamv2 · Proposal #1')
+        const votes = proposal.locator('section').filter({ has: page.getByRole('heading', { name: 'Votes' }) })
+        await expect(votes).toContainText('No one has voted yet.')
         await proposal.getByRole('button', { name: 'Vote…' }).click()
         const review = page.getByRole('dialog', { name: 'Review · Vote' })
         const yes = review.getByRole('radio', { name: 'Yes' })
         await yes.focus()
         await yes.press('ArrowRight')
         await expect(review.getByRole('radio', { name: 'No' })).toHaveAttribute('aria-checked', 'true')
-        await expect(review.getByText('Gas limit')).toBeVisible()
-        await expect(review.getByText('Adena shows the final network fee', { exact: false })).toBeVisible()
+        await expect(review.getByText('Gas limit')).toHaveCount(0)
+        // The fee is shown, rechecked and sent as shown: 15,000,000 gas at 1 ugnot per 1,000, with 20% headroom.
+        await expect(review.getByText('Network fee', { exact: true })).toBeVisible()
+        await expect(review.getByText('0.018 GNOT', { exact: true })).toBeVisible()
         await review.getByRole('button', { name: 'Sign in Adena' }).click()
         await expect(review).toHaveCount(0)
         await expect(proposal.getByText('You voted')).toBeVisible()
+        // The voter list is read again with the rest: who voted, what, and with what power.
+        await expect(votes.getByRole('listitem')).toHaveText([`${ALICE}No2 voting power`])
         const [call] = await adenaCalls(page)
         expect(call.messages[0].value).toMatchObject({ pkg_path: V2_DAO, func: 'Vote', args: ['1', 'NO'] })
+        expect([call.gasWanted, call.gasFee]).toEqual([15_000_000, 18_000])
+    })
+
+    test('a locked Adena is asked to unlock in its own window, then the vote is signed', async ({ page }) => {
+        await page.addInitScript(() => {
+            const w = window as unknown as { adena: Record<string, (...a: unknown[]) => Promise<unknown>>; __locked: boolean; __unlock: () => void; __unlockAsked: boolean }
+            const LOCKED = { status: 'failure', type: 'WALLET_LOCKED', data: {} }
+            w.__locked = false
+            for (const k of ['GetAccount', 'GetNetwork']) {
+                const read = w.adena[k]
+                w.adena[k] = async (...a: unknown[]) => (w.__locked ? LOCKED : read.apply(w.adena, a))
+            }
+            // Adena's connect window for a connected site: its login screen, then ALREADY_CONNECTED.
+            w.adena.AddEstablish = () => new Promise((resolve) => { w.__unlockAsked = true; w.__unlock = () => { w.__locked = false; resolve({ status: 'failure', type: 'ALREADY_CONNECTED', data: {} }) } })
+        })
+        await page.goto(`${OS_ON}/os/dao/test.teamv2/proposals/1`)
+        await win(page, 'test.teamv2 · Proposal #1').getByRole('button', { name: 'Vote…' }).click()
+        const review = page.getByRole('dialog', { name: 'Review · Vote' })
+        await expect(review.getByText('0.018 GNOT', { exact: true })).toBeVisible()
+        await page.evaluate(() => { (window as unknown as { __locked: boolean }).__locked = true })
+        await review.getByRole('button', { name: 'Sign in Adena' }).click()
+        await expect(review.getByRole('heading', { name: 'Unlock Adena' })).toBeVisible()
+        expect(await page.evaluate(() => (window as unknown as { __unlockAsked?: boolean }).__unlockAsked)).toBe(true)
+        expect(await adenaCalls(page)).toEqual([])
+        await page.evaluate(() => (window as unknown as { __unlock: () => void }).__unlock())
+        await expect(review).toHaveCount(0)
+        const [call] = await adenaCalls(page)
+        expect(call.messages[0].value).toMatchObject({ pkg_path: V2_DAO, func: 'Vote' })
     })
 
     test('a short landscape vote review keeps its actions reachable', async ({ page }) => {
@@ -240,12 +288,43 @@ test.describe('Memba OS wizards', () => {
         await review.getByRole('button', { name: 'Cancel' }).click()
     })
 
-    test('an accepted proposal links to the working execution page', async ({ page }) => {
+    test('a member executes an accepted proposal through the review, and Adena gets Execute', async ({ page }) => {
+        await page.addInitScript((hash) => {
+            const a = (window as unknown as { adena: { DoContract: (tx: unknown) => Promise<unknown> } }).adena
+            const send = a.DoContract
+            a.DoContract = async (tx) => { await send(tx); return { status: 'success', data: { hash } } }
+        }, EXECUTE_HASH)
         await page.goto(`${OS_ON}/os/dao/test.teamv2/proposals/2`)
         const proposal = win(page, 'test.teamv2 · Proposal #2')
-        const execute = proposal.getByRole('link', { name: 'Execute on the DAO page' })
-        await expect(execute).toBeVisible()
-        await expect(execute).toHaveAttribute('href', '/mainnet/dao/gno.land/r/test/teamv2/proposal/2')
+        await expect(proposal.getByText(/^Any member can execute it until/)).toBeVisible()
+        await proposal.getByRole('button', { name: 'Execute…' }).click()
+        const review = page.getByRole('dialog', { name: 'Review · Execute' })
+        await expect(review.getByText('Text proposal', { exact: true })).toBeVisible()
+        // 25,000,000 gas at 1 ugnot per 1,000, with 20% headroom.
+        await expect(review.getByText('0.03 GNOT', { exact: true })).toBeVisible()
+        await review.getByRole('button', { name: 'Sign in Adena' }).click()
+        await expect(review).toHaveCount(0)
+        await expect(proposal.getByText('Executed', { exact: true })).toBeVisible()
+        await expect(proposal.getByRole('button', { name: 'Execute…' })).toHaveCount(0)
+        // Confirmed by its own transaction, not only by the proposal's status.
+        await page.getByRole('button', { name: /Notifications, 1 new/ }).click()
+        await expect(page.getByText('Confirmed · Execute #2')).toBeVisible()
+        const [call] = await adenaCalls(page)
+        expect(call.messages[0].value).toMatchObject({ pkg_path: V2_DAO, func: 'Execute', args: ['2'], caller: ALICE })
+        expect([call.gasWanted, call.gasFee]).toEqual([25_000_000, 30_000])
+    })
+
+    test('a non-member is told only members execute, and a closed window offers nothing to sign', async ({ page }) => {
+        aliceMember = false
+        await page.goto(`${OS_ON}/os/dao/test.teamv2/proposals/2`)
+        const accepted = win(page, 'test.teamv2 · Proposal #2')
+        await expect(accepted.getByText('Only members of this DAO can execute it.')).toBeVisible()
+        await expect(accepted.getByRole('button', { name: 'Execute…' })).toHaveCount(0)
+        await page.goto(`${OS_ON}/os/dao/test.teamv2/proposals/3`)
+        const closed = win(page, 'test.teamv2 · Proposal #3')
+        await expect(closed.getByText('The execution window has closed.')).toBeVisible()
+        await expect(closed.getByRole('button', { name: /Execute|Connect/ })).toHaveCount(0)
+        expect(await adenaCalls(page)).toEqual([])
     })
 
     test('a DAO is created through the five steps, checked, deployed and opened', async ({ page }) => {
@@ -278,6 +357,8 @@ test.describe('Memba OS wizards', () => {
 
         // Review: the chain checks run up front.
         await expect(wiz.getByTestId('os-dao-checks')).toContainText('The address is free')
+        await expect(wiz.getByText('Your balance', { exact: true })).toBeVisible()
+        await expect(wiz.getByText(/, taken from your balance when the package is deployed$/)).toBeVisible()
         await expect(wiz.getByText('Treasury is a target design', { exact: false })).toBeVisible()
         await wiz.getByRole('button', { name: 'Deploy with Adena…' }).click()
         await expect(wiz.getByRole('alert')).toContainText('permanent contract')
@@ -305,9 +386,28 @@ test.describe('Memba OS wizards', () => {
         await expect(win(page, 'Create a DAO')).toHaveCount(0)
     })
 
-    test('a guest opening the Create DAO link is asked to connect', async ({ page }) => {
+    test('a deploy from this browser that is not live shows in the DAOs window with what the chain answers', async ({ page }) => {
+        await page.addInitScript((path) => localStorage.setItem('memba_pending_daos', JSON.stringify([{ chainId: 'gnoland-1', path, name: 'Gno Builders', txHash: 'H', reason: 'waiting', submittedAt: 1 }])), NEW_DAO_PATH)
+        await page.goto(`${OS_ON}/os/daos`)
+        const daos = win(page, 'DAOs')
+        await expect(daos.getByRole('heading', { name: 'Deployed from this browser, not live yet' })).toBeVisible()
+        await expect(daos.getByText(NEW_DAO_PATH)).toBeVisible()
+        await expect(daos.getByText('Not on chain yet: check the transaction before deploying again')).toBeVisible()
+    })
+
+    test('a guest fills in the whole Create DAO wizard and is asked to connect only at Deploy', async ({ page }) => {
         await page.addInitScript(() => localStorage.removeItem('memba_auth_token'))
         await page.goto(`${OS_ON}/os/daos/new`)
-        await expect(win(page, 'Create a DAO').getByText('Connect a wallet to create a DAO.')).toBeVisible()
+        const wiz = win(page, 'Create a DAO')
+        await wiz.getByLabel('Name').fill('Gno Builders')
+        await expect(wiz.getByTestId('os-dao-path')).toHaveText('gno.land/r/‹your address›/gno_builders')
+        await wiz.getByRole('button', { name: 'Continue' }).click()
+        await expect(wiz.getByLabel('Member 1 address')).toHaveAttribute('placeholder', 'Your address, when you connect')
+        for (let i = 0; i < 3; i++) await wiz.getByRole('button', { name: 'Continue' }).click()
+        await expect(wiz.getByText(/^Connect a wallet to deploy\. The address is made from your wallet's address/)).toBeVisible()
+        await expect(wiz.getByTestId('os-dao-checks')).toHaveCount(0)
+        await wiz.getByRole('button', { name: 'Connect a wallet to deploy' }).click()
+        await expect(page.getByRole('dialog', { name: 'Connect a wallet' })).toBeVisible()
+        expect(await adenaCalls(page)).toEqual([])
     })
 })

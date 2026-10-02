@@ -25,14 +25,17 @@ import { isAppStoreSubmitEnabled } from "../lib/config"
 import { isAppStoreV3, fetchByPublisher, type AppListing } from "../lib/appStore"
 import {
     validateSubmission,
-    buildRegisterAppMsg,
-    buildEditListingMsg,
-    buildDelistAppMsg,
+    submitRegisterApp,
+    submitEditListing,
+    submitDelistApp,
     fetchRegistrationFee,
     loadEditForm,
     formatGnot,
+    registerStorageBytes,
+    submitErrorText,
     type AppSubmission,
 } from "../lib/appStoreSubmit"
+import { formatUgnot, STORAGE_PRICE_UGNOT } from "../lib/dao/v2Budget"
 import { ComingSoonGate } from "../components/ui/ComingSoonGate"
 import { ListingFields } from "../components/appstore/ListingFields"
 import { PublisherListings } from "../components/appstore/PublisherListings"
@@ -42,8 +45,8 @@ const EMPTY: AppSubmission = {
     pkgPath: "", name: "", tagline: "", descr: "", category: "", iconCID: "", screenshotsCSV: "", appURL: "",
 }
 
-/** register = pay the fee; edit = free resubmit of an existing pending/rejected listing. */
-type Mode = { kind: "register" } | { kind: "edit"; pkgPath: string }
+/** register = pay the fee; edit = resubmit an existing pending/rejected listing, as loaded in `was`, with no listing fee. */
+type Mode = { kind: "register" } | { kind: "edit"; pkgPath: string; was: AppSubmission }
 
 export function AppSubmit() {
     const { networkKey } = useNetwork()
@@ -84,38 +87,19 @@ export function AppSubmit() {
         // holds the mutationFn from whichever render last ran setOptions), which rarely dropped a
         // just-uploaded iconCID/screenshot from the wire args.
         mutationFn: async (submission: AppSubmission) => {
-            const { doContractBroadcast } = await import("../lib/grc20")
-            const msg = mode.kind === "edit"
-                ? buildEditListingMsg(address, submission)
-                : buildRegisterAppMsg(address, fee ?? Number.NaN, submission)
-            return doContractBroadcast([msg], mode.kind === "edit" ? "Resubmit app" : "Submit app")
+            return mode.kind === "edit"
+                ? submitEditListing(address, submission, mode.was)
+                : submitRegisterApp(address, submission, fee ?? Number.NaN)
         },
-        onSuccess: (_res, submission) => {
-            // The freshly-signed listing is pending — reflect it immediately (the chain read lags
-            // the broadcast), then let the next refetch reconcile. Uses the submitted form (the
-            // mutation variable), not a closure, so it matches exactly what was signed.
-            const optimistic: AppListing = {
-                id: 0, pkgPath: submission.pkgPath, name: submission.name, tagline: submission.tagline,
-                category: submission.category, iconCID: submission.iconCID, appURL: submission.appURL,
-                publisher: address, status: "pending", flagCount: 0, createdAt: 0, descr: submission.descr,
-            }
-            qc.setQueryData<AppListing[]>(["appStore", "mine", address], (prev) => [
-                optimistic,
-                ...(prev ?? []).filter((l) => l.pkgPath !== submission.pkgPath),
-            ])
+        onSuccess: () => {
+            // Sent, not yet seen on chain: the list is read again rather than shown as if it were.
+            void qc.invalidateQueries({ queryKey: ["appStore", "mine", address] })
             void qc.invalidateQueries({ queryKey: ["appStore", "pending"] })
             setDone(mode.kind)
             setTxError(null)
         },
         onError: (e: unknown) => {
-            const msg = e instanceof Error ? e.message : String(e)
-            if (/denied|rejected by user|cancel/i.test(msg)) {
-                setTxError(null) // wallet dismissal is not an error to shout about
-            } else if (/already registered/i.test(msg)) {
-                setTxError("An app is already listed for this package path.")
-            } else {
-                setTxError("The transaction didn't go through. Nothing was charged — please try again.")
-            }
+            setTxError(submitErrorText(e, "submission"))
         },
     })
 
@@ -126,8 +110,7 @@ export function AppSubmit() {
     const [delistError, setDelistError] = useState<string | null>(null)
     const delist = useMutation({
         mutationFn: async (pkgPath: string) => {
-            const { doContractBroadcast } = await import("../lib/grc20")
-            return doContractBroadcast([buildDelistAppMsg(address, pkgPath)], "Delist app")
+            return submitDelistApp(address, pkgPath)
         },
         onSuccess: (_res, pkgPath) => {
             // Optimistic flip — the chain read lags the broadcast, so do NOT
@@ -142,13 +125,10 @@ export function AppSubmit() {
             setDelistError(null)
         },
         onError: (e: unknown) => {
-            const msg = e instanceof Error ? e.message : String(e)
             // Stay armed so the error (and a one-click retry) shows exactly where
             // the user acted — the page-level txError is invisible once the "done"
             // panel replaces the form (review F-1). Wallet dismissal stays silent.
-            setDelistError(/denied|rejected by user|cancel/i.test(msg)
-                ? null
-                : "The delist transaction didn't go through — please try again.")
+            setDelistError(submitErrorText(e, "delist"))
         },
     })
 
@@ -203,7 +183,7 @@ export function AppSubmit() {
             setTxError("Couldn't load this listing's saved details — please try again.")
             return
         }
-        setMode({ kind: "edit", pkgPath: seeded.pkgPath })
+        setMode({ kind: "edit", pkgPath: seeded.pkgPath, was: seeded })
         setDone(null)
         setForm(seeded)
     }
@@ -230,12 +210,12 @@ export function AppSubmit() {
             {done ? (
                 <div className="appstore__notice appsubmit__done" data-testid="appsubmit-done" role="status">
                     <p className="appstore__notice-title">
-                        {done === "edit" ? "Resubmitted — pending review again" : "Submitted — now pending review"}
+                        {done === "edit" ? "Resubmission sent" : "Submission sent"}; not visible on chain yet
                     </p>
                     <p className="appstore__muted">
-                        Your listing is <strong>pending review</strong>: it is not live in the store yet.
+                        Once the chain includes it, your listing is <strong>pending review</strong>: it is not live in the store yet.
                         A curator will approve it, or reject it with a reason you'll see below — fixing
-                        and resubmitting after a rejection is free.
+                        and resubmitting after a rejection costs no listing fee.
                     </p>
                     <button type="button" className="appbtn appbtn--ghost" onClick={resetToRegister}>
                         Submit another app
@@ -251,8 +231,9 @@ export function AppSubmit() {
                 >
                     {mode.kind === "edit" && (
                         <div className="appsubmit__editnote" role="note">
-                            Fixing <code className="apppath">{mode.pkgPath}</code> — resubmitting is free
-                            and sends it back to review.{" "}
+                            Fixing <code className="apppath">{mode.pkgPath}</code> — resubmitting costs no
+                            listing fee, only the network fee and a small deposit for anything it adds, and sends
+                            it back to review.{" "}
                             <button type="button" className="appsubmit__linkbtn" onClick={resetToRegister}>
                                 Cancel
                             </button>
@@ -269,7 +250,9 @@ export function AppSubmit() {
                             <div className="appsubmit__fee" data-testid="appsubmit-fee" role="note">
                                 <strong>{formatGnot(fee)} GNOT listing fee → samcrew treasury.</strong>{" "}
                                 Deters spam and funds curation. Not refundable, including if rejected
-                                (fixing a rejected listing is free).
+                                (fixing a rejected listing costs no listing fee). The listing also pays a
+                                storage deposit of about {formatUgnot(registerStorageBytes(form) * STORAGE_PRICE_UGNOT)} that
+                                is not returned, and the transaction costs a network fee.
                             </div>
                         ) : (
                             <div className="appsubmit__fee appsubmit__fee--error" data-testid="appsubmit-fee-error" role="alert">
@@ -286,7 +269,7 @@ export function AppSubmit() {
                         {broadcast.isPending
                             ? "Waiting for wallet…"
                             : mode.kind === "edit"
-                                ? "Resubmit for review (free)"
+                                ? "Resubmit for review (no listing fee)"
                                 : feeOk
                                     ? `Submit for review · ${formatGnot(fee)} GNOT`
                                     : "Submit for review"}

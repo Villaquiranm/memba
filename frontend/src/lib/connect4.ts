@@ -103,7 +103,7 @@ export function buildCall(func: Connect4Func, args: string[], caller: string, se
 }
 
 function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number) {
-    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { retry: false, gasWanted: GAS_WANTED })
+    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { gasWanted: GAS_WANTED })
 }
 
 export const QUICKPLAY_FALLBACK_EVENT = "memba:quickplay-fallback"

@@ -10,7 +10,8 @@ const lib = vi.hoisted(() => ({
 }))
 vi.mock("../../lib/connect4", async (orig) => ({ ...(await orig<typeof import("../../lib/connect4")>()), ...lib }))
 
-vi.mock("../../lib/quickPlay", () => ({ hasLocalSession: () => true }))
+const qp = vi.hoisted(() => ({ hasLocalSession: vi.fn(() => true) }))
+vi.mock("../../lib/quickPlay", () => qp)
 
 import { GameView } from "./GameView"
 
@@ -24,7 +25,7 @@ const view = (me: string, game: Game, now = 1_000) => {
     return renderWithProviders(<GameView id={4} me={me} connected={me !== ""} onBack={vi.fn()} />)
 }
 
-beforeEach(() => Object.values(lib).forEach((f) => f.mockReset()))
+beforeEach(() => { Object.values(lib).forEach((f) => f.mockReset()); qp.hasLocalSession.mockReturnValue(true) })
 
 describe("GameView", () => {
     it("lets the player on turn drop a piece", async () => {
@@ -123,5 +124,41 @@ describe("GameView", () => {
             await vi.advanceTimersByTimeAsync(10_500)
             expect(await screen.findByRole("button", { name: "Sign this move with your wallet" })).toBeEnabled()
         } finally { vi.useRealTimers() }
+    })
+
+    const unknownErr = () => Object.assign(new Error("Outcome unknown"), { name: "OutcomeUnknownError" })
+
+    it("opens the wallet at once on an unknown outcome with under 15s left", async () => {
+        lib.play.mockRejectedValueOnce(unknownErr()).mockResolvedValueOnce({})
+        view("g1alice", { ...g, deadline: 1_010 })
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+    })
+
+    it("keeps the wallet button when the session disappears after the failure", async () => {
+        lib.play.mockRejectedValueOnce(new Error("rpc down"))
+        view("g1alice", g)
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        await screen.findByRole("button", { name: "Use wallet instead" })
+        qp.hasLocalSession.mockReturnValue(false)
+        fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }).then(() => screen.getByRole("button", { name: "Use wallet instead" })))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+    })
+
+    it("does not auto-route a RealmError with under 15s left, but offers the button", async () => {
+        lib.play.mockRejectedValueOnce(Object.assign(new Error("not your turn"), { name: "RealmError" }))
+        view("g1alice", { ...g, deadline: 1_010 })
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        expect(await screen.findByRole("button", { name: "Use wallet instead" })).toBeEnabled()
+        expect(lib.play).toHaveBeenCalledTimes(1)
+    })
+
+    it("clears the unknown-outcome watch as soon as the move count advances", async () => {
+        lib.play.mockRejectedValueOnce(unknownErr())
+        view("g1alice", g)
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        expect(await screen.findByText(/checking/i)).toBeInTheDocument()
+        lib.getGame.mockResolvedValue({ now: 1_000, game: { ...g, moves: 1, turn: 2, turnPlayer: "g1bob" } })
+        await waitFor(() => expect(screen.queryByText(/checking/i)).toBeNull(), { timeout: 5000 })
     })
 })

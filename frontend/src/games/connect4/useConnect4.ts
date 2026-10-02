@@ -31,6 +31,7 @@ export function useTx() {
     const [pending, setPending] = useState(false)
     const [err, setErr] = useState<{ message: string; name: string } | null>(null)
     const [walletFn, setWalletFn] = useState<(() => Promise<unknown>) | null>(null)
+    const [failures, setFailures] = useState(0)
     const run = async (fn: () => Promise<unknown>, wfn?: () => Promise<unknown>) => {
         if (pending) return false
         setPending(true); setErr(null); setWalletFn(null)
@@ -38,12 +39,13 @@ export function useTx() {
         catch (e) {
             setErr({ message: e instanceof Error ? e.message : String(e), name: e instanceof Error ? e.name : "" })
             setWalletFn(wfn ? () => wfn : null)
+            setFailures((n) => n + 1)
             return false
         }
         finally { setPending(false) }
     }
     return {
-        pending, run,
+        pending, run, failures,
         error: err?.message ?? null,
         errorName: err?.name ?? null,
         clearError: () => { setErr(null); setWalletFn(null) },

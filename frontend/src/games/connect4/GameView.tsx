@@ -29,9 +29,15 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const expired = g?.status === "playing" && left <= 0
     const key = isCreator && needsReveal && !expired && g ? revealKey(me, g.commitment) : null
     const autoRevealed = useRef(false)
+    // Time left is captured when a move fails: the immediate wallet route is decided then, once.
+    const leftRef = useRef(left)
+    useEffect(() => { leftRef.current = left })
+    const failLeft = useRef(Infinity)
     const quick = connected && hasLocalSession(me)
     // Quick play moves carry their wallet twin, so a failure can be re-sent via Adena.
-    const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>) => tx.run(fn, quick ? walletFn : undefined)
+    const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>) => tx.run(async () => {
+        try { return await fn() } catch (e) { failLeft.current = leftRef.current; throw e }
+    }, quick ? walletFn : undefined)
     const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k), () => reveal(me, g.id, k, { viaWallet: true })) : Promise.resolve(false))
 
     useEffect(() => {
@@ -41,33 +47,42 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key, g, me, tx])
 
-    // Outcome unknown: never retry blindly. Watch the chain for 10s, then offer the wallet
-    // only if it is still our turn and no move landed.
-    const { error, errorName, retryWithWallet, clearError } = tx
-    const unknown = quick && errorName === "OutcomeUnknownError"
+    const { error, errorName, retryWithWallet, clearError, failures } = tx
+    const handled = useRef(0)
+    const unknown = errorName === "OutcomeUnknownError"
+    useEffect(() => {
+        if (!retryWithWallet || handled.current === failures) return
+        handled.current = failures
+        // A RealmError would only fail again; an unknown outcome is safe to sign (the realm rejects a duplicate).
+        if (failLeft.current < 15 && errorName !== "RealmError") retryWithWallet()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot per failure; retryWithWallet changes identity every render
+    }, [failures])
+
+    // Outcome unknown with time to spare: watch the chain for 10s, then offer the wallet only
+    // if it is still our turn and no move landed.
     const latest = useRef({ moves: g?.moves, turnPlayer: g?.turnPlayer })
     useEffect(() => { latest.current = { moves: g?.moves, turnPlayer: g?.turnPlayer } })
+    const movesAtFail = useRef<number | undefined>(undefined)
     const [watched, setWatched] = useState(false)
     useEffect(() => {
         if (!unknown) return
-        const movesAtFail = latest.current.moves
+        movesAtFail.current = latest.current.moves
         const t = setTimeout(() => {
-            if (latest.current.moves === movesAtFail && latest.current.turnPlayer === me) setWatched(true)
+            if (latest.current.turnPlayer === me && latest.current.moves === movesAtFail.current) setWatched(true)
             else clearError()
         }, 10_000)
         return () => { clearTimeout(t); setWatched(false) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [unknown, error, me])
-
-    // Quick play failed with the move clock nearly out: no time for a prompt, go to the wallet.
-    const urgent = left < 15
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only per failure; clearError is a fresh closure each render
+    }, [unknown, failures, me])
+    const moves = g?.moves
     useEffect(() => {
-        if (quick && urgent && retryWithWallet && !unknown) retryWithWallet()
-    }, [quick, urgent, retryWithWallet, unknown])
+        if (unknown && failLeft.current >= 15 && moves !== movesAtFail.current) clearError()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the move count only
+    }, [moves])
     const txError = unknown && !watched ? "Outcome unknown — checking…"
         : unknown ? "Outcome unknown — your move may not have landed."
         : error
-    const txAction = quick && retryWithWallet && (!unknown || watched)
+    const txAction = retryWithWallet && (!unknown || watched)
         ? { label: unknown ? "Sign this move with your wallet" : "Use wallet instead", onClick: retryWithWallet }
         : undefined
 

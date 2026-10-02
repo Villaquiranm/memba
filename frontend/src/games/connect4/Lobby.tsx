@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 import { accept, cancel, getActive, offer, type Game } from "../../lib/connect4"
-import { ErrorToast } from "../../components/ui/ErrorToast"
-import { fmtSeconds, formatGnot, useActive, useChainNow, useTx } from "./useConnect4"
+import { Card, Gate, Loading, Pill, Table, Toggle, type Column } from "../../os/kit"
+import { TxError } from "./TxError"
+import { fmtSeconds, formatGnot, shortAddr, useActive, useChainNow, useTx } from "./useConnect4"
+import "./connect4.css"
 
 // The realm's default fee, used for the pre-sign estimate only; per-game results use g.fee.
 const FEE_UGNOT = 100_000
 
 export function Lobby({ me, connected, onOpen }: { me: string; connected: boolean; onOpen: (id: number) => void }) {
-    const { data, dataUpdatedAt } = useActive()
+    const { data, dataUpdatedAt, isLoading } = useActive()
     const now = useChainNow(data?.now, dataUpdatedAt)
     const tx = useTx()
     const alive = useRef(true)
@@ -53,49 +55,61 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
 
     const canAccept = (g: Game) => connected && g.creator !== me && (g.opponent === "" || g.opponent === me) && now < g.expiresAt
     const canCancel = (g: Game) => connected && (g.creator === me || now >= g.expiresAt)
+    const who = (a: string) => (a === me ? "you" : shortAddr(a))
 
-    return <div className="os-stack">
-        <div>
-            <h2>Connect 4</h2>
-            <p className="os-sub">Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
+    const offerColumns: Column<Game>[] = [
+        { key: "game", label: "Game", render: (g) => <span className="os-row">#{g.id}{g.opponent && <Pill>private</Pill>}</span> },
+        { key: "stake", label: "Stake", align: "end", render: (g) => formatGnot(g.stake), sort: (a, b) => a.stake - b.stake },
+        { key: "creator", label: "Creator", render: (g) => who(g.creator) },
+        { key: "expires", label: "Expires", render: (g) => (now >= g.expiresAt ? <Pill tone="warn">expired</Pill> : fmtSeconds(g.expiresAt - now)) },
+        {
+            key: "actions", label: "", align: "end", render: (g) => <span className="os-row c4-actions">
+                <button type="button" className="os-btn" disabled={tx.pending || !canAccept(g)} onClick={() => tx.run(async () => { await accept(me, g); onOpen(g.id) })}>Accept</button>
+                {canCancel(g) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => tx.run(() => cancel(me, g.id))}>Cancel</button>}
+            </span>,
+        },
+    ]
+    const liveColumns: Column<Game>[] = [
+        { key: "game", label: "Game", render: (g) => <span className="os-row">#{g.id}{(g.creator === me || g.acceptor === me) && <Pill tone="ok">yours</Pill>}</span> },
+        { key: "pot", label: "Pot", align: "end", render: (g) => formatGnot(2 * g.stake) },
+        { key: "turn", label: "Turn", render: (g) => (g.turn === 0 ? <Pill tone="warn">awaiting reveal</Pill> : g.turnPlayer === me ? <Pill tone="ok">your move</Pill> : shortAddr(g.turnPlayer)) },
+    ]
+
+    return <div className="os-stack c4">
+        <div className="os-row c4-head">
+            <div className="os-grow">
+                <h2>Connect 4</h2>
+                <p className="os-sub">Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
+            </div>
+            {connected && <span className="os-row"><span id="c4-mine" className="os-sub">Only my games</span><Toggle checked={mineOnly} onChange={setMineOnly} labelledBy="c4-mine" /></span>}
         </div>
-        <ErrorToast message={tx.error} onDismiss={tx.clearError} />
-        {!connected && <div className="os-note" role="status">Connect your wallet to play. You can watch games without one.</div>}
+        <TxError message={tx.error} onDismiss={tx.clearError} />
+        {!connected && <Gate text="Connect your wallet to play. You can watch games without one." />}
 
-        {connected && <label><input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> Only my games</label>}
+        {isLoading ? <Loading label="Loading games…" /> : <>
+            <section className="os-stack os-tight">
+                <h3>Open offers</h3>
+                <Table columns={offerColumns} rows={offers} rowKey={(g) => String(g.id)} empty="No open offers." />
+            </section>
+            <section className="os-stack os-tight">
+                <h3>Live games</h3>
+                <Table columns={liveColumns} rows={live} rowKey={(g) => String(g.id)} empty="No live games."
+                    onRowClick={(g) => onOpen(g.id)} rowLabel={(g) => `Open game #${g.id}`} />
+            </section>
+        </>}
 
-        <h3>Open offers</h3>
-        <table><thead><tr><th>Game</th><th>Stake</th><th>Creator</th><th>Expires</th><th /></tr></thead><tbody>
-            {offers.length === 0 && <tr><td colSpan={5}>No open offers.</td></tr>}
-            {offers.map((g) => <tr key={g.id} aria-label={`#${g.id}`}>
-                <td>#{g.id}{g.opponent && " · private"}</td>
-                <td>{formatGnot(g.stake)}</td>
-                <td>{g.creator === me ? "you" : g.creator}</td>
-                <td>{now >= g.expiresAt ? "expired" : fmtSeconds(g.expiresAt - now)}</td>
-                <td>
-                    <button type="button" disabled={tx.pending || !canAccept(g)} onClick={() => tx.run(async () => { await accept(me, g); onOpen(g.id) })}>Accept</button>
-                    {canCancel(g) && <button type="button" disabled={tx.pending} onClick={() => tx.run(() => cancel(me, g.id))}>Cancel</button>}
-                </td>
-            </tr>)}
-        </tbody></table>
-
-        <h3>Live games</h3>
-        <table><thead><tr><th>Game</th><th>Pot</th><th>Turn</th></tr></thead><tbody>
-            {live.length === 0 && <tr><td colSpan={3}>No live games.</td></tr>}
-            {live.map((g) => <tr key={g.id} aria-label={`#${g.id}`} onClick={() => onOpen(g.id)} style={{ cursor: "pointer" }}>
-                <td><button type="button" className="os-link">#{g.id}</button>{(g.creator === me || g.acceptor === me) && " · yours"}</td>
-                <td>{formatGnot(2 * g.stake)}</td>
-                <td>{g.turn === 0 ? "awaiting reveal" : g.turnPlayer === me ? "you" : g.turnPlayer}</td>
-            </tr>)}
-        </tbody></table>
-
-        {connected && <form className="os-stack" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
-            <h3>Post an offer</h3>
-            <label>Stake (GNOT) <input type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} /></label>
-            <label>Valid for (minutes) <input type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} /></label>
-            <label>Opponent address (optional) <input value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1…" /></label>
-            <p className="os-sub">Winner receives {formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}. After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</p>
-            <button type="submit" disabled={!formOk || tx.pending}>Post offer</button>
-        </form>}
+        {connected && <Card>
+            <form className="os-stack os-tight c4-form os-grow" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
+                <h3>Post an offer</h3>
+                <div className="c4-fields">
+                    <label>Stake (GNOT)<input type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} /></label>
+                    <label>Valid for (minutes)<input type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} /></label>
+                    <label>Opponent address (optional)<input value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1…" /></label>
+                </div>
+                <p className="os-sub">Winner receives <b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b>.</p>
+                <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
+                <div><button type="submit" className="os-btn" disabled={!formOk || tx.pending}>Post offer</button></div>
+            </form>
+        </Card>}
     </div>
 }

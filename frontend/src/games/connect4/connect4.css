@@ -8,3 +8,22 @@
 .c4-last { box-shadow: 0 0 0 3px #fff inset; }
 .c4-win { box-shadow: 0 0 0 4px #30a46c; }
 .c4-last.c4-win { box-shadow: 0 0 0 3px #fff inset, 0 0 0 4px #30a46c; }
+
+/* Lobby and game layout (OS tokens; falls back to plain values outside Memba OS). */
+.c4 h2, .c4 h3 { margin: 0; }
+.c4 h2 { font-size: 18px; }
+.c4 h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--os-mut, inherit); }
+.c4-head { align-items: flex-start; }
+.c4-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.c4-form { display: grid; gap: 10px; }
+.c4-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.c4-fields label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--os-mut, inherit); }
+.c4-play { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.c4-play .c4-board { flex: 1 1 280px; }
+.c4-players { display: grid; grid-template-columns: auto auto; gap: 6px 14px; margin: 0; font-size: 12.5px; }
+.c4-players dt { color: var(--os-mut, inherit); display: flex; align-items: center; gap: 6px; }
+.c4-players dd { margin: 0; font-variant-numeric: tabular-nums; }
+.c4-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+@container os-window (max-width: 520px) {
+  .c4-play { flex-direction: column; }
+}

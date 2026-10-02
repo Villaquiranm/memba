@@ -41,3 +41,5 @@ export function useTx() {
 
 export const formatGnot = (ugnot: number) => `${ugnot / 1_000_000} GNOT`
 export const fmtSeconds = (s: number) => (s <= 0 ? "0s" : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`)
+
+export const shortAddr = (a: string) => (a.length > 14 ? `${a.slice(0, 8)}…${a.slice(-4)}` : a)

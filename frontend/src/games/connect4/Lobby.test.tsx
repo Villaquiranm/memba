@@ -84,8 +84,10 @@ describe("Lobby", () => {
         lib.getActive.mockResolvedValue({ now: 1_000, games: [{ ...base, status: "playing", acceptor: "g1bob", turn: 1, turnPlayer: "g1alice" }] })
         const onOpen = vi.fn()
         renderWithProviders(<Lobby me="g1bob" connected onOpen={onOpen} />)
-        fireEvent.click(await screen.findByRole("button", { name: "#1" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Open game #1" }))
         expect(onOpen).toHaveBeenCalledTimes(1)
+        fireEvent.click(screen.getByRole("row", { name: /#1/ }).cells[1])
+        expect(onOpen).toHaveBeenCalledTimes(2) // a click elsewhere in the row opens it too
     })
 
     it("opens a game the creator must reveal, once; not for the acceptor", async () => {

@@ -37,11 +37,30 @@ describe("sessionTx", () => {
         expect(toB64(bytes)).toBe(FIXTURE.txB64)
     })
 
-    it("produces a low-S signature that verifies", () => {
+    it("signs with the module's own key: signature verifies and is low-S", () => {
         const key = newSessionKey()
-        const payload = signPayload(base)
-        const sig = secp256k1.sign(sha256(new TextEncoder().encode(payload)), key.priv, { prehash: false })
-        expect(secp256k1.verify(sig, sha256(new TextEncoder().encode(payload)), key.pub, { prehash: false, lowS: true })).toBe(true)
+        const tx = signSessionTx({ ...base, key })
+        // walk protobuf: returns the bytes of field `want` (length-delimited) in buf
+        const field = (buf: Uint8Array, want: number): Uint8Array => {
+            for (let i = 0; i < buf.length;) {
+                const tag = buf[i++]
+                let len = 0, shift = 0
+                for (;;) { const c = buf[i++]; len |= (c & 127) << shift; if (c < 128) break; shift += 7 }
+                if (tag === want * 8 + 2) return buf.slice(i, i + len)
+                i += len
+            }
+            throw new Error("field not found")
+        }
+        const sig = field(field(tx, 3), 2)
+        expect(sig.length).toBe(64)
+        const digest = sha256(new TextEncoder().encode(signPayload(base)))
+        expect(secp256k1.verify(sig, digest, key.pub, { prehash: false, lowS: true })).toBe(true)
+        const s = BigInt("0x" + [...sig.slice(32)].map((b) => b.toString(16).padStart(2, "0")).join(""))
+        expect(s <= secp256k1.Point.CURVE().n / 2n).toBe(true)
+    })
+
+    it("refuses a zero fee (signed and carried fee would disagree)", () => {
+        expect(() => signSessionTx({ ...base, key: newSessionKey(), feeUgnot: 0 })).toThrow()
     })
 
     it("refuses inputs the payload encoder can't render safely", () => {

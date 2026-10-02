@@ -75,6 +75,8 @@ function encodeMsgCall(m: CallMsg): number[] {
 }
 
 export function signSessionTx(p: { key: SessionKey; chainId: string; accountNumber: string; sequence: string; gas: number; feeUgnot: number; memo: string; msg: CallMsg }): Uint8Array {
+    // signPayload renders 0 as an empty amount list but the tx would carry "0ugnot"
+    if (p.feeUgnot <= 0) throw new Error("sessionTx: session txs need a positive fee")
     const payload = signPayload(p)
     const sig = secp256k1.sign(sha256(enc.encode(payload)), p.key.priv, { prehash: false })
     const zigzagGas = (BigInt(p.gas) << 1n) ^ (BigInt(p.gas) >> 63n)

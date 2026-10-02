@@ -76,10 +76,11 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     ]
 
     return <div className="os-stack c4">
-        <div className="os-row c4-head">
+        <div className="c4-hero">
+            <div className="c4-hero-discs" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
             <div className="os-grow">
                 <h2>Connect 4</h2>
-                <p className="os-sub">Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
+                <p>Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
             </div>
             {connected && <span className="os-row"><span id="c4-mine" className="os-sub">Only my games</span><Toggle checked={mineOnly} onChange={setMineOnly} labelledBy="c4-mine" /></span>}
         </div>
@@ -108,7 +109,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                 </div>
                 <p className="os-sub">Winner receives <b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b>.</p>
                 <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
-                <div><button type="submit" className="os-btn" disabled={!formOk || tx.pending}>Post offer</button></div>
+                <div><button type="submit" className="os-btn c4-cta" disabled={!formOk || tx.pending}>Post offer</button></div>
             </form>
         </Card>}
     </div>

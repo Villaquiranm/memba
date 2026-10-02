@@ -43,8 +43,11 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     }
 
     const myTurn = connected && g.status === "playing" && g.turnPlayer === me && !expired
-    const clock = expired ? "clock ran out" : `${fmtSeconds(left)} left`
     const won = g.status === "won" && g.winner === me
+    const lost = g.status === "won" && isPlayer && g.winner !== me
+    const piece = !connected ? undefined : g.creator === me ? "1" : g.acceptor === me ? "2" : undefined
+    const live = g.status === "playing" && g.turn !== 0
+    const turnText = myTurn ? "Your move!" : isPlayer ? "Opponent's move" : `${shortAddr(g.turnPlayer)}'s move`
 
     return <div className="os-stack c4">
         <div className="os-row c4-head">
@@ -55,29 +58,50 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         </div>
         <TxError message={tx.error} onDismiss={tx.clearError} />
 
+        {!["open", "playing"].includes(g.status) && <div className="c4-banner" role="status" data-tone={won ? "win" : lost ? "lose" : undefined}>
+            <span>{result(g, me)}{won && <small>The pot is on its way to your wallet.</small>}</span>
+        </div>}
         {g.status === "open" && <div className="os-note" role="status">Waiting for an opponent · offer {now >= g.expiresAt ? "expired" : `expires in ${fmtSeconds(g.expiresAt - now)}`}</div>}
         {needsReveal && <div className={expired ? "os-note os-warn" : "os-note"} role="status">Waiting for the creator to reveal · {expired ? "reveal clock ran out" : `${fmtSeconds(left)} left`}</div>}
-        {g.status === "playing" && g.turn !== 0 && <div className={myTurn ? "os-note os-ok" : expired ? "os-note os-warn" : "os-note"} role="status">
-            {myTurn ? "Your move" : isPlayer ? "Opponent's move" : `${shortAddr(g.turnPlayer)}'s move`} · {clock}
-        </div>}
         {isCreator && needsReveal && !expired && !key && <div className="os-note os-err" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
-        {!["open", "playing"].includes(g.status) && <div className={won ? "os-note os-ok" : "os-note"} role="status">{result(g, me)}</div>}
 
-        <div className="c4-play">
-            <Board game={g} canPlay={myTurn && !tx.pending} onPlay={(c) => void tx.run(() => play(me, g.id, c))} />
-            <dl className="c4-players">
-                <dt><span className="c4-dot c4-p1" /> Creator</dt><dd>{g.creator === me ? "you" : shortAddr(g.creator)}</dd>
-                <dt><span className="c4-dot c4-p2" /> Acceptor</dt><dd>{g.acceptor ? (g.acceptor === me ? "you" : shortAddr(g.acceptor)) : "—"}</dd>
-                <dt>Stake each</dt><dd>{formatGnot(g.stake)}</dd>
-                <dt>Moves</dt><dd>{g.moves}</dd>
-            </dl>
+        <div className="c4-arena">
+            <Board game={g} piece={piece} canPlay={myTurn && !tx.pending} onPlay={(c) => void tx.run(() => play(me, g.id, c))} />
+            <div className="c4-side">
+                {live && <div className="c4-turn" role="status" data-mine={myTurn}>{turnText}<small>{expired ? "clock ran out" : `${fmtSeconds(left)} left`}</small></div>}
+                <PlayerCard colour="red" label="Creator" addr={g.creator} me={me} active={live && g.turn === 1} left={left} />
+                <PlayerCard colour="yellow" label="Acceptor" addr={g.acceptor} me={me} active={live && g.turn === 2} left={left} />
+                <dl className="c4-stats">
+                    <dt>Stake each</dt><dd>{formatGnot(g.stake)}</dd>
+                    <dt>Winner gets</dt><dd>{formatGnot(2 * g.stake - g.fee)}</dd>
+                    <dt>Moves</dt><dd>{g.moves}</dd>
+                </dl>
+                <div className="os-row">
+                    {isCreator && needsReveal && key && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void tx.run(() => reveal(me, g.id, key))}>Reveal</button>}
+                    {expired && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void tx.run(() => claimTimeout(me, g.id))}>Claim timeout</button>}
+                    {connected && g.status === "open" && (isCreator || now >= g.expiresAt) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => cancel(me, g.id))}>Cancel</button>}
+                    {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => resign(me, g.id))}>Resign</button>}
+                </div>
+            </div>
         </div>
+    </div>
+}
 
-        <div className="os-row">
-            {isCreator && needsReveal && key && <button type="button" className="os-btn" disabled={tx.pending} onClick={() => void tx.run(() => reveal(me, g.id, key))}>Reveal</button>}
-            {expired && <button type="button" className="os-btn" disabled={tx.pending} onClick={() => void tx.run(() => claimTimeout(me, g.id))}>Claim timeout</button>}
-            {connected && g.status === "open" && (isCreator || now >= g.expiresAt) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => cancel(me, g.id))}>Cancel</button>}
-            {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => resign(me, g.id))}>Resign</button>}
-        </div>
+const MOVE_SECONDS = 90
+const RING = 2 * Math.PI * 18
+
+function PlayerCard({ colour, label, addr, me, active, left }: { colour: "red" | "yellow"; label: string; addr: string; me: string; active: boolean; left: number }) {
+    const secs = Math.max(0, Math.min(MOVE_SECONDS, left))
+    const level = secs <= 15 ? "danger" : secs <= 30 ? "warn" : "ok"
+    return <div className={`c4-player c4-${colour}-turn`} data-active={active}>
+        <span className={`c4-player-disc c4-${colour}`} aria-hidden="true" />
+        <span className="os-grow">
+            <b>{addr ? (addr === me ? "You" : shortAddr(addr)) : "Waiting…"}</b>
+            <small>{label}{active ? " · on turn" : ""}</small>
+        </span>
+        {active && <span className="c4-clock" data-level={level} aria-hidden="true">
+            <svg viewBox="0 0 44 44"><circle className="c4-clock-track" cx="22" cy="22" r="18" /><circle className="c4-clock-fill" cx="22" cy="22" r="18" strokeDasharray={RING} strokeDashoffset={RING * (1 - secs / MOVE_SECONDS)} /></svg>
+            <span>{secs}</span>
+        </span>}
     </div>
 }

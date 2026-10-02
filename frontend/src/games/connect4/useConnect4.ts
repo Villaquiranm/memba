@@ -24,19 +24,32 @@ export function useChainNow(now: number | undefined, fetchedAt: number): number 
     return now === undefined ? 0 : now + Math.max(0, Math.floor((wall - fetchedAt) / 1_000))
 }
 
-/** One tx at a time; refreshes every connect4 query after success. */
+/** One tx at a time; refreshes every connect4 query after success. `walletFn` is the
+ * same call routed through the wallet, offered via retryWithWallet if `fn` fails. */
 export function useTx() {
     const client = useQueryClient()
     const [pending, setPending] = useState(false)
-    const [error, setError] = useState<string | null>(null)
-    const run = async (fn: () => Promise<unknown>) => {
+    const [err, setErr] = useState<{ message: string; name: string } | null>(null)
+    const [walletFn, setWalletFn] = useState<(() => Promise<unknown>) | null>(null)
+    const run = async (fn: () => Promise<unknown>, wfn?: () => Promise<unknown>) => {
         if (pending) return false
-        setPending(true); setError(null)
+        setPending(true); setErr(null); setWalletFn(null)
         try { await fn(); await client.invalidateQueries({ queryKey: ["connect4"] }); return true }
-        catch (e) { setError(e instanceof Error ? e.message : String(e)); return false }
+        catch (e) {
+            setErr({ message: e instanceof Error ? e.message : String(e), name: e instanceof Error ? e.name : "" })
+            setWalletFn(wfn ? () => wfn : null)
+            return false
+        }
         finally { setPending(false) }
     }
-    return { pending, error, clearError: () => setError(null), run }
+    return {
+        pending, run,
+        error: err?.message ?? null,
+        errorName: err?.name ?? null,
+        clearError: () => { setErr(null); setWalletFn(null) },
+        retryWithWallet: walletFn ? () => void run(walletFn) : null,
+        lastViaQuickPlay: walletFn !== null,
+    }
 }
 
 export const formatGnot = (ugnot: number) => `${ugnot / 1_000_000} GNOT`

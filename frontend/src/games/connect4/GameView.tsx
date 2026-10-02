@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { cancel, claimTimeout, play, resign, reveal, revealKey, type Game } from "../../lib/connect4"
+import { hasLocalSession } from "../../lib/quickPlay"
 import { Empty, Loading, Pill, type PillTone } from "../../os/kit"
 import { Board } from "./Board"
 import { TxError } from "./TxError"
@@ -28,12 +29,47 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const expired = g?.status === "playing" && left <= 0
     const key = isCreator && needsReveal && !expired && g ? revealKey(me, g.commitment) : null
     const autoRevealed = useRef(false)
+    const quick = connected && hasLocalSession(me)
+    // Quick play moves carry their wallet twin, so a failure can be re-sent via Adena.
+    const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>) => tx.run(fn, quick ? walletFn : undefined)
+    const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k), () => reveal(me, g.id, k, { viaWallet: true })) : Promise.resolve(false))
 
     useEffect(() => {
         if (!key || !g || autoRevealed.current) return
         autoRevealed.current = true
-        void tx.run(() => reveal(me, g.id, key))
+        void doReveal(key)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key, g, me, tx])
+
+    // Outcome unknown: never retry blindly. Watch the chain for 10s, then offer the wallet
+    // only if it is still our turn and no move landed.
+    const { error, errorName, retryWithWallet, clearError } = tx
+    const unknown = quick && errorName === "OutcomeUnknownError"
+    const latest = useRef({ moves: g?.moves, turnPlayer: g?.turnPlayer })
+    useEffect(() => { latest.current = { moves: g?.moves, turnPlayer: g?.turnPlayer } })
+    const [watched, setWatched] = useState(false)
+    useEffect(() => {
+        if (!unknown) return
+        const movesAtFail = latest.current.moves
+        const t = setTimeout(() => {
+            if (latest.current.moves === movesAtFail && latest.current.turnPlayer === me) setWatched(true)
+            else clearError()
+        }, 10_000)
+        return () => { clearTimeout(t); setWatched(false) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [unknown, error, me])
+
+    // Quick play failed with the move clock nearly out: no time for a prompt, go to the wallet.
+    const urgent = left < 15
+    useEffect(() => {
+        if (quick && urgent && retryWithWallet && !unknown) retryWithWallet()
+    }, [quick, urgent, retryWithWallet, unknown])
+    const txError = unknown && !watched ? "Outcome unknown — checking…"
+        : unknown ? "Outcome unknown — your move may not have landed."
+        : error
+    const txAction = quick && retryWithWallet && (!unknown || watched)
+        ? { label: unknown ? "Sign this move with your wallet" : "Use wallet instead", onClick: retryWithWallet }
+        : undefined
 
     const back = <button type="button" className="os-btn os-quiet" onClick={onBack}>← Lobby</button>
     if (isLoading) return <Loading label={`Loading game #${id}…`} />
@@ -56,7 +92,7 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
             <Pill tone={STATUS_TONE[g.status]}>{g.status}</Pill>
             <span className="os-sub">pot {formatGnot(2 * g.stake)}</span>
         </div>
-        <TxError message={tx.error} onDismiss={tx.clearError} />
+        <TxError message={txError} onDismiss={tx.clearError} action={txAction} />
 
         {!["open", "playing"].includes(g.status) && <div className="c4-banner" role="status" data-tone={won ? "win" : lost ? "lose" : undefined}>
             <span>{result(g, me)}{won && <small>The pot is on its way to your wallet.</small>}</span>
@@ -66,9 +102,9 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         {isCreator && needsReveal && !expired && !key && <div className="os-note os-err" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
 
         <div className="c4-arena">
-            <Board game={g} piece={piece} canPlay={myTurn && !tx.pending} onPlay={(c) => void tx.run(() => play(me, g.id, c))} />
+            <Board game={g} piece={piece} canPlay={myTurn && !tx.pending} onPlay={(c) => void run(() => play(me, g.id, c), () => play(me, g.id, c, { viaWallet: true }))} />
             <div className="c4-side">
-                {live && <div className="c4-turn" role="status" data-mine={myTurn}>{turnText}<small>{expired ? "clock ran out" : `${fmtSeconds(left)} left`}</small></div>}
+                {live && <div className="c4-turn" role="status" data-mine={myTurn}>{quick && <span aria-label="Signed by Quick play" title="Signed by Quick play">⚡ </span>}{turnText}<small>{expired ? "clock ran out" : `${fmtSeconds(left)} left`}</small></div>}
                 <PlayerCard colour="red" label="Creator" addr={g.creator} me={me} active={live && g.turn === 1} left={left} />
                 <PlayerCard colour="yellow" label="Acceptor" addr={g.acceptor} me={me} active={live && g.turn === 2} left={left} />
                 <dl className="c4-stats">
@@ -77,10 +113,10 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
                     <dt>Moves</dt><dd>{g.moves}</dd>
                 </dl>
                 <div className="os-row">
-                    {isCreator && needsReveal && key && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void tx.run(() => reveal(me, g.id, key))}>Reveal</button>}
-                    {expired && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void tx.run(() => claimTimeout(me, g.id))}>Claim timeout</button>}
+                    {isCreator && needsReveal && key && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void doReveal(key)}>Reveal</button>}
+                    {expired && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void run(() => claimTimeout(me, g.id), () => claimTimeout(me, g.id, { viaWallet: true }))}>Claim timeout</button>}
                     {connected && g.status === "open" && (isCreator || now >= g.expiresAt) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => cancel(me, g.id))}>Cancel</button>}
-                    {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => resign(me, g.id))}>Resign</button>}
+                    {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void run(() => resign(me, g.id), () => resign(me, g.id, { viaWallet: true }))}>Resign</button>}
                 </div>
             </div>
         </div>

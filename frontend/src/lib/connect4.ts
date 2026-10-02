@@ -9,6 +9,7 @@
 import { queryEval, parseQevalJSON } from "./dao/shared"
 import { ACTIVE_NETWORK_KEY, GNO_RPC_URL, connect4PathFor } from "./config"
 import { doContractBroadcast, type AminoMsg } from "./grc20"
+import { hasLocalSession, quickPlayCall, QuickPlayUnavailable } from "./quickPlay"
 
 export type Status = "open" | "playing" | "won" | "draw" | "void" | "cancelled"
 
@@ -105,6 +106,19 @@ function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: 
     return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { retry: false, gasWanted: GAS_WANTED })
 }
 
+type MoveFunc = "Reveal" | "Play" | "Resign" | "ClaimTimeout"
+export interface MoveOptions { viaWallet?: boolean }
+
+// Coin-free moves sign through the Quick play session when one is active; if the
+// session can't be used, the same call goes to Adena at once.
+async function move(func: MoveFunc, args: string[], caller: string, opts?: MoveOptions) {
+    if (!opts?.viaWallet && hasLocalSession(caller)) {
+        try { return await quickPlayCall(caller, func, args) }
+        catch (e) { if (!(e instanceof QuickPlayUnavailable)) throw e }
+    }
+    return submit(func, args, caller)
+}
+
 function assertIndex(n: number) {
     if (!isIndex(n)) throw new Error("Invalid game id")
 }
@@ -157,17 +171,17 @@ export async function offer(caller: string, o: { stakeUgnot: number; validFor: n
 
 export const accept = (caller: string, g: Game) => submit("Accept", [String(g.id)], caller, g.stake)
 
-export async function reveal(caller: string, id: number, passphrase: string) {
+export async function reveal(caller: string, id: number, passphrase: string, opts?: MoveOptions) {
     assertIndex(id)
-    return submit("Reveal", [String(id), passphrase], caller)
+    return move("Reveal", [String(id), passphrase], caller, opts)
 }
 
-export async function play(caller: string, id: number, column: number) {
+export async function play(caller: string, id: number, column: number, opts?: MoveOptions) {
     assertIndex(id)
     if (!Number.isInteger(column) || column < 1 || column > 7) throw new Error("Column must be 1-7")
-    return submit("Play", [String(id), String(column)], caller)
+    return move("Play", [String(id), String(column)], caller, opts)
 }
 
-export async function claimTimeout(caller: string, id: number) { assertIndex(id); return submit("ClaimTimeout", [String(id)], caller) }
-export async function resign(caller: string, id: number) { assertIndex(id); return submit("Resign", [String(id)], caller) }
+export async function claimTimeout(caller: string, id: number, opts?: MoveOptions) { assertIndex(id); return move("ClaimTimeout", [String(id)], caller, opts) }
+export async function resign(caller: string, id: number, opts?: MoveOptions) { assertIndex(id); return move("Resign", [String(id)], caller, opts) }
 export async function cancel(caller: string, id: number) { assertIndex(id); return submit("Cancel", [String(id)], caller) }

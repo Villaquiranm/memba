@@ -4,13 +4,16 @@ const qeval = vi.hoisted(() => vi.fn())
 const broadcast = vi.hoisted(() => vi.fn(async () => ({ hash: "h" })))
 vi.mock("./dao/shared", async (orig) => ({ ...(await orig<typeof import("./dao/shared")>()), queryEval: qeval }))
 vi.mock("./grc20", () => ({ doContractBroadcast: broadcast }))
+const qp = vi.hoisted(() => ({ hasLocalSession: vi.fn(), quickPlayCall: vi.fn() }))
+vi.mock("./quickPlay", async (orig) => ({ ...(await orig<typeof import("./quickPlay")>()), ...qp }))
 vi.mock("./config", async (orig) => ({
     ...(await orig<typeof import("./config")>()),
     connect4PathFor: () => "gno.land/r/test/c4",
     GNO_RPC_URL: "https://rpc.test",
 }))
 
-import { accept, buildCall, getActive, getGame, isGame, offer, play, revealKey, sha256Hex, type Game } from "./connect4"
+import { QuickPlayUnavailable } from "./quickPlay"
+import { accept, buildCall, cancel, getActive, getGame, isGame, offer, play, revealKey, sha256Hex, type Game } from "./connect4"
 
 export const sample: Game = {
     id: 3, creator: "g1creator", opponent: "", acceptor: "g1acceptor", stake: 2_000_000, fee: 100_000,
@@ -19,7 +22,7 @@ export const sample: Game = {
 }
 const wrap = (v: unknown) => `(${JSON.stringify(JSON.stringify(v))} string)`
 
-beforeEach(() => qeval.mockReset())
+beforeEach(() => { qeval.mockReset(); broadcast.mockClear(); qp.hasLocalSession.mockReset(); qp.quickPlayCall.mockReset() })
 
 describe("isGame", () => {
     it("accepts a valid game", () => expect(isGame(sample)).toBe(true))
@@ -117,5 +120,42 @@ describe("writes", () => {
 
     it("sha256Hex matches a known vector", async () => {
         expect(await sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    })
+})
+
+describe("Quick play routing", () => {
+    it("sends coin-free moves through Quick play when active, Adena otherwise", async () => {
+        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayCall.mockResolvedValue({ hash: "H" })
+        await play("g1me", 3, 4)
+        expect(qp.quickPlayCall).toHaveBeenCalledWith("g1me", "Play", ["3", "4"])
+        expect(broadcast).not.toHaveBeenCalled()
+        qp.hasLocalSession.mockReturnValue(false)
+        await play("g1me", 3, 5)
+        expect(broadcast).toHaveBeenCalledTimes(1)
+    })
+    it("never routes stakes or Cancel through Quick play", async () => {
+        qp.hasLocalSession.mockReturnValue(true)
+        await accept("g1me", sample)
+        await cancel("g1me", 3)
+        expect(qp.quickPlayCall).not.toHaveBeenCalled()
+    })
+    it("falls back to Adena at once when the session is unavailable", async () => {
+        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayCall.mockRejectedValue(new QuickPlayUnavailable("ended", "x"))
+        await play("g1me", 3, 4)
+        expect(broadcast).toHaveBeenCalledTimes(1)
+    })
+    it("propagates other errors", async () => {
+        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayCall.mockRejectedValue(new Error("not your turn"))
+        await expect(play("g1me", 3, 4)).rejects.toThrow("not your turn")
+        expect(broadcast).not.toHaveBeenCalled()
+    })
+    it("viaWallet forces Adena", async () => {
+        qp.hasLocalSession.mockReturnValue(true)
+        await play("g1me", 3, 4, { viaWallet: true })
+        expect(qp.quickPlayCall).not.toHaveBeenCalled()
+        expect(broadcast).toHaveBeenCalledTimes(1)
     })
 })

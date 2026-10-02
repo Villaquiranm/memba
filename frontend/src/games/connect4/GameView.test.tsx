@@ -10,6 +10,8 @@ const lib = vi.hoisted(() => ({
 }))
 vi.mock("../../lib/connect4", async (orig) => ({ ...(await orig<typeof import("../../lib/connect4")>()), ...lib }))
 
+vi.mock("../../lib/quickPlay", () => ({ hasLocalSession: () => true }))
+
 import { GameView } from "./GameView"
 
 const g: Game = {
@@ -94,5 +96,32 @@ describe("GameView", () => {
         expect(lib.getGame).toHaveBeenCalledTimes(2)
         expect(screen.getByText(/Your move/)).toBeInTheDocument()
         expect(screen.queryByText(/not found/)).toBeNull()
+    })
+
+    it("offers 'Use wallet instead' after a Quick play move fails, which signs via the wallet", async () => {
+        lib.play.mockRejectedValueOnce(new Error("rpc down")).mockResolvedValueOnce({})
+        view("g1alice", g)
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        fireEvent.click(await screen.findByRole("button", { name: "Use wallet instead" }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+    })
+
+    it("goes straight to the wallet when a Quick play move fails with under 15s left", async () => {
+        lib.play.mockRejectedValueOnce(new Error("rpc down")).mockResolvedValueOnce({})
+        view("g1alice", { ...g, deadline: 1_010 })
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+    })
+
+    it("after an unknown outcome, offers the wallet only if it's still our turn", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true })
+        try {
+            lib.play.mockRejectedValueOnce(Object.assign(new Error("Outcome unknown"), { name: "OutcomeUnknownError" }))
+            view("g1alice", g)
+            fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+            expect(await screen.findByText(/checking/i)).toBeInTheDocument()
+            await vi.advanceTimersByTimeAsync(10_500)
+            expect(await screen.findByRole("button", { name: "Sign this move with your wallet" })).toBeEnabled()
+        } finally { vi.useRealTimers() }
     })
 })

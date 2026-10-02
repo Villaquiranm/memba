@@ -143,8 +143,13 @@ describe("Quick play routing", () => {
     it("falls back to Adena at once when the session is unavailable", async () => {
         qp.hasLocalSession.mockReturnValue(true)
         qp.quickPlayCall.mockRejectedValue(new QuickPlayUnavailable("ended", "x"))
+        const seen: string[] = []
+        const on = (e: Event) => seen.push((e as CustomEvent<string>).detail)
+        window.addEventListener("memba:quickplay-fallback", on)
         await play("g1me", 3, 4)
+        window.removeEventListener("memba:quickplay-fallback", on)
         expect(broadcast).toHaveBeenCalledTimes(1)
+        expect(seen).toEqual(["x"])
     })
     it("propagates other errors", async () => {
         qp.hasLocalSession.mockReturnValue(true)

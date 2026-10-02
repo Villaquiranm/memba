@@ -29,14 +29,26 @@ describe("startQuickPlay", () => {
         expect(msgs[0]).toMatchObject({ type: "/auth.m_create_session", value: { creator: M, allow_paths: ["vm/exec:gno.land/r/test/c4"], spend_limit: "1000000ugnot", spend_period: "86400" } })
         expect(Number(msgs[0].value.expires_at) - now()).toBeGreaterThan(14390)
     })
-    it("drops the key when Adena fails or the chain has no session", async () => {
+    it("drops the key when Adena fails", async () => {
         grc.doContractBroadcast.mockRejectedValueOnce(new Error("rejected"))
         await expect(startQuickPlay(M, 3600)).rejects.toThrow("rejected")
         expect(hasLocalSession(M)).toBe(false)
+    })
+    it("keeps the key when the broadcast landed but the chain shows no session yet", async () => {
         grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
-        await expect(startQuickPlay(M, 3600)).rejects.toThrow()
-        expect(hasLocalSession(M)).toBe(false)
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow(/sent but isn't confirmed yet/)
+        expect(hasLocalSession(M)).toBe(true)
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow(/already on/)
+    })
+    it("keeps the key when the confirmation read throws", async () => {
+        grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
+        vi.stubGlobal("fetch", vi.fn().mockImplementation(async (u: string) => {
+            if (String(u).includes("/sessions")) return query(null)
+            throw new Error("network down")
+        }))
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow(/sent but isn't confirmed yet/)
+        expect(hasLocalSession(M)).toBe(true)
     })
     it("refuses before any prompt when the key can't be stored", async () => {
         const spy = vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("quota") })
@@ -75,6 +87,13 @@ describe("quickPlayCall", () => {
         await started()
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(sessionJSON({ used: "990000ugnot" }))))
         await expect(quickPlayCall(M, "Play", ["7", "4"])).rejects.toEqual(expect.objectContaining({ reason: "budget" }))
+        expect(hasLocalSession(M)).toBe(true)
+    })
+    it("maps a DeliverTx session spend limit failure to a budget fallback (keeping the key)", async () => {
+        await started()
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(sessionJSON())))
+        bc.broadcastSignedTx.mockRejectedValue(new RealmError("unable to lock deposit 100000ugnot, session spend limit exceeded"))
+        await expect(quickPlayCall(M, "Play", ["7", "4"])).rejects.toEqual(expect.objectContaining({ name: "QuickPlayUnavailable", reason: "budget" }))
         expect(hasLocalSession(M)).toBe(true)
     })
     it("retries a check_tx rejection once with a re-read sequence, then falls back", async () => {

@@ -106,6 +106,7 @@ function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: 
     return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { retry: false, gasWanted: GAS_WANTED })
 }
 
+export const QUICKPLAY_FALLBACK_EVENT = "memba:quickplay-fallback"
 type MoveFunc = "Reveal" | "Play" | "Resign" | "ClaimTimeout"
 export interface MoveOptions { viaWallet?: boolean }
 
@@ -114,7 +115,11 @@ export interface MoveOptions { viaWallet?: boolean }
 async function move(func: MoveFunc, args: string[], caller: string, opts?: MoveOptions) {
     if (!opts?.viaWallet && hasLocalSession(caller)) {
         try { return await quickPlayCall(caller, func, args) }
-        catch (e) { if (!(e instanceof QuickPlayUnavailable)) throw e }
+        catch (e) {
+            if (!(e instanceof QuickPlayUnavailable)) throw e
+            // Tell the UI why, without delaying the wallet call.
+            window.dispatchEvent(new CustomEvent(QUICKPLAY_FALLBACK_EVENT, { detail: e.message }))
+        }
     }
     return submit(func, args, caller)
 }

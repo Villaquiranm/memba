@@ -50,7 +50,6 @@ export function useTx() {
         errorName: err?.name ?? null,
         clearError: () => { setErr(null); setWalletFn(null) },
         retryWithWallet: walletFn ? () => void run(walletFn) : null,
-        lastViaQuickPlay: walletFn !== null,
     }
 }
 

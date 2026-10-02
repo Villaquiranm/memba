@@ -135,6 +135,56 @@ describe("GameView", () => {
         await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
     })
 
+    it("does not open the wallet after an unknown outcome when the re-read shows the move landed", async () => {
+        lib.play.mockRejectedValueOnce(unknownErr()).mockResolvedValue({})
+        view("g1alice", { ...g, deadline: 1_010 })
+        lib.getGame.mockResolvedValue({ now: 1_000, game: { ...g, deadline: 1_010, moves: 1, turn: 2, turnPlayer: "g1bob" } })
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        expect(await screen.findByText("Your move already landed.")).toBeInTheDocument()
+        expect(lib.play).toHaveBeenCalledTimes(1)
+    })
+
+    it("sends via the wallet after an unknown outcome when the re-read shows nothing changed", async () => {
+        lib.play.mockRejectedValueOnce(unknownErr()).mockResolvedValue({})
+        view("g1alice", { ...g, deadline: 1_010 })
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+        expect(lib.getGame.mock.calls.length).toBeGreaterThan(1) // the guard re-read
+    })
+
+    it("guards the wallet button too: aborts when the re-read shows the move landed", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true })
+        try {
+            lib.play.mockRejectedValueOnce(unknownErr())
+            view("g1alice", g)
+            fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+            await screen.findByText(/checking/i)
+            await vi.advanceTimersByTimeAsync(10_500)
+            const btn = await screen.findByRole("button", { name: "Sign this move with your wallet" })
+            lib.getGame.mockResolvedValue({ now: 1_000, game: { ...g, moves: 1, turn: 2, turnPlayer: "g1bob" } })
+            fireEvent.click(btn)
+            expect(await screen.findByText("Your move already landed.")).toBeInTheDocument()
+            expect(lib.play).toHaveBeenCalledTimes(1)
+        } finally { vi.useRealTimers() }
+    })
+
+    it("does not open the wallet twice when the automatic wallet prompt is rejected", async () => {
+        lib.play.mockRejectedValueOnce(new Error("rpc down")).mockRejectedValue(new Error("user rejected"))
+        view("g1alice", { ...g, deadline: 1_010 })
+        fireEvent.click(await screen.findByRole("button", { name: "Drop in column 5" }))
+        await waitFor(() => expect(lib.play).toHaveBeenCalledTimes(2))
+        await screen.findByText(/user rejected/)
+        await new Promise((r) => setTimeout(r, 100))
+        expect(lib.play).toHaveBeenCalledTimes(2)
+    })
+
+    it("shows why Quick play fell back to the wallet", async () => {
+        view("g1alice", g)
+        await screen.findByText(/Your move/)
+        window.dispatchEvent(new CustomEvent("memba:quickplay-fallback", { detail: "Quick play ended — confirm in your wallet." }))
+        expect(await screen.findByText("Quick play ended — confirm in your wallet.")).toBeInTheDocument()
+    })
+
     it("keeps the wallet button when the session disappears after the failure", async () => {
         lib.play.mockRejectedValueOnce(new Error("rpc down"))
         view("g1alice", g)

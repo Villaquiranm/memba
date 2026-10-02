@@ -36,17 +36,19 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
     }
 
     const readError = isError && <span className="os-note os-warn" role="status">Couldn't read Quick play status</span>
-    if (isError && !status) return <div className="c4-qp">{readError}</div>
-
-    if (status) {
-        const left = Math.max(0, Math.floor(status.expiresAt - now))
-        const raw = status.spendLimitUgnot - status.spendUsedUgnot
-        const remaining = Number.isFinite(raw) ? Math.max(0, raw) : 0
-        const spent = remaining < MOVE_FEE_UGNOT
-        return <div className="c4-qp" data-on="true">
-            <span className="c4-qp-pill" data-tone={spent ? "warn" : undefined}>{spent
+    if (status || isError) {
+        const pill = status && (() => {
+            const left = Math.max(0, Math.floor(status.expiresAt - now))
+            const raw = status.spendLimitUgnot - status.spendUsedUgnot
+            const remaining = Number.isFinite(raw) ? Math.max(0, raw) : 0
+            const spent = remaining < MOVE_FEE_UGNOT
+            return <span className="c4-qp-pill" data-tone={spent ? "warn" : undefined}>{spent
                 ? "⚡ Quick play · budget used up for today"
                 : `⚡ Quick play · ${Math.floor(left / 3600)}h ${Math.floor((left % 3600) / 60)}m left · ${(remaining / 1_000_000).toFixed(2)} GNOT budget`}</span>
+        })()
+        // With the RPC down and no stale data the key can still be dropped here.
+        return <div className="c4-qp" data-on="true">
+            {pill}
             <button type="button" className="os-btn os-quiet" disabled={busy} onClick={() => act(() => endQuickPlay(me))}>End session</button>
             <button type="button" className="os-btn os-quiet c4-qp-forget" title="Deletes the key here; doesn't revoke on chain — the session runs until it expires." disabled={busy} onClick={() => { forgetQuickPlay(me); void client.invalidateQueries({ queryKey: ["quickplay", me] }) }}>Forget on this device</button>
             {readError}

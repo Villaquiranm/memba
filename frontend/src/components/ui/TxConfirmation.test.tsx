@@ -44,8 +44,15 @@ describe("TxConfirmation quick play", () => {
         await act(async () => { void captured.cb!([create], "Start Quick play") })
         expect(screen.getByText(/Create Quick play session/)).toBeInTheDocument()
         expect(screen.getByText(/connect4_v2 only/)).toBeInTheDocument()
-        expect(screen.getByText(/up to 1 GNOT\/day for gas/)).toBeInTheDocument()
+        expect(screen.getByText(/up to 1 GNOT\/day for gas and storage/)).toBeInTheDocument()
         expect(screen.queryByText(/sends funds/)).not.toBeInTheDocument()
+    })
+    it("labels a revoke inside a Start approval as removing an expired session", async () => {
+        render(<TxConfirmationProvider><div /></TxConfirmationProvider>)
+        const create = { type: "/auth.m_create_session", value: { creator: CREATOR, session_key: sk, expires_at: String(Math.floor(Date.now() / 1000) + 3600), allow_paths: ["vm/exec:gno.land/r/x/c4"], spend_limit: "1000000ugnot", spend_period: "86400" } }
+        await act(async () => { void captured.cb!([{ type: "/auth.m_revoke_session", value: { creator: CREATOR, session_key: sk } }, create], "Start Quick play") })
+        expect(screen.getByText(/Remove expired Quick play session/, { selector: ".tx-confirm-func" })).toBeInTheDocument()
+        expect(screen.queryByText(/End Quick play session/)).not.toBeInTheDocument()
     })
     it("describes ending a session", async () => {
         render(<TxConfirmationProvider><div /></TxConfirmationProvider>)

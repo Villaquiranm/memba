@@ -7,7 +7,7 @@
 import { ACTIVE_NETWORK_KEY, GNO_CHAIN_ID, GNO_RPC_URL, connect4PathFor } from "./config"
 import { doContractBroadcast, feeForGasWanted, networkGasPrice } from "./grc20"
 import { keyFromPriv, newSessionKey, pubKeyAnyBytes, signSessionTx, type SessionKey } from "./sessionTx"
-import { broadcastSignedTx, CheckTxError } from "./signedTxBroadcast"
+import { broadcastSignedTx, CheckTxError, RealmError } from "./signedTxBroadcast"
 
 export const QUICKPLAY_DURATIONS = [3600, 14400, 86400] as const
 export type QuickPlayDuration = (typeof QUICKPLAY_DURATIONS)[number]
@@ -111,10 +111,14 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
         } }], "Start Quick play", { retry: false })
-        const s = await chainSession(master, key.address)
-        if (!s) throw new Error("Quick play wasn't confirmed on chain. Try again.")
-        return s.status
     } catch (e) { remove(master); throw e }
+    // The broadcast landed: from here the key is kept even if the read fails. quickPlayStatus/
+    // quickPlayCall drop it once the chain says there is no session; hasLocalSession blocks a second Start.
+    const pending = new Error("Quick play was sent but isn't confirmed yet — it will show up shortly.")
+    let s: ChainSession | null
+    try { s = await chainSession(master, key.address) } catch { throw pending }
+    if (!s) throw pending
+    return s.status
 }
 
 /** Throws (key kept) on transport/parse failure; null means the chain has no such session. */
@@ -147,6 +151,8 @@ export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "R
         })
         try { return await broadcastSignedTx(GNO_CHAIN_ID, bytes) }
         catch (e) {
+            // DeliverTx budget exhaustion (storage deposit lock) rolls the move back, so the wallet may resend.
+            if (e instanceof RealmError && /session spend limit/i.test(e.message)) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")
             if (!(e instanceof CheckTxError)) throw e
             if (/session expired|unknown session|session not found/i.test(e.message)) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
             if (/spend limit|exceeds.*limit|not allowed/i.test(e.message)) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")

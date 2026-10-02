@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react"
-import { cancel, claimTimeout, play, resign, reveal, revealKey, type Game } from "../../lib/connect4"
-import { hasLocalSession } from "../../lib/quickPlay"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { QUICKPLAY_FALLBACK_EVENT, cancel, claimTimeout, getGame, play, resign, reveal, revealKey, type Game } from "../../lib/connect4"
+import { hasLocalSession, quickPlayStatus } from "../../lib/quickPlay"
 import { Empty, Loading, Pill, type PillTone } from "../../os/kit"
 import { Board } from "./Board"
 import { TxError } from "./TxError"
@@ -34,10 +35,25 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const leftRef = useRef(left)
     useEffect(() => { leftRef.current = left })
     const failLeft = useRef(Infinity)
-    const quick = connected && hasLocalSession(me)
+    // Read localStorage once per account/session change, not per 1s tick (observes the QuickPlay panel's query).
+    const { dataUpdatedAt: qpUpdatedAt } = useQuery({ queryKey: ["quickplay", me], queryFn: () => quickPlayStatus(me), enabled: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- qpUpdatedAt is the invalidation signal
+    const quick = useMemo(() => connected && hasLocalSession(me), [connected, me, qpUpdatedAt])
+    // Chain state when a move failed: after an unknown outcome the wallet may only sign if it hasn't moved on.
+    const latest = useRef({ moves: g?.moves, turn: g?.turn, turnPlayer: g?.turnPlayer })
+    useEffect(() => { latest.current = { moves: g?.moves, turn: g?.turn, turnPlayer: g?.turnPlayer } })
+    const movesAtFail = useRef<number | undefined>(undefined)
+    const turnAtFail = useRef<number | undefined>(undefined)
+    const [note, setNote] = useState<string | null>(null)
+    useEffect(() => {
+        let t: ReturnType<typeof setTimeout> | undefined
+        const on = (e: Event) => { setNote(String((e as CustomEvent).detail)); clearTimeout(t); t = setTimeout(() => setNote(null), 6_000) }
+        window.addEventListener(QUICKPLAY_FALLBACK_EVENT, on)
+        return () => { window.removeEventListener(QUICKPLAY_FALLBACK_EVENT, on); clearTimeout(t) }
+    }, [])
     // Quick play moves carry their wallet twin, so a failure can be re-sent via Adena.
     const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>) => tx.run(async () => {
-        try { return await fn() } catch (e) { failLeft.current = leftRef.current; throw e }
+        try { return await fn() } catch (e) { failLeft.current = leftRef.current; movesAtFail.current = latest.current.moves; turnAtFail.current = latest.current.turn; throw e }
     }, quick ? walletFn : undefined)
     const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k), () => reveal(me, g.id, k, { viaWallet: true })) : Promise.resolve(false))
 
@@ -51,23 +67,30 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const { error, errorName, retryWithWallet, clearError, failures } = tx
     const handled = useRef(0)
     const unknown = errorName === "OutcomeUnknownError"
+    // After an unknown outcome the move may have landed: re-read the game and only then sign via the wallet.
+    const walletRoute = async () => {
+        if (!retryWithWallet) return
+        if (unknown) {
+            const game = (await getGame(id).catch(() => null))?.game
+            if (game && (game.moves !== movesAtFail.current || game.turn !== turnAtFail.current || (game.turn !== 0 && game.turnPlayer !== me))) {
+                clearError(); setNote("Your move already landed."); return
+            }
+        }
+        retryWithWallet()
+    }
     useEffect(() => {
         if (!retryWithWallet || handled.current === failures) return
         handled.current = failures
-        // A RealmError would only fail again; an unknown outcome is safe to sign (the realm rejects a duplicate).
-        if (failLeft.current < 15 && errorName !== "RealmError") retryWithWallet()
+        // A RealmError would only fail again; an unknown outcome is re-checked first (walletRoute).
+        if (failLeft.current < 15 && errorName !== "RealmError") void walletRoute()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot per failure; retryWithWallet changes identity every render
     }, [failures])
 
     // Outcome unknown with time to spare: watch the chain for 10s, then offer the wallet only
     // if it is still our turn and no move landed.
-    const latest = useRef({ moves: g?.moves, turnPlayer: g?.turnPlayer })
-    useEffect(() => { latest.current = { moves: g?.moves, turnPlayer: g?.turnPlayer } })
-    const movesAtFail = useRef<number | undefined>(undefined)
     const [watched, setWatched] = useState(false)
     useEffect(() => {
         if (!unknown) return
-        movesAtFail.current = latest.current.moves
         const t = setTimeout(() => {
             if (latest.current.turnPlayer === me && latest.current.moves === movesAtFail.current) setWatched(true)
             else clearError()
@@ -84,7 +107,7 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         : unknown ? "Outcome unknown — your move may not have landed."
         : error
     const txAction = retryWithWallet && (!unknown || watched)
-        ? { label: unknown ? "Sign this move with your wallet" : "Use wallet instead", onClick: retryWithWallet }
+        ? { label: unknown ? "Sign this move with your wallet" : "Use wallet instead", onClick: () => void walletRoute() }
         : undefined
 
     const back = <button type="button" className="os-btn os-quiet" onClick={onBack}>← Lobby</button>
@@ -109,6 +132,7 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
             <QuickPlay me={me} connected={connected} />
             <span className="os-sub">pot {formatGnot(2 * g.stake)}</span>
         </div>
+        {note && <div className="os-note" role="status">{note}</div>}
         <TxError message={txError} onDismiss={tx.clearError} action={txAction} />
 
         {!["open", "playing"].includes(g.status) && <div className="c4-banner" role="status" data-tone={won ? "win" : lost ? "lose" : undefined}>

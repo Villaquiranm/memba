@@ -41,6 +41,10 @@ describe("QuickPlay", () => {
         renderWithProviders(<QuickPlay me="g1me" connected />)
         expect(await screen.findByText("Couldn't read Quick play status")).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: /^⚡ Quick play/ })).toBeNull()
+        // The key can still be dropped with the RPC down.
+        expect(screen.getByRole("button", { name: "End session" })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Forget on this device" }))
+        expect(qp.forgetQuickPlay).toHaveBeenCalledWith("g1me")
     })
     it("is hidden when Connect 4 is not deployed on this network", () => {
         cfg.path = null

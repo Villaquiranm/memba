@@ -23,9 +23,13 @@ export class QuickPlayUnavailable extends Error {
     constructor(readonly reason: "ended" | "budget" | "rejected", message: string) { super(message) }
 }
 
-interface Stored { priv: string; sessionAddr: string; expiresAt: number; allowPath: string; chainId: string }
+interface Stored { priv: string; sessionAddr: string; allowPath: string; chainId: string }
 const storageKey = (master: string) => `memba.quickplay.${ACTIVE_NETWORK_KEY}.${master}`
 const allowPath = () => { const p = connect4PathFor(ACTIVE_NETWORK_KEY); return p ? `vm/exec:${p}` : null }
+const MAX_SESSIONS = 16
+const MASTER_RE = /^g1[02-9ac-hj-np-z]{38}$/
+const checkMaster = (m: string) => { if (!MASTER_RE.test(m)) throw new Error("Invalid account address") }
+class SessionReadError extends Error { name = "SessionReadError" }
 const toHex = (u: Uint8Array) => Array.from(u, (b) => b.toString(16).padStart(2, "0")).join("")
 const fromHex = (s: string) => Uint8Array.from(s.match(/../g) ?? [], (b) => parseInt(b, 16))
 const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u))
@@ -46,12 +50,20 @@ export function hasLocalSession(master: string): boolean { return read(master) !
 export function forgetQuickPlay(master: string): void { remove(master) }
 
 interface ChainSession { accountNumber: string; sequence: string; status: QuickPlayStatus; allowPaths: string[] }
+async function abciData(path: string): Promise<unknown | null> {
+    try {
+        const res = await fetch(`${GNO_RPC_URL}/abci_query?path=%22${path}%22`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const base = (await res.json())?.result?.response?.ResponseBase
+        if (!base?.Data) return null
+        return JSON.parse(atob(base.Data))
+    } catch (e) { throw new SessionReadError(e instanceof Error ? e.message : "read failed") }
+}
 async function chainSession(master: string, sessionAddr: string): Promise<ChainSession | null> {
-    const res = await fetch(`${GNO_RPC_URL}/abci_query?path=%22auth/accounts/${master}/session/${sessionAddr}%22`)
-    const base = (await res.json())?.result?.response?.ResponseBase
-    if (!base?.Data) return null
-    const d = JSON.parse(atob(base.Data))
+    const d = (await abciData(`auth/accounts/${master}/session/${sessionAddr}`)) as { BaseSessionAccount?: Record<string, any>; allow_paths?: unknown } | null // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!d) return null
     const s = d.BaseSessionAccount
+    if (!s?.BaseAccount) throw new SessionReadError("malformed session")
     const ugnot = (c: string | undefined) => Number(/^(\d+)ugnot$/.exec(c ?? "")?.[1] ?? 0)
     const reset = Number(s.spend_reset ?? 0), period = Number(s.spend_period ?? 0)
     const used = period > 0 && Date.now() / 1000 >= reset + period ? 0 : ugnot(s.spend_used)
@@ -62,17 +74,39 @@ async function chainSession(master: string, sessionAddr: string): Promise<ChainS
     }
 }
 
+const sessionKeyAny = (pub33b64: string) => ({ type_url: "/tm.PubKeySecp256k1", value: b64(Uint8Array.from([0x0a, 0x21, ...Uint8Array.from(atob(pub33b64), (c) => c.charCodeAt(0))])) })
+/** Own-path sessions already expired (never pruned by the chain) + total count; null if the list can't be read. */
+async function sessionSlots(master: string, path: string): Promise<{ total: number; stale: string[] } | null> {
+    try {
+        const list = await abciData(`auth/accounts/${master}/sessions`)
+        if (list === null) return { total: 0, stale: [] }
+        if (!Array.isArray(list)) return null
+        const now = Date.now() / 1000, stale: string[] = []
+        for (const e of list) {
+            const key = e?.BaseSessionAccount?.BaseAccount?.public_key?.value
+            const ap = e?.allow_paths
+            if (typeof key === "string" && /^[A-Za-z0-9+/]{44}$/.test(key) && Array.isArray(ap) && ap.length === 1 && ap[0] === path && Number(e.BaseSessionAccount.expires_at) <= now) stale.push(key)
+        }
+        return { total: list.length, stale }
+    } catch { return null }
+}
+
 export async function startQuickPlay(master: string, duration: QuickPlayDuration): Promise<QuickPlayStatus> {
+    checkMaster(master)
+    if (hasLocalSession(master)) throw new Error("Quick play is already on — end it first.")
     if (!QUICKPLAY_DURATIONS.includes(duration)) throw new Error("Unsupported Quick play duration")
     const path = allowPath()
     if (!path) throw new Error("Connect 4 is not available on this network.")
     const key = newSessionKey()
     const expiresAt = Math.floor(Date.now() / 1000) + duration
-    const entry: Stored = { priv: toHex(key.priv), sessionAddr: key.address, expiresAt, allowPath: path, chainId: GNO_CHAIN_ID }
+    const entry: Stored = { priv: toHex(key.priv), sessionAddr: key.address, allowPath: path, chainId: GNO_CHAIN_ID }
     try { localStorage.setItem(storageKey(master), JSON.stringify(entry)) } catch { throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.") }
     if (!hasLocalSession(master)) throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.")
     try {
-        await doContractBroadcast([{ type: "/auth.m_create_session", value: {
+        const slots = await sessionSlots(master, path)
+        if (slots && slots.total - slots.stale.length >= MAX_SESSIONS) throw new Error("This account already has 16 sessions. Revoke some in your wallet, then try again.")
+        const revokes = (slots?.stale ?? []).map((k) => ({ type: "/auth.m_revoke_session", value: { creator: master, session_key: sessionKeyAny(k) } }))
+        await doContractBroadcast([...revokes, { type: "/auth.m_create_session", value: {
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
@@ -83,7 +117,9 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
     } catch (e) { remove(master); throw e }
 }
 
+/** Throws (key kept) on transport/parse failure; null means the chain has no such session. */
 export async function quickPlayStatus(master: string): Promise<QuickPlayStatus | null> {
+    checkMaster(master)
     const local = read(master)
     if (!local) return null
     const s = await chainSession(master, local.sessionAddr)
@@ -92,12 +128,15 @@ export async function quickPlayStatus(master: string): Promise<QuickPlayStatus |
 }
 
 export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "Resign" | "ClaimTimeout", args: string[]): Promise<{ hash: string }> {
+    checkMaster(master)
     if (!FUNCS.has(func)) throw new Error(`Quick play can't sign ${func}`)
     const local = read(master)
     if (!local) throw new QuickPlayUnavailable("ended", "Quick play isn't on for this account.")
     const fee = feeForGasWanted(GAS_WANTED, await networkGasPrice())
     for (let attempt = 0; attempt < 2; attempt++) {
-        const s = await chainSession(master, local.sessionAddr)
+        let s: ChainSession | null
+        try { s = await chainSession(master, local.sessionAddr) }
+        catch { throw new QuickPlayUnavailable("rejected", "Couldn't read the Quick play session — confirm in your wallet.") }
         if (!s || s.status.expiresAt <= Date.now() / 1000) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
         if (!s.allowPaths.includes(local.allowPath)) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
         if (s.status.spendUsedUgnot + fee > s.status.spendLimitUgnot) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")
@@ -107,12 +146,18 @@ export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "R
             msg: { caller: master, send: "", max_deposit: MAX_DEPOSIT, pkg_path: local.allowPath.slice("vm/exec:".length), func, args },
         })
         try { return await broadcastSignedTx(GNO_CHAIN_ID, bytes) }
-        catch (e) { if (!(e instanceof CheckTxError) || attempt === 1) { if (e instanceof CheckTxError) throw new QuickPlayUnavailable("rejected", e.message); throw e } }
+        catch (e) {
+            if (!(e instanceof CheckTxError)) throw e
+            if (/session expired|unknown session|session not found/i.test(e.message)) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
+            if (/spend limit|exceeds.*limit|not allowed/i.test(e.message)) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")
+            if (attempt === 1) throw new QuickPlayUnavailable("rejected", e.message)
+        }
     }
     throw new QuickPlayUnavailable("rejected", "Quick play couldn't sign this move.")
 }
 
 export async function endQuickPlay(master: string): Promise<void> {
+    checkMaster(master)
     const local = read(master)
     if (!local) return
     await doContractBroadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(local.key.pub).slice(-35)) } } }], "End Quick play", { retry: false })

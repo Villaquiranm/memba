@@ -360,6 +360,20 @@ describe('MAX_INT64 / maxWholeTokens', () => {
 // ── Adena Message Conversion ────────────────────────────────────
 
 describe('toAdenaMessages', () => {
+
+    const sk = { type_url: "/tm.PubKeySecp256k1", value: "CiEDXfaR2nuZGxKWWW3wcJe9zaX9aSkUWGB9jB703kvKqC4=" }
+    it("passes a valid create/revoke session through", () => {
+        const create = { type: "/auth.m_create_session", value: { creator: "g1cvr48r7l7lkmvp77cr6zg2zhu26jgfwr0y8pew", session_key: sk, expires_at: "1790935843", allow_paths: ["vm/exec:gno.land/r/nym-mikecito001/connect4_v2"], spend_limit: "1000000ugnot", spend_period: "86400" } }
+        expect(toAdenaMessages([create])).toEqual([create])
+        const revoke = { type: "/auth.m_revoke_session", value: { creator: create.value.creator, session_key: sk } }
+        expect(toAdenaMessages([revoke])).toEqual([revoke])
+    })
+    it("rejects a malformed or unrestricted session", () => {
+        const v = { creator: "g1cvr48r7l7lkmvp77cr6zg2zhu26jgfwr0y8pew", session_key: sk, expires_at: "1790935843", allow_paths: ["*"], spend_limit: "1000000ugnot", spend_period: "86400" }
+        expect(() => toAdenaMessages([{ type: "/auth.m_create_session", value: v }])).toThrow()
+        expect(() => toAdenaMessages([{ type: "/auth.m_create_session", value: { ...v, allow_paths: ["vm/exec:gno.land/r/x"], expires_at: "0" } }])).toThrow()
+        expect(() => toAdenaMessages([{ type: "/auth.m_revoke_all_sessions", value: { creator: v.creator } }])).toThrow()
+    })
     it('converts Amino MsgCall to Adena /vm.m_call format', () => {
         const aminoMsgs = [{
             type: 'vm/MsgCall',

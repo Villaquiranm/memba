@@ -40,7 +40,7 @@ describe("TxConfirmation quick play", () => {
     const sk = { type_url: "/tm.PubKeySecp256k1", value: "CiEDXfaR2nuZGxKWWW3wcJe9zaX9aSkUWGB9jB703kvKqC4=" }
     it("describes a Quick play session in plain words", async () => {
         render(<TxConfirmationProvider><div /></TxConfirmationProvider>)
-        const create = { type: "/auth.m_create_session", value: { creator: CREATOR, session_key: sk, expires_at: "1790935843", allow_paths: ["vm/exec:gno.land/r/nym-mikecito001/connect4_v2"], spend_limit: "1000000ugnot", spend_period: "86400" } }
+        const create = { type: "/auth.m_create_session", value: { creator: CREATOR, session_key: sk, expires_at: String(Math.floor(Date.now() / 1000) + 14400), allow_paths: ["vm/exec:gno.land/r/nym-mikecito001/connect4_v2"], spend_limit: "1000000ugnot", spend_period: "86400" } }
         await act(async () => { void captured.cb!([create], "Start Quick play") })
         expect(screen.getByText(/Create Quick play session/)).toBeInTheDocument()
         expect(screen.getByText(/connect4_v2 only/)).toBeInTheDocument()

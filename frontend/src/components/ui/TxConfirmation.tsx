@@ -106,7 +106,8 @@ function TxConfirmationModal({
         const v = msg.value as Record<string, unknown>
         if (msg.type === "/auth.m_create_session") {
             const realm = String((v.allow_paths as string[] | undefined)?.[0] ?? "").replace(/^vm\/exec:/, "")
-            const ends = new Date(Number(v.expires_at) * 1000).toISOString().slice(0, 10) // pure: no Date.now() in render
+            const endMs = Number(v.expires_at) * 1000
+            const ends = Number.isFinite(endMs) ? new Date(endMs).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "at an invalid time" // pure: no Date.now() in render
             const gnot = Number(String(v.spend_limit).replace(/ugnot$/, "")) / 1_000_000
             return { index: i, func: "Create Quick play session", caller: String(v.creator ?? ""), send: "", args: [`${realm.split("/").pop()} only · up to ${gnot} GNOT/day for gas · ends ${ends}`], pkgPath: realm, depositCap: "" }
         }

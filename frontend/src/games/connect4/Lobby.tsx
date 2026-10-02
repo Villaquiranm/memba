@@ -66,7 +66,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                 <h2>Connect 4</h2>
                 <p>Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
             </div>
-            <div className="os-row">
+            <div className="os-row c4-hero-controls">
                 <QuickPlay me={me} connected={connected} />
                 {connected && <span className="os-row"><span id="c4-mine" className="os-sub">Only my games</span><Toggle checked={mineOnly} onChange={setMineOnly} labelledBy="c4-mine" /></span>}
             </div>

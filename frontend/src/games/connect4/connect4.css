@@ -149,6 +149,13 @@
 .c4-hero-discs i:nth-child(3n) { animation-delay: .6s; }
 .c4-hero .os-toggle { box-shadow: 0 0 0 2px rgba(255, 255, 255, .5); }
 .c4-hero .os-sub, .c4-hero label { color: #fff; }
+/* The hero wraps: the text keeps a readable width and the controls (Quick play
+   pill + End/Forget + filter) drop to their own row when they don't fit. */
+.c4-hero { flex-wrap: wrap; }
+.c4-hero > .os-grow { flex: 1 1 300px; min-width: 240px; }
+.c4-hero-controls { margin-left: auto; justify-content: flex-end; flex-wrap: wrap; row-gap: 10px; }
+.c4-hero .c4-qp .os-btn.os-quiet { background: rgba(255, 255, 255, .18); color: #fff; }
+.c4-hero .c4-qp .os-btn.c4-qp-forget { background: none; color: #fff; opacity: .85; text-decoration: underline; }
 .c4-actions { justify-content: flex-end; flex-wrap: nowrap; }
 .c4-cta { min-height: 44px; padding-inline: 20px !important; border-radius: 14px !important; font-size: 13px !important; box-shadow: 0 4px 0 color-mix(in srgb, var(--os-acc, #2563eb) 70%, #000); transition: transform .12s ease-out, box-shadow .12s ease-out; }
 .c4-cta:not(:disabled):active { transform: translateY(3px); box-shadow: 0 1px 0 color-mix(in srgb, var(--os-acc, #2563eb) 70%, #000); }

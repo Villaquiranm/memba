@@ -4,9 +4,11 @@ import { renderWithProviders } from "../../test/test-utils"
 
 const qp = vi.hoisted(() => ({ startQuickPlay: vi.fn(), quickPlayStatus: vi.fn(), endQuickPlay: vi.fn(), forgetQuickPlay: vi.fn() }))
 vi.mock("../../lib/quickPlay", async (orig) => ({ ...(await orig<typeof import("../../lib/quickPlay")>()), ...qp }))
+const cfg = vi.hoisted(() => ({ path: "gno.land/r/x/connect4" as string | null }))
+vi.mock("../../lib/config", async (orig) => ({ ...(await orig<typeof import("../../lib/config")>()), connect4PathFor: () => cfg.path }))
 import { QuickPlay } from "./QuickPlay"
 
-beforeEach(() => Object.values(qp).forEach((f) => f.mockReset()))
+beforeEach(() => { cfg.path = "gno.land/r/x/connect4"; Object.values(qp).forEach((f) => f.mockReset()) })
 
 describe("QuickPlay", () => {
     it("is hidden without a wallet", () => {
@@ -39,5 +41,29 @@ describe("QuickPlay", () => {
         renderWithProviders(<QuickPlay me="g1me" connected />)
         expect(await screen.findByText("Couldn't read Quick play status")).toBeInTheDocument()
         expect(screen.queryByRole("button", { name: /^⚡ Quick play/ })).toBeNull()
+    })
+    it("is hidden when Connect 4 is not deployed on this network", () => {
+        cfg.path = null
+        const { container } = renderWithProviders(<QuickPlay me="g1me" connected />)
+        expect(container).toBeEmptyDOMElement()
+    })
+    it("closes the panel on Escape and on an outside click, refocusing the toggle", async () => {
+        qp.quickPlayStatus.mockResolvedValue(null)
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        const toggle = await screen.findByRole("button", { name: /Quick play/ })
+        fireEvent.click(toggle)
+        expect(toggle).toHaveAttribute("aria-controls")
+        fireEvent.keyDown(document, { key: "Escape" })
+        expect(screen.queryByText(/Stakes still ask/)).toBeNull()
+        expect(toggle).toHaveFocus()
+        fireEvent.click(toggle)
+        fireEvent.pointerDown(document.body)
+        expect(screen.queryByText(/Stakes still ask/)).toBeNull()
+    })
+    it("turns amber when the budget is used up", async () => {
+        qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3600, spendUsedUgnot: 990_000, spendLimitUgnot: 1_000_000 })
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        const pill = await screen.findByText("⚡ Quick play · budget used up for today")
+        expect(pill).toHaveAttribute("data-tone", "warn")
     })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { accept, cancel, getActive, offer, type Game } from "../../lib/connect4"
-import { Card, Gate, Loading, Pill, Table, Toggle, type Column } from "../../os/kit"
+import { Empty, Gate, Loading, Pill, Toggle } from "../../os/kit"
+import { COLS, ROWS, cell } from "./rules"
 import { TxError } from "./TxError"
 import { fmtSeconds, formatGnot, shortAddr, useActive, useChainNow, useTx } from "./useConnect4"
 import "./connect4.css"
@@ -57,24 +58,6 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     const canCancel = (g: Game) => connected && (g.creator === me || now >= g.expiresAt)
     const who = (a: string) => (a === me ? "you" : shortAddr(a))
 
-    const offerColumns: Column<Game>[] = [
-        { key: "game", label: "Game", render: (g) => <span className="os-row">#{g.id}{g.opponent && <Pill>private</Pill>}</span> },
-        { key: "stake", label: "Stake", align: "end", render: (g) => formatGnot(g.stake), sort: (a, b) => a.stake - b.stake },
-        { key: "creator", label: "Creator", render: (g) => who(g.creator) },
-        { key: "expires", label: "Expires", render: (g) => (now >= g.expiresAt ? <Pill tone="warn">expired</Pill> : fmtSeconds(g.expiresAt - now)) },
-        {
-            key: "actions", label: "", align: "end", render: (g) => <span className="os-row c4-actions">
-                <button type="button" className="os-btn" disabled={tx.pending || !canAccept(g)} onClick={() => tx.run(async () => { await accept(me, g); onOpen(g.id) })}>Accept</button>
-                {canCancel(g) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => tx.run(() => cancel(me, g.id))}>Cancel</button>}
-            </span>,
-        },
-    ]
-    const liveColumns: Column<Game>[] = [
-        { key: "game", label: "Game", render: (g) => <span className="os-row">#{g.id}{(g.creator === me || g.acceptor === me) && <Pill tone="ok">yours</Pill>}</span> },
-        { key: "pot", label: "Pot", align: "end", render: (g) => formatGnot(2 * g.stake) },
-        { key: "turn", label: "Turn", render: (g) => (g.turn === 0 ? <Pill tone="warn">awaiting reveal</Pill> : g.turnPlayer === me ? <Pill tone="ok">your move</Pill> : shortAddr(g.turnPlayer)) },
-    ]
-
     return <div className="os-stack c4">
         <div className="c4-hero">
             <div className="c4-hero-discs" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
@@ -87,31 +70,97 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
         <TxError message={tx.error} onDismiss={tx.clearError} />
         {!connected && <Gate text="Connect your wallet to play. You can watch games without one." />}
 
-        {isLoading ? <Loading label="Loading games…" /> : <>
-            <section className="os-stack os-tight">
-                <h3>Open offers</h3>
-                <Table columns={offerColumns} rows={offers} rowKey={(g) => String(g.id)} empty="No open offers."
-                    onRowClick={(g) => onOpen(g.id)} rowLabel={(g) => `Open game #${g.id}`} />
-            </section>
-            <section className="os-stack os-tight">
-                <h3>Live games</h3>
-                <Table columns={liveColumns} rows={live} rowKey={(g) => String(g.id)} empty="No live games."
-                    onRowClick={(g) => onOpen(g.id)} rowLabel={(g) => `Open game #${g.id}`} />
-            </section>
-        </>}
+        <div className="c4-lobby">
+            <div className="os-stack">
+                {isLoading ? <Loading label="Loading games…" /> : <>
+                    <section className="os-stack os-tight">
+                        <h3>Open offers <span className="c4-count">{offers.length}</span></h3>
+                        {offers.length === 0 ? <Empty title="No open offers. Post one and wait for a challenger." /> : <ul className="c4-cards">
+                            {offers.map((g) => {
+                                const expired = now >= g.expiresAt
+                                const soon = !expired && g.expiresAt - now <= 60
+                                return <li key={g.id} className="c4-offer" aria-label={`Game #${g.id}`} data-expired={expired}>
+                                    <div className="os-row c4-offer-top">
+                                        <span className="c4-mini-disc c4-red" aria-hidden="true" />
+                                        <b>#{g.id}</b>
+                                        {g.creator === me && <Pill tone="ok">yours</Pill>}
+                                        {g.opponent && <Pill>{g.opponent === me ? "for you" : "private"}</Pill>}
+                                        <span className={`c4-timer${expired ? " c4-timer-out" : soon ? " c4-timer-soon" : ""}`}>{expired ? "expired" : fmtSeconds(g.expiresAt - now)}</span>
+                                    </div>
+                                    <div className="c4-offer-stake">
+                                        <strong>{formatGnot(g.stake)}</strong>
+                                        <small>stake each · winner gets {formatGnot(2 * g.stake - g.fee)}</small>
+                                    </div>
+                                    <div className="os-sub">by {who(g.creator)}</div>
+                                    <div className="os-row c4-offer-actions">
+                                        {g.creator !== me && <button type="button" className="os-btn c4-cta" disabled={tx.pending || !canAccept(g)} onClick={() => tx.run(async () => { await accept(me, g); onOpen(g.id) })}>Accept</button>}
+                                        {canCancel(g) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => tx.run(() => cancel(me, g.id))}>Cancel</button>}
+                                        <button type="button" className="os-btn os-quiet" aria-label={`Open game #${g.id}`} onClick={() => onOpen(g.id)}>Open</button>
+                                    </div>
+                                </li>
+                            })}
+                        </ul>}
+                    </section>
+                    <section className="os-stack os-tight">
+                        <h3>Live games <span className="c4-count">{live.length}</span></h3>
+                        {live.length === 0 ? <Empty title="No games in progress right now." /> : <ul className="c4-cards">
+                            {live.map((g) => <li key={g.id} aria-label={`Game #${g.id}`}>
+                                <button type="button" className="c4-live" aria-label={`Open game #${g.id}`} onClick={() => onOpen(g.id)}>
+                                    <MiniBoard board={g.board} />
+                                    <span className="c4-live-info">
+                                        <b>#{g.id} {(g.creator === me || g.acceptor === me) && <Pill tone="ok">yours</Pill>}</b>
+                                        <span className="os-sub">pot {formatGnot(2 * g.stake)} · {g.moves} moves</span>
+                                        {g.turn === 0 ? <Pill tone="warn">awaiting reveal</Pill> : g.turnPlayer === me ? <Pill tone="ok">your move</Pill> : <span className="os-row c4-live-turn"><span className={`c4-mini-disc ${g.turn === 1 ? "c4-red" : "c4-yellow"}`} aria-hidden="true" />{shortAddr(g.turnPlayer)} to move</span>}
+                                    </span>
+                                </button>
+                            </li>)}
+                        </ul>}
+                    </section>
+                </>}
+            </div>
 
-        {connected && <Card>
-            <form className="os-stack os-tight c4-form os-grow" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
-                <h3>Post an offer</h3>
-                <div className="c4-fields">
-                    <label>Stake (GNOT)<input type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} /></label>
-                    <label>Valid for (minutes)<input type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} /></label>
-                    <label>Opponent address (optional)<input value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1…" /></label>
-                </div>
-                <p className="os-sub">Winner receives <b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b>.</p>
-                <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
-                <div><button type="submit" className="os-btn c4-cta" disabled={!formOk || tx.pending}>Post offer</button></div>
-            </form>
-        </Card>}
+            {connected && <aside className="c4-post">
+                <form className="c4-form" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
+                    <h3>Post an offer</h3>
+                    <div className="c4-field">
+                        <label htmlFor="c4-stake">Stake (GNOT)</label>
+                        <input id="c4-stake" type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} />
+                        <QuickPicks label="Stake presets" values={["1", "2", "5", "10"]} unit="GNOT" value={stake} onPick={setStake} />
+                    </div>
+                    <div className="c4-field">
+                        <label htmlFor="c4-valid">Valid for (minutes)</label>
+                        <input id="c4-valid" type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} />
+                        <QuickPicks label="Duration presets" values={["5", "10", "30", "60"]} unit="min" value={validFor} onPick={setValidFor} />
+                    </div>
+                    <div className="c4-field">
+                        <label htmlFor="c4-opp">Opponent address (optional)</label>
+                        <input id="c4-opp" value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1… — leave empty for anyone" />
+                    </div>
+                    <div className="c4-payout" aria-live="polite">
+                        <span><small>You stake</small><b>{formOk ? formatGnot(stakeUgnot) : "—"}</b></span>
+                        <span className="c4-payout-arrow" aria-hidden="true">→</span>
+                        <span><small>Winner gets</small><b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b></span>
+                    </div>
+                    <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
+                    <button type="submit" className="os-btn c4-cta c4-cta-wide" disabled={!formOk || tx.pending}>Post offer</button>
+                </form>
+            </aside>}
+        </div>
     </div>
+}
+
+function QuickPicks({ label, values, unit, value, onPick }: { label: string; values: string[]; unit: string; value: string; onPick: (v: string) => void }) {
+    return <div className="c4-quick" role="group" aria-label={label}>
+        {values.map((v) => <button key={v} type="button" aria-pressed={v === value} onClick={() => onPick(v)}>{v} {unit}</button>)}
+    </div>
+}
+
+/** A thumbnail of a game's board: 7 columns × 6 rows, top row first. */
+function MiniBoard({ board }: { board: string }) {
+    return <span className="c4-miniboard" aria-hidden="true">
+        {Array.from({ length: ROWS }, (_, i) => Array.from({ length: COLS }, (_, c) => {
+            const p = cell(board, c, ROWS - 1 - i)
+            return <i key={`${c}-${i}`} className={p === "1" ? "c4-red" : p === "2" ? "c4-yellow" : undefined} />
+        }))}
+    </span>
 }

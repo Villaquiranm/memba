@@ -21,9 +21,9 @@ describe("Lobby", () => {
         lib.getActive.mockResolvedValue({ now: 1_000, games: [base, { ...base, id: 2, opponent: "g1carol" }] })
         lib.accept.mockResolvedValue({ hash: "h" })
         renderWithProviders(<Lobby me="g1bob" connected onOpen={vi.fn()} />)
-        const row1 = await screen.findByRole("row", { name: /#1/ })
+        const row1 = await screen.findByRole("listitem", { name: /#1/ })
         expect(row1).toHaveTextContent("2 GNOT")
-        expect(screen.getByRole("row", { name: /#2/ })).toHaveTextContent("private")
+        expect(screen.getByRole("listitem", { name: /#2/ })).toHaveTextContent("private")
         expect(screen.getAllByRole("button", { name: "Accept" })[1]).toBeDisabled() // private, not for bob
         fireEvent.click(screen.getAllByRole("button", { name: "Accept" })[0])
         await waitFor(() => expect(lib.accept).toHaveBeenCalledWith("g1bob", expect.objectContaining({ id: 1 })))
@@ -32,7 +32,7 @@ describe("Lobby", () => {
     it("disables Accept on your own and expired offers, and offers Cancel on expired ones to anyone", async () => {
         lib.getActive.mockResolvedValue({ now: 3_000, games: [base] }) // now > expiresAt
         renderWithProviders(<Lobby me="g1bob" connected onOpen={vi.fn()} />)
-        const row = await screen.findByRole("row", { name: /#1/ })
+        const row = await screen.findByRole("listitem", { name: /#1/ })
         expect(row).toHaveTextContent("expired")
         expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled()
         expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled()
@@ -86,8 +86,7 @@ describe("Lobby", () => {
         renderWithProviders(<Lobby me="g1bob" connected onOpen={onOpen} />)
         fireEvent.click(await screen.findByRole("button", { name: "Open game #1" }))
         expect(onOpen).toHaveBeenCalledTimes(1)
-        fireEvent.click(screen.getByRole("row", { name: /#1/ }).cells[1])
-        expect(onOpen).toHaveBeenCalledTimes(2) // a click elsewhere in the row opens it too
+
     })
 
     it("opens a game the creator must reveal, once; not for the acceptor", async () => {
@@ -101,17 +100,17 @@ describe("Lobby", () => {
 
         const other = vi.fn()
         renderWithProviders(<Lobby me="g1bob" connected onOpen={other} />)
-        await screen.findAllByRole("row", { name: /#1/ })
+        await screen.findAllByRole("listitem", { name: /#1/ })
         expect(other).not.toHaveBeenCalled()
     })
 
     it("filters to my games", async () => {
         lib.getActive.mockResolvedValue({ now: 1_000, games: [base, { ...base, id: 2, creator: "g1carol" }] })
         renderWithProviders(<Lobby me="g1alice" connected onOpen={vi.fn()} />)
-        await screen.findByRole("row", { name: /#2/ })
+        await screen.findByRole("listitem", { name: /#2/ })
         fireEvent.click(screen.getByLabelText("Only my games"))
-        expect(screen.queryByRole("row", { name: /#2/ })).toBeNull()
-        expect(screen.getByRole("row", { name: /#1/ })).toBeInTheDocument()
+        expect(screen.queryByRole("listitem", { name: /#2/ })).toBeNull()
+        expect(screen.getByRole("listitem", { name: /#1/ })).toBeInTheDocument()
     })
 
     it("opens an open offer from the lobby, for its creator and for spectators, without hijacking Accept", async () => {

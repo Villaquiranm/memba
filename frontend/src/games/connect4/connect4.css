@@ -150,12 +150,71 @@
 .c4-hero .os-toggle { box-shadow: 0 0 0 2px rgba(255, 255, 255, .5); }
 .c4-hero .os-sub, .c4-hero label { color: #fff; }
 .c4-actions { justify-content: flex-end; flex-wrap: nowrap; }
-.c4-form { display: grid; gap: 10px; }
-.c4-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-.c4-fields label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--os-mut, inherit); }
 .c4-cta { min-height: 44px; padding-inline: 20px !important; border-radius: 14px !important; font-size: 13px !important; box-shadow: 0 4px 0 color-mix(in srgb, var(--os-acc, #2563eb) 70%, #000); transition: transform .12s ease-out, box-shadow .12s ease-out; }
 .c4-cta:not(:disabled):active { transform: translateY(3px); box-shadow: 0 1px 0 color-mix(in srgb, var(--os-acc, #2563eb) 70%, #000); }
 
+/* Lobby: offers and live games as clay cards, the form beside them. */
+.c4-lobby { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.c4-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--os-chip, #eef2ff); color: var(--os-acc-ink, #1e40af); font-size: 11px; letter-spacing: 0; }
+.c4-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+
+.c4-offer, .c4-live, .c4-post {
+  background: var(--os-card, #fff); border: 3px solid var(--os-line, #e5e7eb); border-radius: 20px;
+  box-shadow: 0 5px 0 var(--os-line, #e5e7eb);
+}
+.c4-offer { display: grid; gap: 10px; padding: 14px; transition: transform .2s var(--c4-ease-bounce), border-color .2s ease-out; }
+.c4-offer:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--c4-red) 45%, var(--os-line, #e5e7eb)); }
+.c4-offer[data-expired="true"] { opacity: .7; }
+.c4-offer-top { flex-wrap: nowrap; gap: 6px; }
+.c4-offer-top b { font-size: 14px; }
+.c4-offer-stake strong { display: block; font: 800 26px/1 var(--os-font, inherit); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.c4-offer-stake small { color: var(--os-mut, #6b7280); font-size: 11.5px; }
+.c4-offer-actions { gap: 6px; }
+.c4-offer-actions .c4-cta { flex: 1; justify-content: center; }
+.c4-timer { margin-left: auto; padding: 3px 9px; border-radius: 999px; font: 700 11px var(--os-font, inherit); font-variant-numeric: tabular-nums; background: var(--os-chip, #eef2ff); color: var(--os-acc-ink, #1e40af); white-space: nowrap; }
+.c4-timer-soon { background: #fef3c7; color: #92400e; animation: c4-tick 1s ease-in-out infinite; }
+.c4-timer-out { background: var(--os-hover, #f3f4f6); color: var(--os-mut, #6b7280); }
+.c4-mini-disc { width: 16px; height: 16px; border-radius: 50%; flex: none; box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .22), inset 0 1px 0 rgba(255, 255, 255, .45); }
+.c4-mini-disc.c4-red, .c4-miniboard i.c4-red { background: radial-gradient(circle at 35% 30%, #fca5a5, var(--c4-red) 45%, var(--c4-red-deep)); }
+.c4-mini-disc.c4-yellow, .c4-miniboard i.c4-yellow { background: radial-gradient(circle at 35% 30%, #fef08a, var(--c4-yellow) 45%, var(--c4-yellow-deep)); }
+
+.c4-live { width: 100%; display: flex; gap: 14px; align-items: center; padding: 12px; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: transform .2s var(--c4-ease-bounce), border-color .2s ease-out; }
+.c4-live:hover { transform: translateY(-2px); border-color: var(--c4-board); }
+.c4-live:focus-visible { outline: 3px solid var(--c4-board); outline-offset: 2px; }
+.c4-live-info { display: grid; gap: 4px; min-width: 0; justify-items: start; }
+.c4-live-info b { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.c4-live-turn { gap: 6px; font-size: 12px; flex-wrap: nowrap; }
+.c4-miniboard { display: grid; grid-template-columns: repeat(7, 9px); gap: 3px; padding: 6px; border-radius: 9px; flex: none; background: linear-gradient(160deg, #3b82f6, var(--c4-board-deep)); box-shadow: 0 3px 0 var(--c4-board-deep); }
+.c4-miniboard i { width: 9px; height: 9px; border-radius: 50%; background: #172554; }
+
+.c4-post { padding: 16px; position: sticky; top: 0; }
+.c4-form { display: grid; gap: 14px; }
+.c4-field { display: grid; gap: 6px; }
+.c4-field label { font-size: 12px; font-weight: 700; color: var(--os-mut, inherit); }
+.c4-field input { min-height: 40px; font-size: 14px !important; border-radius: 12px !important; }
+.c4-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.c4-quick button {
+  flex: 1; min-height: 32px; padding: 0 4px; border-radius: 10px; cursor: pointer; white-space: nowrap;
+  font: 700 11.5px var(--os-font, inherit); color: var(--os-ink, inherit);
+  background: var(--os-hover, #f3f4f6); border: 2px solid transparent;
+  transition: transform .15s var(--c4-ease-bounce), background-color .15s ease-out, border-color .15s ease-out;
+}
+.c4-quick button:hover { transform: translateY(-1px); }
+.c4-quick button[aria-pressed="true"] { background: var(--os-chip, #eef2ff); border-color: var(--os-acc, #2563eb); color: var(--os-acc-ink, #1e40af); }
+.c4-quick button:focus-visible { outline: 2px solid var(--os-acc, #2563eb); outline-offset: 2px; }
+.c4-payout { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--c4-win) 14%, var(--os-card, #fff)), var(--os-card, #fff)); border: 2px solid color-mix(in srgb, var(--c4-win) 35%, var(--os-line, #e5e7eb)); }
+.c4-payout span { display: grid; gap: 2px; }
+.c4-payout small { color: var(--os-mut, #6b7280); font-size: 11px; font-weight: 600; }
+.c4-payout b { font: 800 18px var(--os-font, inherit); font-variant-numeric: tabular-nums; }
+.c4-payout span:last-child { text-align: right; }
+.c4-payout span:last-child b { color: #15803d; }
+.c4-payout-arrow { font-size: 18px; color: var(--os-mut, #6b7280); }
+.c4-cta-wide { width: 100%; justify-content: center; }
+
+@container os-window (max-width: 760px) {
+  .c4-lobby { grid-template-columns: 1fr; }
+  .c4-post { position: static; }
+}
 @container os-window (max-width: 560px) {
   .c4-arena { flex-direction: column; }
   .c4-side { flex-basis: auto; width: 100%; }

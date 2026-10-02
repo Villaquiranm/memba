@@ -90,7 +90,8 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
         {isLoading ? <Loading label="Loading games…" /> : <>
             <section className="os-stack os-tight">
                 <h3>Open offers</h3>
-                <Table columns={offerColumns} rows={offers} rowKey={(g) => String(g.id)} empty="No open offers." />
+                <Table columns={offerColumns} rows={offers} rowKey={(g) => String(g.id)} empty="No open offers."
+                    onRowClick={(g) => onOpen(g.id)} rowLabel={(g) => `Open game #${g.id}`} />
             </section>
             <section className="os-stack os-tight">
                 <h3>Live games</h3>

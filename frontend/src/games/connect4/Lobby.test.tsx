@@ -113,4 +113,32 @@ describe("Lobby", () => {
         expect(screen.queryByRole("row", { name: /#2/ })).toBeNull()
         expect(screen.getByRole("row", { name: /#1/ })).toBeInTheDocument()
     })
+
+    it("opens an open offer from the lobby, for its creator and for spectators, without hijacking Accept", async () => {
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [base] })
+        const onOpen = vi.fn()
+        const { unmount } = renderWithProviders(<Lobby me="g1alice" connected onOpen={onOpen} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Open game #1" }))
+        expect(onOpen).toHaveBeenCalledWith(1)
+        unmount()
+
+        onOpen.mockClear()
+        lib.accept.mockReturnValue(new Promise(() => {}))
+        renderWithProviders(<Lobby me="" connected={false} onOpen={onOpen} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Open game #1" }))
+        expect(onOpen).toHaveBeenCalledTimes(1)
+        fireEvent.click(screen.getByRole("button", { name: "Accept" })) // disabled for a guest: no open, no tx
+        expect(onOpen).toHaveBeenCalledTimes(1)
+        expect(lib.accept).not.toHaveBeenCalled()
+    })
+
+    it("an enabled Accept signs without also opening the row", async () => {
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [base] })
+        lib.accept.mockReturnValue(new Promise(() => {})) // tx still pending
+        const onOpen = vi.fn()
+        renderWithProviders(<Lobby me="g1bob" connected onOpen={onOpen} />)
+        fireEvent.click(await screen.findByRole("button", { name: "Accept" }))
+        await waitFor(() => expect(lib.accept).toHaveBeenCalled())
+        expect(onOpen).not.toHaveBeenCalled()
+    })
 })

@@ -3,6 +3,7 @@ import { accept, cancel, getActive, offer, type Game } from "../../lib/connect4"
 import { Empty, Gate, Loading, Pill, Toggle } from "../../os/kit"
 import { COLS, ROWS, cell } from "./rules"
 import { TxError } from "./TxError"
+import { QuickPlay } from "./QuickPlay"
 import { fmtSeconds, formatGnot, shortAddr, useActive, useChainNow, useTx } from "./useConnect4"
 import "./connect4.css"
 
@@ -65,7 +66,10 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                 <h2>Connect 4</h2>
                 <p>Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
             </div>
-            {connected && <span className="os-row"><span id="c4-mine" className="os-sub">Only my games</span><Toggle checked={mineOnly} onChange={setMineOnly} labelledBy="c4-mine" /></span>}
+            <div className="os-row">
+                <QuickPlay me={me} connected={connected} />
+                {connected && <span className="os-row"><span id="c4-mine" className="os-sub">Only my games</span><Toggle checked={mineOnly} onChange={setMineOnly} labelledBy="c4-mine" /></span>}
+            </div>
         </div>
         <TxError message={tx.error} onDismiss={tx.clearError} />
         {!connected && <Gate text="Connect your wallet to play. You can watch games without one." />}

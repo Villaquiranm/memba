@@ -136,7 +136,7 @@
 .c4 h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--os-mut, inherit); }
 .c4-head { align-items: flex-start; }
 .c4-hero {
-  position: relative; overflow: hidden; display: flex; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 22px;
+  position: relative; display: flex; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 22px;
   color: #fff; background: linear-gradient(135deg, #3b82f6, #2563eb 50%, #1e40af);
   border: 3px solid var(--c4-board-deep); box-shadow: 0 6px 0 var(--c4-board-deep);
 }
@@ -224,3 +224,9 @@
 @media (prefers-reduced-motion: reduce) {
   .c4 *, .c4 *::after { animation: none !important; transition: none !important; }
 }
+
+.c4-qp { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; }
+.c4-qp-pill { padding: 6px 12px; border-radius: 999px; font: 700 12px var(--os-font, inherit); background: color-mix(in srgb, var(--c4-win) 16%, var(--os-card, #fff)); color: #15803d; border: 2px solid color-mix(in srgb, var(--c4-win) 40%, transparent); }
+.c4-qp-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; width: 280px; display: grid; gap: 10px; padding: 14px; border-radius: 16px; background: color-mix(in srgb, var(--os-ink, #1B1F2A) 4%, var(--os-solid-ink, #fff)); color: var(--os-ink, inherit); border: 3px solid var(--os-line, #e5e7eb); box-shadow: 0 6px 0 var(--os-line, #e5e7eb), 0 18px 30px -12px rgba(0, 0, 0, .25); }
+.c4-hero .c4-qp-toggle { background: rgba(255, 255, 255, .18); }
+.c4-hero .c4-qp-panel .os-sub { color: var(--os-mut, inherit); margin: 0; }

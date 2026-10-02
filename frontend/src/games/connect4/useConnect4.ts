@@ -35,7 +35,7 @@ export function useTx() {
     const run = async (fn: () => Promise<unknown>, wfn?: () => Promise<unknown>) => {
         if (pending) return false
         setPending(true); setErr(null); setWalletFn(null)
-        try { await fn(); await client.invalidateQueries({ queryKey: ["connect4"] }); return true }
+        try { await fn(); await client.invalidateQueries({ queryKey: ["connect4"] }); void client.invalidateQueries({ queryKey: ["quickplay"] }); return true }
         catch (e) {
             setErr({ message: e instanceof Error ? e.message : String(e), name: e instanceof Error ? e.name : "" })
             setWalletFn(wfn ? () => wfn : null)

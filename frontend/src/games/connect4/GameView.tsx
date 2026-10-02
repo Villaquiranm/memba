@@ -4,6 +4,7 @@ import { hasLocalSession } from "../../lib/quickPlay"
 import { Empty, Loading, Pill, type PillTone } from "../../os/kit"
 import { Board } from "./Board"
 import { TxError } from "./TxError"
+import { QuickPlay } from "./QuickPlay"
 import { fmtSeconds, formatGnot, shortAddr, useChainNow, useGame, useTx } from "./useConnect4"
 import "./connect4.css"
 
@@ -105,6 +106,7 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
             {back}
             <h2 className="os-grow">Game #{id}</h2>
             <Pill tone={STATUS_TONE[g.status]}>{g.status}</Pill>
+            <QuickPlay me={me} connected={connected} />
             <span className="os-sub">pot {formatGnot(2 * g.stake)}</span>
         </div>
         <TxError message={txError} onDismiss={tx.clearError} action={txAction} />

@@ -40,5 +40,22 @@ describe("broadcastSignedTx", () => {
         await expect(broadcastSignedTx("onyx-1", bytes)).rejects.toBeInstanceOf(OutcomeUnknownError)
         vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(status()).mockResolvedValueOnce(commit(ok, ok, "AAAA")))
         await expect(broadcastSignedTx("onyx-1", bytes)).rejects.toThrow(/different transaction hash/)
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(status()).mockResolvedValueOnce(commit(ok, ok, "AAAA")))
+        await expect(broadcastSignedTx("onyx-1", bytes)).rejects.toBeInstanceOf(OutcomeUnknownError)
+    })
+    it("treats a JSON-RPC error as outcome unknown", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(status()).mockResolvedValueOnce({ ok: true, json: async () => ({ error: { message: "timed out" } }) }))
+        await expect(broadcastSignedTx("onyx-1", bytes)).rejects.toBeInstanceOf(OutcomeUnknownError)
+    })
+    it("treats ok check_tx with null deliver_tx as outcome unknown", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(status()).mockResolvedValueOnce(commit(ok, null)))
+        await expect(broadcastSignedTx("onyx-1", bytes)).rejects.toBeInstanceOf(OutcomeUnknownError)
+    })
+    it("skips amino header lines in the log", async () => {
+        const log = "--= Error =--\nData: std.Error{}\nMsg Traces:\n    0  /x.gno:1 - not your turn"
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(status()).mockResolvedValueOnce(commit(ok, fail(log))))
+        const err = await broadcastSignedTx("onyx-1", bytes).catch(e => e)
+        expect(err).toBeInstanceOf(RealmError)
+        expect(err.message).toBe("0  /x.gno:1 - not your turn")
     })
 })

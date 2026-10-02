@@ -5,7 +5,9 @@ export class RealmError extends Error { name = "RealmError" }
 export class CheckTxError extends Error { name = "CheckTxError" }
 export class OutcomeUnknownError extends Error {
     name = "OutcomeUnknownError"
-    constructor(readonly expectedHash: string) { super(`Outcome unknown. Expected transaction hash ${expectedHash}. Check it on-chain before retrying.`) }
+    constructor(readonly expectedHash: string, readonly detail?: string) {
+        super(`${detail ? `${detail}. ` : "Outcome unknown. "}Expected transaction hash ${expectedHash}. Check it on-chain before retrying.`)
+    }
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -21,20 +23,22 @@ function failure(value: unknown): string | null {
     const err = base.Error
     if (err && typeof err === "object" && typeof (err as { value?: unknown }).value === "string") return (err as { value: string }).value
     const log = typeof base.Log === "string" ? base.Log : ""
-    return log.split("\n").map(l => l.trim()).find(Boolean) ?? "Transaction failed"
+    const lines = log.split("\n").map(l => l.trim()).filter(Boolean)
+    // Skip amino error header lines.
+    return lines.find(l => !/^(--= Error =--|Data:|Msg Traces:|Stack Trace:)/.test(l)) ?? (log.trim() || "Transaction failed")
 }
 
 // One transport for signed bytes; never fall back to a wallet rewriting the
 // payload, another network, or hex-encoded JSON masquerading as a transaction.
 // Callers gate (feature flags, chain checks) before calling.
 export async function broadcastSignedTx(chain: string, bytes: Uint8Array): Promise<{ hash: string; height: number }> {
-    if (!bytes.length) throw new Error("Native aggregate is not ready for broadcast")
+    if (!bytes.length) throw new Error("Nothing to broadcast")
     const statusRes = await fetch(`${GNO_RPC_URL}/status`)
     if (!statusRes.ok) throw new Error("Unable to verify RPC chain")
     const status = record(record(await statusRes.json()).result)
     if (record(status.node_info).network !== chain || record(status.sync_info).catching_up !== false) throw new Error("RPC is on a different chain or catching up")
     const expected = Array.from(sha256(bytes), b => b.toString(16).padStart(2, "0")).join("").toUpperCase()
-    const uncertain = () => new OutcomeUnknownError(expected)
+    const uncertain = (detail?: string) => new OutcomeUnknownError(expected, detail)
     // JSON-RPC bodies go to the root; /broadcast_tx_commit is the form/query API.
     let response: Response
     try {
@@ -46,7 +50,7 @@ export async function broadcastSignedTx(chain: string, bytes: Uint8Array): Promi
     if (!response.ok) throw uncertain()
     let body: Record<string, unknown>
     try { body = record(await response.json()) } catch { throw uncertain() }
-    if (body.error) throw new Error("Native RPC rejected the transaction")
+    if (body.error) throw uncertain("RPC rejected the transaction")
     let result: Record<string, unknown>
     let checkErr: string | null, deliverErr: string | null
     try {
@@ -64,6 +68,6 @@ export async function broadcastSignedTx(chain: string, bytes: Uint8Array): Promi
     try {
         actual = /^[0-9a-f]{64}$/i.test(hash) ? hash.toUpperCase() : Array.from(atob(hash), c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("").toUpperCase()
     } catch { throw uncertain() }
-    if (actual !== expected) throw new Error("RPC returned a different transaction hash")
+    if (actual !== expected) throw uncertain("RPC returned a different transaction hash")
     return { hash: expected, height: Number(result.height) }
 }

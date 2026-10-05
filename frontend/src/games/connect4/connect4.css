@@ -199,7 +199,7 @@
 .c4-form { display: grid; gap: 14px; }
 .c4-field { display: grid; gap: 6px; }
 .c4-field label { font-size: 12px; font-weight: 700; color: var(--os-mut, inherit); }
-.c4-field input { min-height: 40px; font-size: 14px !important; border-radius: 12px !important; }
+.c4-field input { min-height: 40px; font-size: 14px !important; border-radius: 12px !important; padding: 0 10px;}
 .c4-quick { display: flex; gap: 6px; flex-wrap: wrap; }
 .c4-quick button {
   flex: 1; min-height: 32px; padding: 0 4px; border-radius: 10px; cursor: pointer; white-space: nowrap;

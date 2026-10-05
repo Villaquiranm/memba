@@ -36,6 +36,13 @@ describe("QuickPlay", () => {
         fireEvent.click(screen.getByRole("button", { name: "Forget on this device" }))
         expect(qp.forgetQuickPlay).toHaveBeenCalledWith("g1me")
     })
+    it("shows a confirming pill (not the start button) while a just-sent session isn't on chain yet", async () => {
+        qp.quickPlayStatus.mockResolvedValue("pending")
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        expect(await screen.findByText(/Quick play · confirming/)).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: /Start/ })).toBeNull()
+        expect(screen.getByRole("button", { name: "Forget on this device" })).toBeEnabled()
+    })
     it("shows an error note, not the start button, when the status read fails", async () => {
         qp.quickPlayStatus.mockRejectedValue(new Error("network"))
         renderWithProviders(<QuickPlay me="g1me" connected />)

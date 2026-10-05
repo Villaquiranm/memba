@@ -17,7 +17,9 @@ const sessionJSON = (o: Partial<{ seq: string; used: string; expires: number }> 
 })
 const query = (body: unknown | null) => ({ ok: true, json: async () => ({ result: { response: { ResponseBase: body === null ? { Data: null, Log: "session not found" } : { Data: btoa(JSON.stringify(body)), Log: "" } } } }) })
 
-beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.unstubAllGlobals() })
+beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
+/** Pretend the session was sent long enough ago that "not on chain" really means gone. */
+const age = () => { const k = `memba.quickplay.onyx.${M}`; localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k)!), sentAt: Date.now() - 10 * 60_000 })) }
 
 describe("startQuickPlay", () => {
     it("stores the key before asking Adena, then confirms on chain", async () => {
@@ -34,12 +36,43 @@ describe("startQuickPlay", () => {
         await expect(startQuickPlay(M, 3600)).rejects.toThrow("rejected")
         expect(hasLocalSession(M)).toBe(false)
     })
+    it("waits for a just-sent session to appear on chain", async () => {
+        vi.useFakeTimers()
+        grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
+        vi.stubGlobal("fetch", vi.fn().mockImplementation(async (u: string) => {
+            if (String(u).includes("/sessions")) return query(null)
+            return (fetch as ReturnType<typeof vi.fn>).mock.calls.length < 4 ? query(null) : query(sessionJSON())
+        }))
+        const p = startQuickPlay(M, 3600)
+        await vi.advanceTimersByTimeAsync(5_000)
+        await expect(p).resolves.toMatchObject({ spendLimitUgnot: 1_000_000 })
+    })
     it("keeps the key when the broadcast landed but the chain shows no session yet", async () => {
+        vi.useFakeTimers()
         grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
-        await expect(startQuickPlay(M, 3600)).rejects.toThrow(/sent but isn't confirmed yet/)
+        const p = startQuickPlay(M, 3600)
+        const settled = expect(p).rejects.toThrow(/sent but isn't confirmed yet/)
+        await vi.advanceTimersByTimeAsync(20_000)
+        await settled
         expect(hasLocalSession(M)).toBe(true)
         await expect(startQuickPlay(M, 3600)).rejects.toThrow(/already on/)
+    })
+    it("treats a young missing session as pending: status keeps the key, moves fall back without clearing it", async () => {
+        vi.useFakeTimers()
+        grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
+        const p = startQuickPlay(M, 3600).catch(() => {})
+        await vi.advanceTimersByTimeAsync(20_000)
+        await p
+        vi.useRealTimers()
+        expect(await quickPlayStatus(M)).toBe("pending")
+        expect(hasLocalSession(M)).toBe(true)
+        await expect(quickPlayCall(M, "Play", ["7", "4"])).rejects.toEqual(expect.objectContaining({ name: "QuickPlayUnavailable", reason: "rejected" }))
+        expect(hasLocalSession(M)).toBe(true)
+        age()
+        expect(await quickPlayStatus(M)).toBeNull()
+        expect(hasLocalSession(M)).toBe(false)
     })
     it("keeps the key when the confirmation read throws", async () => {
         grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
@@ -79,6 +112,7 @@ describe("quickPlayCall", () => {
     })
     it("falls back and clears the key when the chain session is gone", async () => {
         await started()
+        age()
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
         await expect(quickPlayCall(M, "Play", ["7", "4"])).rejects.toEqual(expect.objectContaining({ name: "QuickPlayUnavailable", reason: "ended" }))
         expect(hasLocalSession(M)).toBe(false)
@@ -200,6 +234,7 @@ describe("hardening", () => {
         vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")))
         await expect(quickPlayStatus(M)).rejects.toThrow()
         expect(hasLocalSession(M)).toBe(true)
+        age()
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
         expect(await quickPlayStatus(M)).toBeNull()
         expect(hasLocalSession(M)).toBe(false)

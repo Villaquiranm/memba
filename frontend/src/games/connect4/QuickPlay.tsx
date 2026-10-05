@@ -9,7 +9,9 @@ const LABEL: Record<QuickPlayDuration, string> = { 3600: "1h", 14400: "4h", 8640
 
 export function QuickPlay({ me, connected }: { me: string; connected: boolean }) {
     const client = useQueryClient()
-    const { data: status, isError } = useQuery({ queryKey: ["quickplay", me], queryFn: () => quickPlayStatus(me), enabled: connected && !!me, refetchInterval: 30_000 })
+    const { data: status, isError } = useQuery({ queryKey: ["quickplay", me], queryFn: () => quickPlayStatus(me), enabled: connected && !!me,
+        // A just-sent session is polled quickly until the chain shows it.
+        refetchInterval: (q) => (q.state.data === "pending" ? 3_000 : 30_000) })
     // Wall-clock seconds in state (ticks each second): Date.now() in render is impure.
     const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
     useEffect(() => { const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000); return () => clearInterval(t) }, [])
@@ -37,7 +39,9 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
 
     const readError = isError && <span className="os-note os-warn" role="status">Couldn't read Quick play status</span>
     if (status || isError) {
-        const pill = status && (() => {
+        const pill = status === "pending"
+            ? <span className="c4-qp-pill" data-tone="pending">⚡ Quick play · confirming…</span>
+            : status && (() => {
             const left = Math.max(0, Math.floor(status.expiresAt - now))
             const raw = status.spendLimitUgnot - status.spendUsedUgnot
             const remaining = Number.isFinite(raw) ? Math.max(0, raw) : 0

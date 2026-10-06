@@ -25,6 +25,31 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet; the creator's first-mover reveal is sent automatically from this browser.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### Memba OS Tokens: open a fair sale (2026-10-06)
+- Memba OS Tokens: open a fair sale for a new token (lots, a fixed or falling price, soft cap and window), checked against the Launchpad's rules and live terms before signing, with what a fair sale does and does not do stated before you sign (hidden until the Launchpad is published)
+
+### Memba OS: short and zoomed screens (2026-10-06)
+- Memba OS: menus, dialogs, review sheets and window buttons stay usable on short or zoomed screens
+
+### Memba OS: Market and Tokens described truthfully (2026-10-06)
+- Memba OS no longer describes Market and Tokens as places to trade NFTs and tokens, which mainnet does not offer; Market is described as hiring with milestone escrow
+### memba.club is the canonical address (2026-10-06)
+- memba.club is now Memba's canonical address. On memba.club, an old classic link (for example /mainnet/dao/…, /mainnet/feed/post/12) opens the matching Memba OS window; pages without a window, and links to testnets or retired networks, stay as they were. Prepares the retirement of memba.samourai.app: the content security policy allows Clerk on memba.club, and a service-worker kill switch is in place for the coming redirect
+### Backend: unused Launchpad index removed (2026-10-06)
+- Backend: remove the unused Token Launchpad index package; an indexer will return with the first feature that reads it
+
+### Alerts: a true sentence without sign-in (2026-10-06)
+- Alerts: when sign-in for alerts isn't set up on a site, the page now says so plainly and still lists the Telegram bots, instead of showing a configuration instruction; the Profile page no longer shows that instruction. The Telegram bot buttons are easier to read
+
+### memba.samourai.app: Memba moved (2026-10-06)
+- memba.samourai.app now shows that Memba has moved to memba.club, with a link to the same page there and a note on what this browser saved that does not move (saved DAOs, drafts, settings)
+
+### Memba DAO: read-only while governance moves (2026-10-06)
+- Memba DAO (v12) is read-only in Memba while it moves to a new governance contract: Memba OS and the classic DAO page show its seats, rules, proposals, votes and fees, but offer no proposal, vote or execution, say why, and no longer count its proposals as votes waiting for you
+
+### Dependency security fixes (2026-10-06)
+- Updated the backend's OpenTelemetry libraries to 1.45.0, which fixes vulnerability GO-2026-6505 reported by govulncheck
+- Raised the floors of `source-map-js` (1.2.2, GHSA-68fv-2mgg-jv7q) in the frontend and the workspace packages, and `proxy-addr` (2.0.8, GHSA-jqcg-44mw-7w3h) in the workspace packages
 
 ### Memba OS: execute DAO proposals (2026-10-02)
 - Members can execute an accepted proposal of a DAO made from Memba's template from its Memba OS window, through the review sheet: Memba checks membership, the execution window, the action and the fee before Adena opens, and confirms the member's own transaction on chain. The link to the classic page is gone.

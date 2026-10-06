@@ -7,6 +7,9 @@
  */
 import { isValidGnoAddressChecksum } from "../dao/address"
 
+/** A SHA-256 digest, as the realms write one: 64 lowercase hex digits. */
+export const HASH = /^[0-9a-f]{64}$/
+
 /** An object carrying exactly `keys`: a missing or an unknown key is a contract change. */
 export function record<K extends string>(value: unknown, what: string, keys: readonly K[]): Record<K, unknown> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid ${what}`)
@@ -29,12 +32,24 @@ export function bool(value: unknown, what: string): boolean {
     return value
 }
 
-const INT64_MAX = 2n ** 63n - 1n
+export const INT64_MAX = 2n ** 63n - 1n
 
 /** An int64 arrives as a decimal string, so it never loses precision in JSON; none is negative here. */
 export function decimal(value: unknown, what: string): bigint {
     if (typeof value !== "string" || !/^(0|[1-9]\d{0,18})$/.test(value) || BigInt(value) > INT64_MAX) throw new Error(`Invalid ${what}`)
     return BigInt(value)
+}
+
+/** A fee or a rate the realm writes as "-1" while it is closed or not set: null, never a number. */
+export function decimalOrUnset(value: unknown, what: string): bigint | null {
+    return value === "-1" ? null : decimal(value, what)
+}
+
+/** Token numbers start at 1. */
+export function tokenNumber(value: unknown): bigint {
+    const number = decimal(value, "token number")
+    if (number === 0n) throw new Error("Invalid token number")
+    return number
 }
 
 /** The chain's one spelling of an address: lowercase bech32 with a valid checksum. */
@@ -43,7 +58,39 @@ export function address(value: unknown, what: string): string {
     return value
 }
 
+/** An address the realm writes as "" while it is not set. */
+export function optionalAddress(value: unknown, what: string): string {
+    return value === "" ? "" : address(value, what)
+}
+
+/** `C<n>` as the ledger accepts it: no leading zero, at most 21 characters. */
+export function collectionId(value: unknown): string {
+    if (typeof value !== "string" || !/^C[1-9]\d{0,19}$/.test(value)) throw new Error("Invalid collection ID")
+    return value
+}
+
+/** "ugnot", or the registry key of a GRC20 token. */
+export function currencyKey(value: unknown): string {
+    if (typeof value !== "string" || !/^[a-zA-Z0-9_./-]{1,100}$/.test(value)) throw new Error("Invalid currency")
+    return value
+}
+
 export function oneOf<T extends string>(value: unknown, what: string, allowed: readonly T[]): T {
     if (!allowed.includes(value as T)) throw new Error(`Invalid ${what}`)
     return value as T
+}
+
+export function hash(value: unknown, what: string): string {
+    if (typeof value !== "string" || !HASH.test(value)) throw new Error(`Invalid ${what}`)
+    return value
+}
+
+/**
+ * An IPFS CID as the curation realm accepts it: CIDv1 `bafy…` (dag-pb) or
+ * `bafk…` (raw, the usual codec of a small text file) in base32, 59 to 90
+ * characters, or CIDv0 `Qm…` in base58 (46).
+ */
+export function cid(value: unknown, what: string): string {
+    if (typeof value !== "string" || !/^(baf[yk][a-z2-7]{55,86}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(value)) throw new Error(`Invalid ${what}`)
+    return value
 }

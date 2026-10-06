@@ -1,7 +1,9 @@
 /**
- * The Market window's NFT lane: Explore, one collection, one token's trade
- * panel (where a listing is bought or cancelled), and My trading, each a
- * section of the Market window.
+ * The Market window's NFT lane: Explore, one collection (where a collection
+ * offer is made), one token's trade panel (where it is bought, listed, offered
+ * for, and sold to an offer), and My trading (where one's own offers are
+ * cancelled), and Operations, the curation desk (where a collection's creator
+ * applies for review and managers decide), each a section of the Market window.
  * Loaded on its own, the first time an NFT section opens.
  *
  * @module os/apps/market/nft/lane
@@ -15,9 +17,10 @@ import { CollectionTrade } from "./collection"
 import { Explore } from "./explore"
 import { ItemTrade } from "./item"
 import { MyTrading } from "./mine"
+import { Application, Operations } from "./operations"
 import type { LaneProps } from "./reads"
 
-const VIEWS = [{ id: "explore", name: "Explore" }, { id: "mine", name: "My trading" }] as const
+const VIEWS = [{ id: "explore", name: "Explore" }, { id: "mine", name: "My trading" }, { id: "operations", name: "Operations" }] as const
 
 export default function NftLane({ route, session, open, push }: { route: MarketNftRoute } & Pick<NativeViewProps, "session" | "open" | "push">) {
     const lane: LaneProps = {
@@ -38,10 +41,12 @@ export default function NftLane({ route, session, open, push }: { route: MarketN
     }, [section])
     return (
         <div className="os-stack" ref={view}>
-            <Segmented label="NFT lane" options={VIEWS} value={route.kind === "mine" ? "mine" : "explore"} onChange={(kind) => lane.go({ kind })} />
+            <Segmented label="NFT lane" options={VIEWS} value={route.kind === "mine" ? "mine" : route.kind === "operations" || route.kind === "application" ? "operations" : "explore"} onChange={(kind) => lane.go({ kind })} />
             {route.kind === "explore" ? <Explore lane={lane} />
-                : route.kind === "mine" ? <MyTrading lane={lane} address={session.address} connect={session.openConnect} />
-                : route.kind === "collection" ? <CollectionTrade lane={lane} collection={route.collection} />
+                : route.kind === "mine" ? <MyTrading lane={lane} session={session} />
+                : route.kind === "operations" ? <Operations lane={lane} />
+                : route.kind === "application" ? <Application lane={lane} session={session} collection={route.collection} />
+                : route.kind === "collection" ? <CollectionTrade lane={lane} session={session} collection={route.collection} />
                 : <ItemTrade lane={lane} session={session} collection={route.collection} number={route.number} />}
         </div>
     )

@@ -11,7 +11,7 @@ import NftLane from "./lane"
 // Only the readers are stubbed: every screen reads through them, and they are tested on their own.
 const market = vi.hoisted(() => ({
     listListings: vi.fn(), listOffers: vi.fn(), listCollectionListings: vi.fn(), listCollectionOffers: vi.fn(),
-    listSellerListings: vi.fn(), listBuyerOffers: vi.fn(), getTokenListing: vi.fn(),
+    listSellerListings: vi.fn(), listBuyerOffers: vi.fn(), getTokenListing: vi.fn(), getMarketTerms: vi.fn(),
 }))
 const ledger = vi.hoisted(() => ({ getCollection: vi.fn(), getToken: vi.fn() }))
 vi.mock("../../../../lib/nft/market", async (original) => ({ ...(await original<typeof import("../../../../lib/nft/market")>()), ...market }))
@@ -312,7 +312,7 @@ describe("Market NFT lane", () => {
                 await vi.waitFor(() => expect(region("Listing").getByRole("alert")).toHaveTextContent("The network could not be read. Try again in a moment."))
                 trading.lane.mockRejectedValueOnce(new TokenLaunchpadReadError("realm_error", "refused"))
                 fireEvent.click(buy)
-                await vi.waitFor(() => expect(region("Listing").getByRole("alert")).toHaveTextContent("The market's configuration refused this read. Refresh the listing."))
+                await vi.waitFor(() => expect(region("Listing").getByRole("alert")).toHaveTextContent("The market's configuration refused this read. Refresh the page."))
                 expect(trading.sign).not.toHaveBeenCalled()
             })
 
@@ -335,11 +335,232 @@ describe("Market NFT lane", () => {
                 expect(region("Listing").queryByText("This listing cannot be bought now.")).toBeNull()
             })
 
+            describe("selling", () => {
+                const held = { collection: "C1", number: 2n, owner: OWNER, status: "active", uri: "" }
+                const terms = { feeBPS: 50n, maxFeeBPS: 200n, treasury: "", split: { seller: 9_950_000n, fee: 50_000n, royalties: [] } }
+                beforeEach(() => {
+                    ledger.getToken.mockResolvedValue(held)
+                    ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "open", markets: [] })
+                    market.getMarketTerms.mockResolvedValue(terms)
+                })
+
+                it("offers the sale to the token's holder only", async () => {
+                    market.getTokenListing.mockResolvedValue(null)
+                    show(item(), BUYER)
+                    await screen.findByText("This token is not listed.")
+                    await vi.waitFor(() => expect(ledger.getToken).toHaveBeenCalled())
+                    expect(screen.queryByRole("region", { name: "Sell this token" })).toBeNull()
+                })
+
+                it("lists at the price entered, for the time chosen, after reading the lane and the market's terms", async () => {
+                    market.getTokenListing.mockResolvedValue(null)
+                    show(item(), OWNER)
+                    const sell = within(await screen.findByRole("region", { name: "Sell this token" }))
+                    fireEvent.click(sell.getByRole("button", { name: "List for sale" }))
+                    expect(await sell.findByRole("alert")).toHaveTextContent("Enter a price in GNOT, such as 12.5.")
+                    fireEvent.change(sell.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "10" } })
+                    fireEvent.change(sell.getByRole("combobox", { name: "Open for" }), { target: { value: "30" } })
+                    const before = Math.floor(Date.now() / 1000)
+                    fireEvent.click(sell.getByRole("button", { name: "List for sale" }))
+                    await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                    expect(market.getMarketTerms).toHaveBeenCalledWith("C1", 10_000_000n)
+                    expect(trading.lane).toHaveBeenCalledWith("mainnet", "nft_market", "ugnot")
+                    const [approve, list] = trading.sign.mock.calls[0][0].prepare().msgs
+                    expect(approve.value).toMatchObject({ caller: OWNER, func: "Approve", args: ["C1", "g1nn54k5fmly8agexe3ll4t6clqmcefsn7nr9ee3", "2"] })
+                    expect(list.value.args.slice(0, 3)).toEqual(["C1", "2", "10000000"])
+                    expect(Number(list.value.args[3]) - before - 30 * 86_400).toBeGreaterThanOrEqual(0)
+                    expect(Number(list.value.args[3]) - before - 30 * 86_400).toBeLessThan(5)
+                    expect(list.value.args.slice(4)).toEqual(["ugnot", "50"])
+                })
+
+                it("replaces the holder's own listing, and says so", async () => {
+                    market.getTokenListing.mockResolvedValue(listing(9, 2n, { seller: OWNER }))
+                    show(item(), OWNER)
+                    const sell = within(await screen.findByRole("region", { name: "Sell this token" }))
+                    expect(sell.getByText("A new listing closes the token's open listing L9.")).toBeInTheDocument()
+                    fireEvent.change(sell.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "12.5" } })
+                    fireEvent.click(sell.getByRole("button", { name: "Replace listing" }))
+                    await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                    expect(trading.sign.mock.calls[0][0].sub).toBe("Replaces listing L9")
+                })
+
+                it("replaces a listing a former holder left open, since the market keeps one per token", async () => {
+                    market.getTokenListing.mockResolvedValue(listing(9, 2n, { seller: BUYER }))
+                    show(item(), OWNER)
+                    const sell = within(await screen.findByRole("region", { name: "Sell this token" }))
+                    expect(sell.getByText("A new listing closes the token's open listing L9.")).toBeInTheDocument()
+                    fireEvent.change(sell.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "12.5" } })
+                    fireEvent.click(sell.getByRole("button", { name: "Replace listing" }))
+                    await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                    expect(trading.sign.mock.calls[0][0].sub).toBe("Replaces listing L9")
+                })
+
+                it("stops before the review while the market takes no listing", async () => {
+                    market.getTokenListing.mockResolvedValue(null)
+                    market.getMarketTerms.mockResolvedValueOnce({ ...terms, feeBPS: null, split: null })
+                    show(item(), OWNER)
+                    const sell = within(await screen.findByRole("region", { name: "Sell this token" }))
+                    fireEvent.change(sell.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "1" } })
+                    fireEvent.click(sell.getByRole("button", { name: "List for sale" }))
+                    expect(await sell.findByRole("alert")).toHaveTextContent("The market takes no new listing on this network: its protocol fee is not set.")
+                    trading.lane.mockResolvedValueOnce({ lane: "nft_market", currency: "ugnot", paused: true, allowlisted: true, laneReady: true, open: false })
+                    fireEvent.click(sell.getByRole("button", { name: "List for sale" }))
+                    await vi.waitFor(() => expect(sell.getByRole("alert")).toHaveTextContent("Trading is paused on this network for now."))
+                    expect(trading.sign).not.toHaveBeenCalled()
+                })
+
+                it("says why a soulbound token, or one of a collection that has not allowed this market, cannot be sold", async () => {
+                    market.getTokenListing.mockResolvedValue(null)
+                    ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "soulbound", markets: [] })
+                    show(item(), OWNER)
+                    const sell = within(await screen.findByRole("region", { name: "Sell this token" }))
+                    expect(sell.getByText("Soulbound tokens are never sold.")).toBeInTheDocument()
+                    expect(sell.queryByRole("button")).toBeNull()
+                })
+
+                it("lets a royalty-protected token be sold only through a market its creator allowed", async () => {
+                    market.getTokenListing.mockResolvedValue(null)
+                    ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "royalty_protected", markets: [ROYALTY] })
+                    show(item(), OWNER)
+                    const sell = within(await screen.findByRole("region", { name: "Sell this token" }))
+                    expect(sell.getByText("This collection's creator has not allowed this market, so its tokens cannot be sold here.")).toBeInTheDocument()
+                    expect(sell.queryByRole("button")).toBeNull()
+                })
+
+                it("lets a royalty-protected token be listed where its creator allowed this market", async () => {
+                    market.getTokenListing.mockResolvedValue(null)
+                    ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "royalty_protected", markets: ["g1nn54k5fmly8agexe3ll4t6clqmcefsn7nr9ee3"] })
+                    show(item(), OWNER)
+                    expect(await within(await screen.findByRole("region", { name: "Sell this token" })).findByRole("button", { name: "List for sale" })).toBeInTheDocument()
+                })
+            })
+
             it("says a listing priced in a token cannot be bought here yet", async () => {
                 market.getTokenListing.mockResolvedValueOnce(listing(4, 2n, { currency: "gno.land/r/demo/foo20" }))
                 show(item(), BUYER)
                 expect(await region("Listing").findByText("Buying in a token arrives in a later version of Memba OS.")).toBeInTheDocument()
                 expect(region("Listing").queryByRole("button")).toBeNull()
+            })
+        })
+
+        describe("offer controls", () => {
+            const BUYER = "g1jg8mtutu9khhfwc4nxmuhcpftf0pajdhfvsqf5"
+            const HOLDER = "g1c0j899h88nwyvnzvh5jagpq6fkkyuj76nld6t0"
+            const terms = { feeBPS: 50n, maxFeeBPS: 200n, treasury: "", split: { seller: 2_985_000n, fee: 15_000n, royalties: [] } }
+            const theirs = (id: number, kind: NftOfferKind, extra: Partial<NftOffer> = {}) => offer(id, kind, { buyer: BUYER, price: 3_000_000n, ...extra })
+            beforeEach(() => {
+                market.getTokenListing.mockResolvedValue(null)
+                ledger.getToken.mockResolvedValue({ collection: "C1", number: 2n, owner: HOLDER, status: "active", uri: "" })
+                ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "open", markets: [] })
+                market.getMarketTerms.mockResolvedValue(terms)
+            })
+
+            it("lets the holder sell to an offer that applies to its token, and to no other", async () => {
+                market.listCollectionOffers.mockResolvedValue([theirs(1, "token"), theirs(2, "collection"), theirs(3, "trait"), theirs(4, "collection", { expiresAt: PAST })])
+                show({ kind: "token", collection: "C1", number: 2n }, HOLDER)
+                const offers = region("Offers for this token")
+                const sells = await offers.findAllByRole("button", { name: "Sell for 3 GNOT" })
+                expect(sells).toHaveLength(2)
+                expect(offers.getByText("Accepting a trait offer arrives in a later version of Memba OS.")).toBeInTheDocument()
+                fireEvent.click(sells[1])
+                await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                expect(trading.lane).toHaveBeenCalledWith("mainnet", "nft_market", "ugnot")
+                const [approve, accept] = trading.sign.mock.calls[0][0].prepare().msgs
+                expect(approve.value).toMatchObject({ caller: HOLDER, func: "Approve", args: ["C1", "g1nn54k5fmly8agexe3ll4t6clqmcefsn7nr9ee3", "2"] })
+                expect(accept.value).toMatchObject({ func: "AcceptOffer", args: ["O2", "2", "", "ugnot", "3000000"] })
+                expect(screen.queryByRole("region", { name: "Make an offer for this token" })).toBeNull()
+            })
+
+            it.each([["the holder's", HOLDER], ["a former holder's", BUYER]])("names %s listing the sale closes", async (_, seller) => {
+                market.getTokenListing.mockResolvedValue(listing(9, 2n, { seller }))
+                market.listCollectionOffers.mockResolvedValue([theirs(2, "collection")])
+                show({ kind: "token", collection: "C1", number: 2n }, HOLDER)
+                fireEvent.click(await region("Offers for this token").findByRole("button", { name: "Sell for 3 GNOT" }))
+                await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                expect(trading.sign.mock.calls[0][0].lines()).toContainEqual(["Listing", "L9 closes with this sale"])
+            })
+
+            it("says a paused market before the holder's review", async () => {
+                market.listCollectionOffers.mockResolvedValue([theirs(2, "collection")])
+                trading.lane.mockResolvedValueOnce({ lane: "nft_market", currency: "ugnot", paused: true, allowlisted: true, laneReady: true, open: false })
+                show({ kind: "token", collection: "C1", number: 2n }, HOLDER)
+                const offers = region("Offers for this token")
+                fireEvent.click(await offers.findByRole("button", { name: "Sell for 3 GNOT" }))
+                expect(await offers.findByRole("alert")).toHaveTextContent("Trading is paused on this network for now.")
+                expect(trading.sign).not.toHaveBeenCalled()
+            })
+
+            it("offers no sale to an offer when the collection cannot be sold here", async () => {
+                ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "royalty_protected", markets: [] })
+                market.listCollectionOffers.mockResolvedValue([theirs(2, "collection")])
+                show({ kind: "token", collection: "C1", number: 2n }, HOLDER)
+                await region("Offers for this token").findByText("Any token of the collection")
+                expect(region("Offers for this token").queryByRole("button")).toBeNull()
+            })
+
+            it("lets the buyer cancel its own offer, and makes a token offer for someone else's token", async () => {
+                market.listCollectionOffers.mockResolvedValue([theirs(1, "token")])
+                show({ kind: "token", collection: "C1", number: 2n }, BUYER)
+                fireEvent.click(await region("Offers for this token").findByRole("button", { name: "Cancel offer" }))
+                await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                expect(trading.sign.mock.calls[0][0].prepare().msgs[0].value).toMatchObject({ caller: BUYER, func: "CancelOffer", args: ["O1"] })
+                expect(trading.lane).not.toHaveBeenCalled()
+
+                const make = within(screen.getByRole("region", { name: "Make an offer for this token" }))
+                fireEvent.change(make.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "3" } })
+                fireEvent.click(make.getByRole("button", { name: "Make offer" }))
+                await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledTimes(2))
+                expect(market.getMarketTerms).toHaveBeenCalledWith("C1", 3_000_000n)
+                expect(trading.sign.mock.calls[1][0].prepare().msgs[0].value).toMatchObject({ caller: BUYER, send: "3000000ugnot", func: "MakeOffer", args: expect.arrayContaining(["token", "C1", "2", "3000000"]) })
+            })
+
+            it("shows a guest the offer form and asks it to connect only when it makes the offer", async () => {
+                market.listCollectionOffers.mockResolvedValue([])
+                const { openConnect } = show({ kind: "token", collection: "C1", number: 2n })
+                const make = within(await screen.findByRole("region", { name: "Make an offer for this token" }))
+                fireEvent.change(make.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "3" } })
+                fireEvent.click(make.getByRole("button", { name: "Connect to make an offer" }))
+                expect(openConnect).toHaveBeenCalledOnce()
+                expect(market.getMarketTerms).not.toHaveBeenCalled()
+            })
+
+            it("asks a guest to connect before checking a price it has not typed", async () => {
+                market.listCollectionOffers.mockResolvedValue([])
+                const { openConnect } = show({ kind: "token", collection: "C1", number: 2n })
+                const make = within(await screen.findByRole("region", { name: "Make an offer for this token" }))
+                fireEvent.click(make.getByRole("button", { name: "Connect to make an offer" }))
+                expect(openConnect).toHaveBeenCalledOnce()
+                expect(make.queryByRole("alert")).toBeNull()
+            })
+
+            it("makes a collection offer from the collection view", async () => {
+                market.listCollectionListings.mockResolvedValue([])
+                market.listCollectionOffers.mockResolvedValue([])
+                show({ kind: "collection", collection: "C1" }, BUYER)
+                const make = within(await screen.findByRole("region", { name: "Make a collection offer" }))
+                fireEvent.change(make.getByRole("textbox", { name: "Price in GNOT" }), { target: { value: "3" } })
+                fireEvent.click(make.getByRole("button", { name: "Make offer" }))
+                await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                expect(trading.sign.mock.calls[0][0].prepare().msgs[0].value.args.slice(0, 5)).toEqual(["collection", "C1", "0", "", "3000000"])
+            })
+
+            it("says why a soulbound collection takes no offer", async () => {
+                market.listCollectionListings.mockResolvedValue([])
+                market.listCollectionOffers.mockResolvedValue([])
+                ledger.getCollection.mockResolvedValue({ id: "C1", name: "Founders", mode: "soulbound", markets: [] })
+                show({ kind: "collection", collection: "C1" }, BUYER)
+                const make = within(await screen.findByRole("region", { name: "Make a collection offer" }))
+                expect(make.getByText("Soulbound tokens are never sold.")).toBeInTheDocument()
+                expect(make.queryByRole("button")).toBeNull()
+            })
+
+            it("lets the buyer cancel its offers from My trading", async () => {
+                market.listSellerListings.mockResolvedValue([])
+                market.listBuyerOffers.mockResolvedValue([theirs(5, "collection")])
+                show({ kind: "mine" }, BUYER)
+                fireEvent.click(await region("My offers").findByRole("button", { name: "Cancel offer" }))
+                await vi.waitFor(() => expect(trading.sign).toHaveBeenCalledOnce())
+                expect(trading.sign.mock.calls[0][0].prepare().msgs[0].value).toMatchObject({ func: "CancelOffer", args: ["O5"] })
             })
         })
 

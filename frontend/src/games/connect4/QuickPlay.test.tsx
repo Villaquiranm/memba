@@ -23,7 +23,7 @@ describe("QuickPlay", () => {
         expect(screen.getByRole("button", { name: "4h" })).toHaveAttribute("aria-pressed", "true")
         expect(screen.getByText(/Stakes still ask your wallet/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole("button", { name: /Start · 1 wallet approval/ }))
-        await waitFor(() => expect(qp.startQuickPlay).toHaveBeenCalledWith("g1me", 14400))
+        await waitFor(() => expect(qp.startQuickPlay).toHaveBeenCalledWith("g1me", 14400, undefined))
     })
     it("shows time left and budget when on, and ends or forgets", async () => {
         qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3 * 3600 + 12 * 60, spendUsedUgnot: 30_000, spendLimitUgnot: 1_000_000 })
@@ -32,7 +32,7 @@ describe("QuickPlay", () => {
         expect(await screen.findByText(/3h 1[12]m left/)).toBeInTheDocument()
         expect(screen.getByText(/0\.97 GNOT/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole("button", { name: "End session" }))
-        await waitFor(() => expect(qp.endQuickPlay).toHaveBeenCalledWith("g1me"))
+        await waitFor(() => expect(qp.endQuickPlay).toHaveBeenCalledWith("g1me", undefined))
         fireEvent.click(screen.getByRole("button", { name: "Forget on this device" }))
         expect(qp.forgetQuickPlay).toHaveBeenCalledWith("g1me")
     })

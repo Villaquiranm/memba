@@ -102,13 +102,16 @@ export function buildCall(func: Connect4Func, args: string[], caller: string, se
     }
 }
 
-function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number) {
-    return doContractBroadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { gasWanted: GAS_WANTED })
+/** Who asks the wallet: doContractBroadcast by default; Memba OS passes its review sheet's (games/connect4/osWallet). */
+export type Broadcast = typeof doContractBroadcast
+
+function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number, broadcast: Broadcast = doContractBroadcast) {
+    return broadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { gasWanted: GAS_WANTED })
 }
 
 export const QUICKPLAY_FALLBACK_EVENT = "memba:quickplay-fallback"
 type MoveFunc = "Reveal" | "Play" | "Resign" | "ClaimTimeout"
-export interface MoveOptions { viaWallet?: boolean }
+export interface MoveOptions { viaWallet?: boolean; broadcast?: Broadcast }
 
 // Coin-free moves sign through the Quick play session when one is active; if the
 // session can't be used, the same call goes to Adena at once.
@@ -121,7 +124,7 @@ async function move(func: MoveFunc, args: string[], caller: string, opts?: MoveO
             window.dispatchEvent(new CustomEvent(QUICKPLAY_FALLBACK_EVENT, { detail: e.message }))
         }
     }
-    return submit(func, args, caller)
+    return submit(func, args, caller, undefined, opts?.broadcast)
 }
 
 function assertIndex(n: number) {
@@ -153,7 +156,7 @@ export function revealKey(caller: string, commitment: string): string | null {
 
 /** Posts an offer and returns its commitment. The passphrase is stored before
  * signing; if it cannot be stored nothing is sent (a lost key forfeits). */
-export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string }): Promise<string> {
+export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string }, broadcast?: Broadcast): Promise<string> {
     const bytes = crypto.getRandomValues(new Uint8Array(32))
     const passphrase = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
     const commitment = await sha256Hex(passphrase)
@@ -170,11 +173,11 @@ export async function offer(caller: string, o: { stakeUgnot: number; validFor: n
         throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
     }
     if (revealKey(caller, commitment) !== passphrase) throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
-    await submit("Offer", [o.opponent, String(o.validFor), commitment], caller, o.stakeUgnot)
+    await submit("Offer", [o.opponent, String(o.validFor), commitment], caller, o.stakeUgnot, broadcast)
     return commitment
 }
 
-export const accept = (caller: string, g: Game) => submit("Accept", [String(g.id)], caller, g.stake)
+export const accept = (caller: string, g: Game, broadcast?: Broadcast) => submit("Accept", [String(g.id)], caller, g.stake, broadcast)
 
 export async function reveal(caller: string, id: number, passphrase: string, opts?: MoveOptions) {
     assertIndex(id)
@@ -189,4 +192,4 @@ export async function play(caller: string, id: number, column: number, opts?: Mo
 
 export async function claimTimeout(caller: string, id: number, opts?: MoveOptions) { assertIndex(id); return move("ClaimTimeout", [String(id)], caller, opts) }
 export async function resign(caller: string, id: number, opts?: MoveOptions) { assertIndex(id); return move("Resign", [String(id)], caller, opts) }
-export async function cancel(caller: string, id: number) { assertIndex(id); return submit("Cancel", [String(id)], caller) }
+export async function cancel(caller: string, id: number, broadcast?: Broadcast) { assertIndex(id); return submit("Cancel", [String(id)], caller, undefined, broadcast) }

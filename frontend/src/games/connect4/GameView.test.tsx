@@ -33,7 +33,7 @@ describe("GameView", () => {
         view("g1alice", g)
         expect(await screen.findByText(/Your move/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole("button", { name: /^Drop in column 5:/ }))
-        await waitFor(() => expect(lib.play).toHaveBeenCalledWith("g1alice", 4, 5))
+        await waitFor(() => expect(lib.play).toHaveBeenCalledWith("g1alice", 4, 5, {}))
     })
 
     it("disables the board off-turn and shows Resign", async () => {
@@ -54,7 +54,7 @@ describe("GameView", () => {
         lib.revealKey.mockReturnValue("pass")
         lib.reveal.mockRejectedValue(new Error("reveal clock ran out"))
         view("g1alice", { ...g, turn: 0, turnPlayer: "" })
-        await waitFor(() => expect(lib.reveal).toHaveBeenCalledWith("g1alice", 4, "pass"))
+        await waitFor(() => expect(lib.reveal).toHaveBeenCalledWith("g1alice", 4, "pass", {}))
         expect(await screen.findByText(/reveal clock ran out/)).toBeInTheDocument()
         await new Promise((r) => setTimeout(r, 50))
         expect(lib.reveal).toHaveBeenCalledTimes(1)

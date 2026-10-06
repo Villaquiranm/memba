@@ -3,12 +3,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { QUICKPLAY_DURATIONS, endQuickPlay, forgetQuickPlay, quickPlayStatus, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
 import { ACTIVE_NETWORK_KEY, connect4PathFor } from "../../lib/config"
 import { TxError } from "./TxError"
+import { useWalletBroadcast } from "./osWallet"
 
 const MOVE_FEE_UGNOT = 30_000
 const LABEL: Record<QuickPlayDuration, string> = { 3600: "1h", 14400: "4h", 86400: "24h" }
 
 export function QuickPlay({ me, connected }: { me: string; connected: boolean }) {
     const client = useQueryClient()
+    const broadcast = useWalletBroadcast()
     const { data: status, isError } = useQuery({ queryKey: ["quickplay", me], queryFn: () => quickPlayStatus(me), enabled: connected && !!me,
         // A just-sent session is polled quickly until the chain shows it.
         refetchInterval: (q) => (q.state.data === "pending" ? 3_000 : 30_000) })
@@ -53,7 +55,7 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
         // With the RPC down and no stale data the key can still be dropped here.
         return <div className="c4-qp" data-on="true">
             {pill}
-            <button type="button" className="os-btn os-quiet" disabled={busy} onClick={() => act(() => endQuickPlay(me))}>End session</button>
+            <button type="button" className="os-btn os-quiet" disabled={busy} onClick={() => act(() => endQuickPlay(me, broadcast))}>End session</button>
             <button type="button" className="os-btn os-quiet c4-qp-forget" title="Deletes the key here; doesn't revoke on chain — the session runs until it expires." disabled={busy} onClick={() => { forgetQuickPlay(me); void client.invalidateQueries({ queryKey: ["quickplay", me] }) }}>Forget on this device</button>
             {readError}
             <TxError message={error} onDismiss={() => setError(null)} />
@@ -67,7 +69,7 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
                 {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => setDuration(d)}>{LABEL[d]}</button>)}
             </div>
             <p className="os-sub">Moves sign automatically. Stakes still ask your wallet. Up to 1 GNOT/day of gas.</p>
-            <button type="button" className="os-btn c4-cta" disabled={busy} onClick={() => act(() => startQuickPlay(me, duration))}>Start · 1 wallet approval</button>
+            <button type="button" className="os-btn c4-cta" disabled={busy} onClick={() => act(() => startQuickPlay(me, duration, broadcast))}>Start · 1 wallet approval</button>
         </div>}
         {/* Outside the panel: confirming in the wallet dialog closes it before Start settles. */}
         <TxError message={error} onDismiss={() => setError(null)} />

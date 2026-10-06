@@ -7,6 +7,7 @@ const lib = vi.hoisted(() => ({ getActive: vi.fn(), offer: vi.fn(), accept: vi.f
 vi.mock("../../lib/connect4", async (orig) => ({ ...(await orig<typeof import("../../lib/connect4")>()), ...lib }))
 
 import { Lobby } from "./Lobby"
+import { SignerContext, type SignerApi } from "../../os/sign/signerContext"
 
 const base: Game = {
     id: 1, creator: "g1alice", opponent: "", acceptor: "", stake: 2_000_000, fee: 100_000, expiresAt: 2_000,
@@ -26,7 +27,7 @@ describe("Lobby", () => {
         expect(screen.getByRole("listitem", { name: /#2/ })).toHaveTextContent("private")
         expect(screen.getAllByRole("button", { name: "Accept" })[1]).toBeDisabled() // private, not for bob
         fireEvent.click(screen.getAllByRole("button", { name: "Accept" })[0])
-        await waitFor(() => expect(lib.accept).toHaveBeenCalledWith("g1bob", expect.objectContaining({ id: 1 })))
+        await waitFor(() => expect(lib.accept).toHaveBeenCalledWith("g1bob", expect.objectContaining({ id: 1 }), undefined))
     })
 
     it("disables Accept on your own and expired offers, and offers Cancel on expired ones to anyone", async () => {
@@ -47,7 +48,7 @@ describe("Lobby", () => {
         fireEvent.change(await screen.findByLabelText("Stake (GNOT)"), { target: { value: "2" } })
         fireEvent.change(screen.getByLabelText("Valid for (minutes)"), { target: { value: "15" } })
         fireEvent.click(screen.getByRole("button", { name: "Post offer" }))
-        await waitFor(() => expect(lib.offer).toHaveBeenCalledWith("g1alice", { stakeUgnot: 2_000_000, validFor: 15, opponent: "" }))
+        await waitFor(() => expect(lib.offer).toHaveBeenCalledWith("g1alice", { stakeUgnot: 2_000_000, validFor: 15, opponent: "" }, undefined))
         await waitFor(() => expect(onOpen).toHaveBeenCalledWith(7))
     })
 
@@ -116,6 +117,15 @@ describe("Lobby", () => {
         await screen.findAllByRole("listitem", { name: /#7/ })
         await new Promise((r) => setTimeout(r, 50))
         expect(onOpen).toHaveBeenCalledTimes(1)
+    })
+
+    it("inside Memba OS, sends the offer through the OS review sheet", async () => {
+        lib.getActive.mockResolvedValue({ now: 1_001, games: [] })
+        lib.offer.mockImplementation((_me: string, _o: unknown, broadcast: (m: unknown[], memo: string) => Promise<unknown>) => broadcast([], "Connect 4: Offer"))
+        const sign = vi.fn(() => false)
+        renderWithProviders(<SignerContext.Provider value={{ sign } as unknown as SignerApi}><Lobby me="g1alice" connected onOpen={vi.fn()} /></SignerContext.Provider>)
+        fireEvent.click(await screen.findByRole("button", { name: "Post offer" }))
+        await waitFor(() => expect(sign).toHaveBeenCalledWith(expect.objectContaining({ title: "Connect 4", summary: "Connect 4: Offer" })))
     })
 
     it("filters to my games", async () => {

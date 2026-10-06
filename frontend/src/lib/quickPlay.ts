@@ -110,7 +110,8 @@ async function sessionSlots(master: string, path: string): Promise<{ total: numb
     } catch { return null }
 }
 
-export async function startQuickPlay(master: string, duration: QuickPlayDuration): Promise<QuickPlayStatus> {
+/** `broadcast`: who asks the wallet (Memba OS passes its review sheet's). */
+export async function startQuickPlay(master: string, duration: QuickPlayDuration, broadcast: typeof doContractBroadcast = doContractBroadcast): Promise<QuickPlayStatus> {
     checkMaster(master)
     if (starting.has(master) || hasLocalSession(master)) throw new Error("Quick play is already on — end it first.")
     if (!QUICKPLAY_DURATIONS.includes(duration)) throw new Error("Unsupported Quick play duration")
@@ -128,7 +129,7 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
         const slots = await sessionSlots(master, path)
         if (slots && slots.total - slots.stale.length >= MAX_SESSIONS) throw new Error("This account already has 16 sessions. Revoke some in your wallet, then try again.")
         const revokes = (slots?.stale ?? []).map((k) => ({ type: "/auth.m_revoke_session", value: { creator: master, session_key: sessionKeyAny(k) } }))
-        await doContractBroadcast([...revokes, { type: "/auth.m_create_session", value: {
+        await broadcast([...revokes, { type: "/auth.m_create_session", value: {
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
@@ -198,10 +199,10 @@ export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "R
     throw new QuickPlayUnavailable("rejected", "Quick play couldn't sign this move.")
 }
 
-export async function endQuickPlay(master: string): Promise<void> {
+export async function endQuickPlay(master: string, broadcast: typeof doContractBroadcast = doContractBroadcast): Promise<void> {
     checkMaster(master)
     const mine = local(master)
     if (!mine) return
-    await doContractBroadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(mine.key.pub).slice(-35)) } } }], "End Quick play")
+    await broadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(mine.key.pub).slice(-35)) } } }], "End Quick play")
     remove(master)
 }

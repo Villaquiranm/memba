@@ -4,6 +4,7 @@ import { Empty, Gate, Loading, Pill, Toggle } from "../../os/kit"
 import { COLS, ROWS, cell } from "./rules"
 import { TxError } from "./TxError"
 import { QuickPlay } from "./QuickPlay"
+import { useWalletBroadcast } from "./osWallet"
 import { fmtSeconds, formatGnot, shortAddr, useActive, useChainNow, useTx } from "./useConnect4"
 import "./connect4.css"
 
@@ -16,6 +17,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     const { data, dataUpdatedAt, isLoading } = useActive()
     const now = useChainNow(data?.now, dataUpdatedAt)
     const tx = useTx()
+    const broadcast = useWalletBroadcast()
     const alive = useRef(true)
     useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
     const [stake, setStake] = useState("1")
@@ -44,7 +46,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
         && (opponent === "" || /^g1[02-9ac-hj-np-z]{38}$/.test(opponent))
 
     const post = () => tx.run(async () => {
-        const commitment = await offer(me, { stakeUgnot, validFor: minutes, opponent })
+        const commitment = await offer(me, { stakeUgnot, validFor: minutes, opponent }, broadcast)
         // ponytail: finds the new game in the first 100 active games; page if the lobby ever grows past that.
         for (let i = 0; i < 10; i++) {
             if (!alive.current) return
@@ -98,8 +100,8 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                                     </div>
                                     <div className="os-sub">by {who(g.creator)}</div>
                                     <div className="os-row c4-offer-actions">
-                                        {g.creator !== me && <button type="button" className="os-btn c4-cta" disabled={tx.pending || !canAccept(g)} onClick={() => tx.run(async () => { await accept(me, g); onOpen(g.id) })}>Accept</button>}
-                                        {canCancel(g) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => tx.run(() => cancel(me, g.id))}>Cancel</button>}
+                                        {g.creator !== me && <button type="button" className="os-btn c4-cta" disabled={tx.pending || !canAccept(g)} onClick={() => tx.run(async () => { await accept(me, g, broadcast); onOpen(g.id) })}>Accept</button>}
+                                        {canCancel(g) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => tx.run(() => cancel(me, g.id, broadcast))}>Cancel</button>}
                                         <button type="button" className="os-btn os-quiet" aria-label={`Open game #${g.id}`} onClick={() => onOpen(g.id)}>Open</button>
                                     </div>
                                 </li>

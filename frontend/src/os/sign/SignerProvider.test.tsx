@@ -400,6 +400,18 @@ describe("OS signing session boundary", () => {
         expect(screen.queryByText(/Your wallet sets the fee it signs/)).toBeNull()
     })
 
+    it("tells the request when its review is dismissed without signing", () => {
+        const onDismissed = vi.fn()
+        function Dismissable() {
+            const signer = useSigner()
+            return <button type="button" onClick={() => signer.sign({ ...request, onDismissed })}>Open</button>
+        }
+        render(<SignerProvider session={session("member")} toast={vi.fn()}><Dismissable /></SignerProvider>)
+        fireEvent.click(screen.getByRole("button", { name: "Open" }))
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+        expect(onDismissed).toHaveBeenCalledTimes(1)
+    })
+
     it("contains transaction review focus and returns it to the invoking control", async () => {
         const { container } = render(<SignerProvider session={session("member")} toast={vi.fn()}>
             <div className="memba-os"><main className="os-desk"><OpenReview /></main></div>

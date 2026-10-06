@@ -64,6 +64,8 @@ export interface SignRequest<C extends string = string> {
     /** Nothing took effect (stopped before the wallet, rejected in it, or refused by the node): drop what `send` saved. */
     onNothingSent?: () => void
     onSettled?: (outcome: SettledOutcome, choice: C | undefined) => void
+    /** The review was closed without signing (Cancel or Escape on the sheet). */
+    onDismissed?: () => void
 }
 
 export type SignResult =

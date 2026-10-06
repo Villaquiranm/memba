@@ -26,7 +26,7 @@ import { loadSavedTargets, saveWindows, targetsFromUrl, urlForWindows, windowTok
 import { useDesk } from "./useDesk"
 import { useOsSession } from "./useOsSession"
 import { SignerProvider } from "../sign/SignerProvider"
-import { setWalletActionGuard } from "../../lib/grc20"
+import { bumpWalletActionEpoch, setWalletActionGuard } from "../../lib/grc20"
 import { PhoneShell } from "../phone/PhoneShell"
 import { LiveTicker } from "../apps/live/LiveTicker"
 import { LiveActivityProvider } from "../apps/live/LiveProvider"
@@ -149,7 +149,7 @@ export function Shell() {
         },
     })
     const memberNow = useRef(session.status === "member")
-    useLayoutEffect(() => { memberNow.current = session.status === "member" }, [session.status])
+    useLayoutEffect(() => { memberNow.current = session.status === "member"; bumpWalletActionEpoch() }, [session.status])
     useLayoutEffect(() => {
         setWalletActionGuard(() => memberNow.current)
         return () => setWalletActionGuard(null)

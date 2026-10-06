@@ -77,4 +77,17 @@ describe("QuickPlay", () => {
         const pill = await screen.findByText("⚡ Quick play · budget used up for today")
         expect(pill).toHaveAttribute("data-tone", "warn")
     })
+    it("shows a Start failure after the wallet dialog closed the popover", async () => {
+        qp.quickPlayStatus.mockResolvedValue(null)
+        qp.startQuickPlay.mockImplementation(async () => {
+            // Confirming in the transaction dialog is a pointer-down outside the popover.
+            fireEvent.pointerDown(document.body)
+            throw new Error("insufficient funds")
+        })
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        fireEvent.click(await screen.findByRole("button", { name: /Quick play/ }))
+        fireEvent.click(screen.getByRole("button", { name: /Start · 1 wallet approval/ }))
+        expect(await screen.findByText("insufficient funds")).toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: /Start · 1 wallet approval/ })).toBeNull()
+    })
 })

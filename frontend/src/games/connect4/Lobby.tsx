@@ -9,6 +9,8 @@ import "./connect4.css"
 
 // The realm's default fee, used for the pre-sign estimate only; per-game results use g.fee.
 const FEE_UGNOT = 100_000
+// Games already auto-opened for reveal: module-level so "← Lobby" (a remount) doesn't send the creator straight back.
+const autoOpened = new Set<number>()
 
 export function Lobby({ me, connected, onOpen }: { me: string; connected: boolean; onOpen: (id: number) => void }) {
     const { data, dataUpdatedAt, isLoading } = useActive()
@@ -24,13 +26,12 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     const offers = games.filter((g) => g.status === "open")
     const live = games.filter((g) => g.status === "playing")
 
-    // A creator whose offer was accepted must reveal: open that game so the reveal prompt/auto-reveal runs.
-    const opened = useRef(new Set<number>())
+    // A creator whose offer was accepted must reveal: open that game once, while the reveal clock still runs.
     useEffect(() => {
-        if (!connected) return
-        for (const g of data?.games ?? []) {
-            if (g.status === "playing" && g.turn === 0 && g.creator === me && !opened.current.has(g.id)) {
-                opened.current.add(g.id)
+        if (!connected || !data) return
+        for (const g of data.games) {
+            if (g.status === "playing" && g.turn === 0 && g.creator === me && g.deadline > data.now && !autoOpened.has(g.id)) {
+                autoOpened.add(g.id)
                 onOpen(g.id)
             }
         }

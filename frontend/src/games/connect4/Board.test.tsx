@@ -42,13 +42,13 @@ describe("Board", () => {
         let b = empty
         for (let r = 0; r < 6; r++) b = put(b, 0, r, "2")
         render(<Board game={game(b)} canPlay onPlay={onPlay} />)
-        expect(screen.getByRole("button", { name: "Drop in column 1" })).toBeDisabled()
-        fireEvent.click(screen.getByRole("button", { name: "Drop in column 3" }))
+        expect(screen.getByRole("button", { name: /^Drop in column 1:/ })).toBeDisabled()
+        fireEvent.click(screen.getByRole("button", { name: /^Drop in column 3:/ }))
         expect(onPlay).toHaveBeenCalledWith(3)
     })
     it("disables every column when it cannot play", () => {
         render(<Board game={game(empty)} canPlay={false} onPlay={vi.fn()} />)
-        for (let c = 1; c <= 7; c++) expect(screen.getByRole("button", { name: `Drop in column ${c}` })).toBeDisabled()
+        for (let c = 1; c <= 7; c++) expect(screen.getByRole("button", { name: new RegExp(`^Drop in column ${c}:`) })).toBeDisabled()
     })
     it("shows both last-move and winning-line markers on the winning cell", () => {
         let b = empty
@@ -59,5 +59,12 @@ describe("Board", () => {
         )
         // The winning cell (column 3, row 0) should have both classes
         expect(container.querySelectorAll('.c4-last.c4-win')).toHaveLength(1)
+    })
+    it("describes each column's discs and announces the last move", () => {
+        const b = put(put(empty, 2, 0, "1"), 2, 1, "2")
+        render(<Board game={game(b, { moves: 2, lastCol: 2, lastRow: 1 })} canPlay={false} onPlay={vi.fn()} />)
+        expect(screen.getByRole("button", { name: "Drop in column 3: red, yellow, 4 empty" })).toBeDisabled()
+        expect(screen.getByRole("button", { name: "Drop in column 1: 6 empty" })).toBeInTheDocument()
+        expect(screen.getByText("Last move: yellow in column 3.")).toHaveAttribute("aria-live", "polite")
     })
 })

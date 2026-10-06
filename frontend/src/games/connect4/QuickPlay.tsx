@@ -68,7 +68,8 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
             </div>
             <p className="os-sub">Moves sign automatically. Stakes still ask your wallet. Up to 1 GNOT/day of gas.</p>
             <button type="button" className="os-btn c4-cta" disabled={busy} onClick={() => act(() => startQuickPlay(me, duration))}>Start · 1 wallet approval</button>
-            <TxError message={error} onDismiss={() => setError(null)} />
         </div>}
+        {/* Outside the panel: confirming in the wallet dialog closes it before Start settles. */}
+        <TxError message={error} onDismiss={() => setError(null)} />
     </div>
 }

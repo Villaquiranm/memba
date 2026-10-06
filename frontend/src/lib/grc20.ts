@@ -134,6 +134,8 @@ let _walletRpcUrl: string | null = null
 let _walletRpcTrusted = false
 let _walletChainId: string | null = null
 let _walletAddress: string | null = null
+// Bumped whenever the connected account or the OS session changes (see walletActionTicket).
+let _walletEpoch = 0
 
 /** Called by useAdena to sync the wallet's active RPC validation state +
  *  the wallet's active chainId (used to block wrong-chain broadcasts) + the
@@ -142,6 +144,7 @@ export function setWalletRpcContext(url: string | null, trusted: boolean, chainI
     _walletRpcUrl = url
     _walletRpcTrusted = trusted
     _walletChainId = chainId
+    if (address !== _walletAddress) _walletEpoch++
     _walletAddress = address
 }
 
@@ -254,6 +257,26 @@ function nodeLines(nodeError: unknown, log: string): [string, string, string] {
 export function setWalletActionGuard(guard: (() => boolean) | null): void {
     _walletActionGuard = guard
 }
+
+/** The OS calls this when its session changes (lock, sign-out, sign-in). */
+export function bumpWalletActionEpoch(): void { _walletEpoch++ }
+
+/**
+ * For signing that never opens the wallet (Quick play): the returned check
+ * throws once the OS session or connected account that started the action
+ * has changed, even if a new one is in place. Call it before signing and
+ * right before sending.
+ */
+export function walletActionTicket(): () => void {
+    const epoch = _walletEpoch, address = _walletAddress
+    return () => {
+        assertWalletActionAllowed()
+        if (_walletEpoch !== epoch || _walletAddress !== address) throw new WalletActionBlockedError()
+    }
+}
+
+/** The wallet answered with a failure (rejected in Adena, or refused): it is not an unknown outcome. */
+export class WalletRefusedError extends Error {}
 
 function assertWalletActionAllowed(allowOsActivation = false): void {
     if (_walletActionGuard && !_walletActionGuard() && !allowOsActivation) throw new WalletActionBlockedError()
@@ -481,7 +504,7 @@ async function broadcastContract(msgs: AminoMsg[], memo: string, opts?: Broadcas
     const { error: nodeError, log: nodeLog, hash } = res.data ?? {}
     const failure = typeof nodeLog === "string" && nodeLog
         ? new ChainRejectedError(nodeError, nodeLog, hash)
-        : new Error(res.message || res.data?.message || "Transaction failed")
+        : new WalletRefusedError(res.message || res.data?.message || "Transaction failed")
     // A refusal in the wallet and a domain error (insufficient funds, not a member…) are not faults to report.
     if (res.type !== "TRANSACTION_REJECTED" && !NOT_A_FAULT.test(failure.message)) Sentry.captureException(failure, { tags: { memba_path: "tx-broadcast" } })
     throw failure

@@ -241,3 +241,6 @@
 .c4-qp-pill[data-tone="warn"] { background: var(--os-warn-bg, #FEF0DC); color: var(--os-warn, #B45309); border-color: color-mix(in srgb, var(--os-warn, #B45309) 40%, transparent); }
 .c4-qp-forget { background: none; box-shadow: none; text-decoration: underline; color: var(--os-warn, #B45309); }
 .c4-qp-panel { max-width: calc(100vw - 32px); }
+
+/* Screen-reader-only text (board announcements). */
+.c4-sr { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

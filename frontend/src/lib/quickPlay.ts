@@ -5,7 +5,7 @@
  * never come here. See docs/superpowers/specs/2026-10-02-connect4-quickplay-design.md.
  */
 import { ACTIVE_NETWORK_KEY, GNO_CHAIN_ID, GNO_RPC_URL, connect4PathFor } from "./config"
-import { doContractBroadcast, feeForGasWanted, networkGasPrice } from "./grc20"
+import { ChainRejectedError, WalletRefusedError, doContractBroadcast, feeForGasWanted, networkGasPrice, walletActionTicket } from "./grc20"
 import { keyFromPriv, newSessionKey, pubKeyAnyBytes, signSessionTx, type SessionKey } from "./sessionTx"
 import { broadcastSignedTx, CheckTxError, RealmError } from "./signedTxBroadcast"
 
@@ -52,8 +52,12 @@ function read(master: string): (Stored & { key: SessionKey }) | null {
     } catch { return null }
 }
 function remove(master: string) { try { localStorage.removeItem(storageKey(master)) } catch { /* nothing stored */ } }
+const markSent = (master: string, entry: Stored) => { try { localStorage.setItem(storageKey(master), JSON.stringify({ ...entry, sentAt: Date.now() })) } catch { /* key already stored */ } }
+// Accounts whose Start is waiting on the wallet: their stored key isn't a session yet, and a status read must not drop it.
+const starting = new Set<string>()
+const local = (master: string) => (starting.has(master) ? null : read(master))
 
-export function hasLocalSession(master: string): boolean { return read(master) !== null }
+export function hasLocalSession(master: string): boolean { return local(master) !== null }
 export function forgetQuickPlay(master: string): void { remove(master) }
 
 interface ChainSession { accountNumber: string; sequence: string; status: QuickPlayStatus; allowPaths: string[] }
@@ -61,8 +65,16 @@ async function abciData(path: string): Promise<unknown | null> {
     try {
         const res = await fetch(`${GNO_RPC_URL}/abci_query?path=%22${path}%22`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const base = (await res.json())?.result?.response?.ResponseBase
-        if (!base?.Data) return null
+        const body = await res.json()
+        if (body?.error) throw new Error("RPC error")
+        const base = body?.result?.response?.ResponseBase
+        if (!base || typeof base !== "object") throw new Error("malformed response")
+        // Only the chain's own "no such session" means absent; any other error is a failed read.
+        if (base.Error) {
+            if (base.Error["@type"] === "/std.SessionNotFoundError") return null
+            throw new Error("query failed")
+        }
+        if (typeof base.Data !== "string") throw new Error("malformed response")
         return JSON.parse(atob(base.Data))
     } catch (e) { throw new SessionReadError(e instanceof Error ? e.message : "read failed") }
 }
@@ -100,7 +112,7 @@ async function sessionSlots(master: string, path: string): Promise<{ total: numb
 
 export async function startQuickPlay(master: string, duration: QuickPlayDuration): Promise<QuickPlayStatus> {
     checkMaster(master)
-    if (hasLocalSession(master)) throw new Error("Quick play is already on — end it first.")
+    if (starting.has(master) || hasLocalSession(master)) throw new Error("Quick play is already on — end it first.")
     if (!QUICKPLAY_DURATIONS.includes(duration)) throw new Error("Unsupported Quick play duration")
     const path = allowPath()
     if (!path) throw new Error("Connect 4 is not available on this network.")
@@ -108,7 +120,10 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
     const expiresAt = Math.floor(Date.now() / 1000) + duration
     const entry: Stored = { priv: toHex(key.priv), sessionAddr: key.address, allowPath: path, chainId: GNO_CHAIN_ID }
     try { localStorage.setItem(storageKey(master), JSON.stringify(entry)) } catch { throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.") }
-    if (!hasLocalSession(master)) throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.")
+    if (!read(master)) throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.")
+    starting.add(master)
+    // Set right before the wallet request: from then on a failure may still have landed.
+    let sent = false
     try {
         const slots = await sessionSlots(master, path)
         if (slots && slots.total - slots.stale.length >= MAX_SESSIONS) throw new Error("This account already has 16 sessions. Revoke some in your wallet, then try again.")
@@ -117,11 +132,16 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
-        } }], "Start Quick play")
-    } catch (e) { remove(master); throw e }
-    // The broadcast landed: from here the key is kept even if the reads fail. Memba's node can be a
-    // block or two behind the wallet's, so wait for the session to show up before giving up.
-    try { localStorage.setItem(storageKey(master), JSON.stringify({ ...entry, sentAt: Date.now() })) } catch { /* key already stored */ }
+        } }], "Start Quick play", { beforeSign: () => () => { sent = true; return true } })
+        markSent(master, entry)
+    } catch (e) {
+        if (!sent || e instanceof ChainRejectedError || e instanceof WalletRefusedError) { remove(master); throw e }
+        // The wallet may have sent it: keep the key as pending; the status read settles it by session address.
+        markSent(master, entry)
+        throw new Error("Your wallet didn't say whether Quick play started — Memba keeps checking for it.")
+    } finally { starting.delete(master) }
+    // From here the key is kept even if the reads fail. Memba's node can be a block or two behind
+    // the wallet's, so wait for the session to show up before giving up.
     for (let i = 0; i < CONFIRM_TRIES; i++) {
         try {
             const s = await chainSession(master, key.address)
@@ -135,10 +155,10 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
 /** Throws (key kept) on transport/parse failure; null means no session; "pending" means just sent, not on chain yet. */
 export async function quickPlayStatus(master: string): Promise<QuickPlayStatus | "pending" | null> {
     checkMaster(master)
-    const local = read(master)
-    if (!local) return null
-    const s = await chainSession(master, local.sessionAddr)
-    if (!s && young(local)) return "pending"
+    const mine = local(master)
+    if (!mine) return null
+    const s = await chainSession(master, mine.sessionAddr)
+    if (!s && young(mine)) return "pending"
     if (!s || s.status.expiresAt <= Date.now() / 1000) { remove(master); return null }
     return s.status
 }
@@ -146,28 +166,31 @@ export async function quickPlayStatus(master: string): Promise<QuickPlayStatus |
 export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "Resign" | "ClaimTimeout", args: string[]): Promise<{ hash: string }> {
     checkMaster(master)
     if (!FUNCS.has(func)) throw new Error(`Quick play can't sign ${func}`)
-    const local = read(master)
-    if (!local) throw new QuickPlayUnavailable("ended", "Quick play isn't on for this account.")
+    // Signed without the wallet, so the OS session that started the move is checked here instead.
+    const stillAllowed = walletActionTicket()
+    const mine = local(master)
+    if (!mine) throw new QuickPlayUnavailable("ended", "Quick play isn't on for this account.")
     const fee = feeForGasWanted(GAS_WANTED, await networkGasPrice())
     for (let attempt = 0; attempt < 2; attempt++) {
         let s: ChainSession | null
-        try { s = await chainSession(master, local.sessionAddr) }
+        try { s = await chainSession(master, mine.sessionAddr) }
         catch { throw new QuickPlayUnavailable("rejected", "Couldn't read the Quick play session — confirm in your wallet.") }
-        if (!s && young(local)) throw new QuickPlayUnavailable("rejected", "Quick play is still confirming — confirm in your wallet.")
+        if (!s && young(mine)) throw new QuickPlayUnavailable("rejected", "Quick play is still confirming — confirm in your wallet.")
         if (!s || s.status.expiresAt <= Date.now() / 1000) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
-        if (!s.allowPaths.includes(local.allowPath)) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
+        if (!s.allowPaths.includes(mine.allowPath)) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
         if (s.status.spendUsedUgnot + fee > s.status.spendLimitUgnot) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")
+        stillAllowed()
         const bytes = signSessionTx({
-            key: local.key, chainId: GNO_CHAIN_ID, accountNumber: s.accountNumber, sequence: s.sequence, gas: GAS_WANTED, feeUgnot: fee,
+            key: mine.key, chainId: GNO_CHAIN_ID, accountNumber: s.accountNumber, sequence: s.sequence, gas: GAS_WANTED, feeUgnot: fee,
             memo: `Connect 4: ${func}`,
-            msg: { caller: master, send: "", max_deposit: MAX_DEPOSIT, pkg_path: local.allowPath.slice("vm/exec:".length), func, args },
+            msg: { caller: master, send: "", max_deposit: MAX_DEPOSIT, pkg_path: mine.allowPath.slice("vm/exec:".length), func, args },
         })
-        try { return await broadcastSignedTx(GNO_CHAIN_ID, bytes) }
+        try { return await broadcastSignedTx(GNO_CHAIN_ID, bytes, stillAllowed) }
         catch (e) {
             // DeliverTx budget exhaustion (storage deposit lock) rolls the move back, so the wallet may resend.
             if (e instanceof RealmError && /session spend limit/i.test(e.message)) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")
             if (!(e instanceof CheckTxError)) throw e
-            if (/session expired/i.test(e.message) || (/unknown session|session not found/i.test(e.message) && !young(local))) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
+            if (/session expired/i.test(e.message) || (/unknown session|session not found/i.test(e.message) && !young(mine))) { remove(master); throw new QuickPlayUnavailable("ended", "Quick play ended — confirm in your wallet.") }
             if (/spend limit|exceeds.*limit|not allowed/i.test(e.message)) throw new QuickPlayUnavailable("budget", "Quick play budget used up for today.")
             if (attempt === 1) throw new QuickPlayUnavailable("rejected", e.message)
         }
@@ -177,8 +200,8 @@ export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "R
 
 export async function endQuickPlay(master: string): Promise<void> {
     checkMaster(master)
-    const local = read(master)
-    if (!local) return
-    await doContractBroadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(local.key.pub).slice(-35)) } } }], "End Quick play")
+    const mine = local(master)
+    if (!mine) return
+    await doContractBroadcast([{ type: "/auth.m_revoke_session", value: { creator: master, session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(mine.key.pub).slice(-35)) } } }], "End Quick play")
     remove(master)
 }

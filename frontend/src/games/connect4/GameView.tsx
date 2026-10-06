@@ -9,6 +9,11 @@ import { QuickPlay } from "./QuickPlay"
 import { fmtSeconds, formatGnot, shortAddr, useChainNow, useGame, useTx } from "./useConnect4"
 import "./connect4.css"
 
+type Snap = Pick<Game, "moves" | "turn"> | null
+const sameTurn = (g: Game, s: Snap) => !!s && g.moves === s.moves && g.turn === s.turn
+// When a move's outcome is unknown, the wallet may re-send it only while this still holds on a fresh read.
+type Applies = (g: Game, sent: Snap) => boolean
+
 const STATUS_TONE: Record<Game["status"], PillTone> = { open: "neutral", playing: "ok", won: "neutral", draw: "neutral", void: "neutral", cancelled: "neutral" }
 
 function result(g: Game, me: string): string {
@@ -39,11 +44,10 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const { dataUpdatedAt: qpUpdatedAt } = useQuery({ queryKey: ["quickplay", me], queryFn: () => quickPlayStatus(me), enabled: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- qpUpdatedAt is the invalidation signal
     const quick = useMemo(() => connected && hasLocalSession(me), [connected, me, qpUpdatedAt])
-    // Chain state when a move failed: after an unknown outcome the wallet may only sign if it hasn't moved on.
-    const latest = useRef({ moves: g?.moves, turn: g?.turn, turnPlayer: g?.turnPlayer })
-    useEffect(() => { latest.current = { moves: g?.moves, turn: g?.turn, turnPlayer: g?.turnPlayer } })
-    const movesAtFail = useRef<number | undefined>(undefined)
-    const turnAtFail = useRef<number | undefined>(undefined)
+    const latest = useRef(g)
+    useEffect(() => { latest.current = g })
+    // The game as it was when the failed action was sent (captured before sending), and what must still hold to re-send it.
+    const failed = useRef<{ sent: Snap; applies: Applies }>({ sent: null, applies: () => false })
     const [note, setNote] = useState<string | null>(null)
     useEffect(() => {
         let t: ReturnType<typeof setTimeout> | undefined
@@ -52,10 +56,17 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         return () => { window.removeEventListener(QUICKPLAY_FALLBACK_EVENT, on); clearTimeout(t) }
     }, [])
     // Quick play moves carry their wallet twin, so a failure can be re-sent via Adena.
-    const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>) => tx.run(async () => {
-        try { return await fn() } catch (e) { failLeft.current = leftRef.current; movesAtFail.current = latest.current.moves; turnAtFail.current = latest.current.turn; throw e }
-    }, quick ? walletFn : undefined)
-    const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k), () => reveal(me, g.id, k, { viaWallet: true })) : Promise.resolve(false))
+    const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>, applies: Applies) => {
+        const sent: Snap = latest.current && { moves: latest.current.moves, turn: latest.current.turn }
+        return tx.run(async () => {
+            try { return await fn() } catch (e) { failLeft.current = leftRef.current; failed.current = { sent, applies }; throw e }
+        }, quick ? walletFn : undefined)
+    }
+    const canPlay: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn !== 0 && x.turnPlayer === me
+    const canReveal: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn === 0 && x.creator === me
+    // Resign and ClaimTimeout end the game, so it still playing means they didn't land.
+    const stillPlaying: Applies = (x) => x.status === "playing"
+    const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k), () => reveal(me, g.id, k, { viaWallet: true }), canReveal) : Promise.resolve(false))
 
     useEffect(() => {
         if (!key || !g || autoRevealed.current) return
@@ -67,14 +78,14 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const { error, errorName, retryWithWallet, clearError, failures } = tx
     const handled = useRef(0)
     const unknown = errorName === "OutcomeUnknownError"
-    // After an unknown outcome the move may have landed: re-read the game and only then sign via the wallet.
+    // After an unknown outcome the move may have landed: re-send via the wallet only on a fresh read that proves it didn't.
     const walletRoute = async () => {
         if (!retryWithWallet) return
         if (unknown) {
             const game = (await getGame(id).catch(() => null))?.game
-            if (game && (game.moves !== movesAtFail.current || game.turn !== turnAtFail.current || (game.turn !== 0 && game.turnPlayer !== me))) {
-                clearError(); setNote("Your move already landed."); return
-            }
+            if (!game) { setNote("Couldn't check whether your move landed. Try again in a moment."); return }
+            const { sent, applies } = failed.current
+            if (!applies(game, sent)) { clearError(); setNote(sameTurn(game, sent) && game.status === "playing" ? "This move can't be made any more." : "Your move already landed."); return }
         }
         retryWithWallet()
     }
@@ -92,17 +103,19 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     useEffect(() => {
         if (!unknown) return
         const t = setTimeout(() => {
-            if (latest.current.turnPlayer === me && latest.current.moves === movesAtFail.current) setWatched(true)
+            // Without a game to check, offer the wallet: walletRoute re-reads before it signs.
+            const cur = latest.current
+            if (!cur || failed.current.applies(cur, failed.current.sent)) setWatched(true)
             else clearError()
         }, 10_000)
         return () => { clearTimeout(t); setWatched(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only per failure; clearError is a fresh closure each render
     }, [unknown, failures, me])
-    const moves = g?.moves
+    const moves = g?.moves, turn = g?.turn
     useEffect(() => {
-        if (unknown && failLeft.current >= 15 && moves !== movesAtFail.current) clearError()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the move count only
-    }, [moves])
+        if (unknown && failLeft.current >= 15 && g && !sameTurn(g, failed.current.sent)) clearError()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the move count and turn only
+    }, [moves, turn])
     const txError = unknown && !watched ? "Outcome unknown — checking…"
         : unknown ? "Outcome unknown — your move may not have landed."
         : error
@@ -143,7 +156,7 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         {isCreator && needsReveal && !expired && !key && <div className="os-note os-err" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
 
         <div className="c4-arena">
-            <Board game={g} piece={piece} canPlay={myTurn && !tx.pending} onPlay={(c) => void run(() => play(me, g.id, c), () => play(me, g.id, c, { viaWallet: true }))} />
+            <Board game={g} piece={piece} canPlay={myTurn && !tx.pending} onPlay={(c) => void run(() => play(me, g.id, c), () => play(me, g.id, c, { viaWallet: true }), canPlay)} />
             <div className="c4-side">
                 {live && <div className="c4-turn" role="status" data-mine={myTurn}>{quick && <span aria-label="Signed by Quick play" title="Signed by Quick play">⚡ </span>}{turnText}<small>{expired ? "clock ran out" : `${fmtSeconds(left)} left`}</small></div>}
                 <PlayerCard colour="red" label="Creator" addr={g.creator} me={me} active={live && g.turn === 1} left={left} />
@@ -154,10 +167,10 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
                     <dt>Moves</dt><dd>{g.moves}</dd>
                 </dl>
                 <div className="os-row">
-                    {isCreator && needsReveal && key && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void doReveal(key)}>Reveal</button>}
-                    {expired && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void run(() => claimTimeout(me, g.id), () => claimTimeout(me, g.id, { viaWallet: true }))}>Claim timeout</button>}
+                    {isCreator && needsReveal && key && !unknown && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void doReveal(key)}>Reveal</button>}
+                    {expired && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void run(() => claimTimeout(me, g.id), () => claimTimeout(me, g.id, { viaWallet: true }), stillPlaying)}>Claim timeout</button>}
                     {connected && g.status === "open" && (isCreator || now >= g.expiresAt) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => cancel(me, g.id))}>Cancel</button>}
-                    {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void run(() => resign(me, g.id), () => resign(me, g.id, { viaWallet: true }))}>Resign</button>}
+                    {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void run(() => resign(me, g.id), () => resign(me, g.id, { viaWallet: true }), stillPlaying)}>Resign</button>}
                 </div>
             </div>
         </div>

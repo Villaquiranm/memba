@@ -90,7 +90,7 @@ describe("Lobby", () => {
     })
 
     it("opens a game the creator must reveal, once; not for the acceptor", async () => {
-        const g = { ...base, status: "playing" as const, acceptor: "g1bob", turn: 0 as const }
+        const g = { ...base, status: "playing" as const, acceptor: "g1bob", turn: 0 as const, deadline: 1_090 }
         lib.getActive.mockResolvedValue({ now: 1_000, games: [g] })
         const onOpen = vi.fn()
         renderWithProviders(<Lobby me="g1alice" connected onOpen={onOpen} />)
@@ -102,6 +102,20 @@ describe("Lobby", () => {
         renderWithProviders(<Lobby me="g1bob" connected onOpen={other} />)
         await screen.findAllByRole("listitem", { name: /#1/ })
         expect(other).not.toHaveBeenCalled()
+    })
+
+    it("doesn't reopen a reveal after going back to the lobby, nor open one whose clock ran out", async () => {
+        const fresh = { ...base, id: 7, status: "playing" as const, acceptor: "g1bob", turn: 0 as const, deadline: 1_090 }
+        const stale = { ...fresh, id: 8, deadline: 900 }
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [fresh, stale] })
+        const onOpen = vi.fn()
+        const first = renderWithProviders(<Lobby me="g1alice" connected onOpen={onOpen} />)
+        await waitFor(() => expect(onOpen).toHaveBeenCalledWith(7))
+        first.unmount()
+        renderWithProviders(<Lobby me="g1alice" connected onOpen={onOpen} />)
+        await screen.findAllByRole("listitem", { name: /#7/ })
+        await new Promise((r) => setTimeout(r, 50))
+        expect(onOpen).toHaveBeenCalledTimes(1)
     })
 
     it("filters to my games", async () => {

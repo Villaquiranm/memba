@@ -30,8 +30,9 @@ function failure(value: unknown): string | null {
 
 // One transport for signed bytes; never fall back to a wallet rewriting the
 // payload, another network, or hex-encoded JSON masquerading as a transaction.
-// Callers gate (feature flags, chain checks) before calling.
-export async function broadcastSignedTx(chain: string, bytes: Uint8Array): Promise<{ hash: string; height: number }> {
+// Callers gate (feature flags, chain checks) before calling; `beforePost` runs
+// after the chain preflight, right before the bytes leave, and throws to stop.
+export async function broadcastSignedTx(chain: string, bytes: Uint8Array, beforePost?: () => void): Promise<{ hash: string; height: number }> {
     if (!bytes.length) throw new Error("Nothing to broadcast")
     const statusRes = await fetch(`${GNO_RPC_URL}/status`)
     if (!statusRes.ok) throw new Error("Unable to verify RPC chain")
@@ -39,6 +40,7 @@ export async function broadcastSignedTx(chain: string, bytes: Uint8Array): Promi
     if (record(status.node_info).network !== chain || record(status.sync_info).catching_up !== false) throw new Error("RPC is on a different chain or catching up")
     const expected = Array.from(sha256(bytes), b => b.toString(16).padStart(2, "0")).join("").toUpperCase()
     const uncertain = (detail?: string) => new OutcomeUnknownError(expected, detail)
+    beforePost?.()
     // JSON-RPC bodies go to the root; /broadcast_tx_commit is the form/query API.
     let response: Response
     try {

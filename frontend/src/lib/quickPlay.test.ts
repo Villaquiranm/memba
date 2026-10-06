@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const grc = vi.hoisted(() => ({ doContractBroadcast: vi.fn(), feeForGasWanted: vi.fn(() => 24_000), networkGasPrice: vi.fn(async () => ({ gas: 1000, ugnot: 1 })) }))
+const grc = vi.hoisted(() => ({
+    doContractBroadcast: vi.fn(), feeForGasWanted: vi.fn(() => 24_000), networkGasPrice: vi.fn(async () => ({ gas: 1000, ugnot: 1 })),
+    walletActionTicket: vi.fn(() => () => {}),
+    ChainRejectedError: class ChainRejectedError extends Error {}, WalletRefusedError: class WalletRefusedError extends Error {},
+}))
 vi.mock("./grc20", () => grc)
 const bc = vi.hoisted(() => ({ broadcastSignedTx: vi.fn() }))
 vi.mock("./signedTxBroadcast", async (orig) => ({ ...(await orig<typeof import("./signedTxBroadcast")>()), ...bc }))
@@ -15,7 +19,7 @@ const sessionJSON = (o: Partial<{ seq: string; used: string; expires: number }> 
     BaseSessionAccount: { BaseAccount: { account_number: "283", sequence: o.seq ?? "0" }, expires_at: String(o.expires ?? now() + 3600), spend_limit: "1000000ugnot", spend_used: o.used ?? "", spend_period: "86400", spend_reset: String(now()) },
     allow_paths: ["vm/exec:gno.land/r/test/c4"],
 })
-const query = (body: unknown | null) => ({ ok: true, json: async () => ({ result: { response: { ResponseBase: body === null ? { Data: null, Log: "session not found" } : { Data: btoa(JSON.stringify(body)), Log: "" } } } }) })
+const query = (body: unknown | null) => ({ ok: true, json: async () => ({ result: { response: { ResponseBase: body === null ? { Error: { "@type": "/std.SessionNotFoundError" }, Data: null, Log: "session not found" } : { Error: null, Data: btoa(JSON.stringify(body)), Log: "" } } } }) })
 
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 /** Pretend the session was sent long enough ago that "not on chain" really means gone. */
@@ -23,7 +27,14 @@ const age = () => { const k = `memba.quickplay.onyx.${M}`; localStorage.setItem(
 
 describe("startQuickPlay", () => {
     it("stores the key before asking Adena, then confirms on chain", async () => {
-        grc.doContractBroadcast.mockImplementation(async () => { expect(hasLocalSession(M)).toBe(true); return { hash: "h" } })
+        grc.doContractBroadcast.mockImplementation(async () => {
+            // Stored before the wallet opens, but not a session yet: status reads and moves must ignore it.
+            expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).not.toBeNull()
+            expect(hasLocalSession(M)).toBe(false)
+            expect(await quickPlayStatus(M)).toBeNull()
+            expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).not.toBeNull()
+            return { hash: "h" }
+        })
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(sessionJSON())))
         const st = await startQuickPlay(M, 14400)
         expect(st.spendLimitUgnot).toBe(1_000_000)
@@ -35,6 +46,18 @@ describe("startQuickPlay", () => {
         grc.doContractBroadcast.mockRejectedValueOnce(new Error("rejected"))
         await expect(startQuickPlay(M, 3600)).rejects.toThrow("rejected")
         expect(hasLocalSession(M)).toBe(false)
+    })
+    it("drops the key when the wallet answers with a refusal after opening", async () => {
+        grc.doContractBroadcast.mockImplementationOnce(async (_m: unknown, _memo: string, o: { beforeSign: () => () => boolean }) => { o.beforeSign()(); throw new grc.WalletRefusedError("rejected by user") })
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow("rejected by user")
+        expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).toBeNull()
+    })
+    it("keeps the key as pending when the wallet opened and the outcome is unknown", async () => {
+        grc.doContractBroadcast.mockImplementationOnce(async (_m: unknown, _memo: string, o: { beforeSign: () => () => boolean }) => { o.beforeSign()(); throw new Error("Adena returned an indeterminate transaction status.") })
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow(/keeps checking/)
+        expect(await quickPlayStatus(M)).toBe("pending")
+        expect(hasLocalSession(M)).toBe(true)
     })
     it("waits for a just-sent session to appear on chain", async () => {
         vi.useFakeTimers()
@@ -235,6 +258,12 @@ describe("hardening", () => {
         await expect(quickPlayStatus(M)).rejects.toThrow()
         expect(hasLocalSession(M)).toBe(true)
         age()
+        // An HTTP-200 JSON-RPC or ABCI error is a failed read, not an absent session.
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ error: { code: -32603, message: "Internal error" } }) }))
+        await expect(quickPlayStatus(M)).rejects.toThrow()
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: { response: { ResponseBase: { Error: { "@type": "/std.InternalError" }, Data: null } } } }) }))
+        await expect(quickPlayStatus(M)).rejects.toThrow()
+        expect(hasLocalSession(M)).toBe(true)
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
         expect(await quickPlayStatus(M)).toBeNull()
         expect(hasLocalSession(M)).toBe(false)
@@ -247,6 +276,19 @@ describe("hardening", () => {
         expect(hasLocalSession(M)).toBe(false)
         localStorage.setItem(k, JSON.stringify({ ...e, sessionAddr: "g1p8xftdc9v75netuza8kgtrzg8yxaagd8u3hk5m" }))
         expect(hasLocalSession(M)).toBe(false)
+    })
+    it("stops before signing and before sending once the OS session that started the move changed", async () => {
+        await started()
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(sessionJSON())))
+        const blocked = Object.assign(new Error("Your Memba session ended. Connect again before signing."), { name: "WalletActionBlockedError" })
+        grc.walletActionTicket.mockReturnValueOnce(() => { throw blocked })
+        await expect(quickPlayCall(M, "Play", ["7", "4"])).rejects.toBe(blocked)
+        expect(bc.broadcastSignedTx).not.toHaveBeenCalled()
+        const check = vi.fn()
+        grc.walletActionTicket.mockReturnValueOnce(check)
+        bc.broadcastSignedTx.mockResolvedValueOnce({ hash: "H", height: 1 })
+        await quickPlayCall(M, "Play", ["7", "4"])
+        expect(bc.broadcastSignedTx.mock.calls[0][2]).toBe(check)
     })
     it("rejects malformed master", async () => {
         await expect(startQuickPlay("nope", 3600)).rejects.toThrow()

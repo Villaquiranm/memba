@@ -105,13 +105,14 @@ export function buildCall(func: Connect4Func, args: string[], caller: string, se
 /** Who asks the wallet: doContractBroadcast by default; Memba OS passes its review sheet's (games/connect4/osWallet). */
 export type Broadcast = typeof doContractBroadcast
 
-function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number, broadcast: Broadcast = doContractBroadcast) {
-    return broadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { gasWanted: GAS_WANTED })
+function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: number, broadcast: Broadcast = doContractBroadcast, beforeSign?: () => Promise<void>) {
+    return broadcast([buildCall(func, args, caller, sendUgnot)], `Connect 4: ${func}`, { gasWanted: GAS_WANTED, beforeSign })
 }
 
 export const QUICKPLAY_FALLBACK_EVENT = "memba:quickplay-fallback"
 type MoveFunc = "Reveal" | "Play" | "Resign" | "ClaimTimeout"
-export interface MoveOptions { viaWallet?: boolean; broadcast?: Broadcast }
+/** `beforeSign` runs right before the wallet opens and throws to stop (nothing is sent). */
+export interface MoveOptions { viaWallet?: boolean; broadcast?: Broadcast; beforeSign?: () => Promise<void> }
 
 // Coin-free moves sign through the Quick play session when one is active; if the
 // session can't be used, the same call goes to Adena at once.
@@ -124,7 +125,7 @@ async function move(func: MoveFunc, args: string[], caller: string, opts?: MoveO
             window.dispatchEvent(new CustomEvent(QUICKPLAY_FALLBACK_EVENT, { detail: e.message }))
         }
     }
-    return submit(func, args, caller, undefined, opts?.broadcast)
+    return submit(func, args, caller, undefined, opts?.broadcast, opts?.beforeSign)
 }
 
 function assertIndex(n: number) {

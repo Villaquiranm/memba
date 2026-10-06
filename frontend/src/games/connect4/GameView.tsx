@@ -30,8 +30,8 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const now = useChainNow(data?.now, dataUpdatedAt)
     const tx = useTx()
     const broadcast = useWalletBroadcast()
-    // Moves try Quick play first; `wallet` sends the same move through the wallet.
-    const plain = { broadcast }, wallet = { viaWallet: true, broadcast }
+    // Moves try Quick play first; `wallet` re-sends a failed one through the wallet, re-checked right before Adena opens.
+    const plain = { broadcast }, wallet = { viaWallet: true, broadcast, beforeSign: () => stillApplies() }
     const g = data?.game ?? null
     const isCreator = connected && g?.creator === me
     const isPlayer = connected && (g?.creator === me || g?.acceptor === me)
@@ -70,6 +70,12 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const canReveal: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn === 0 && x.creator === me
     // Resign and ClaimTimeout end the game, so it still playing means they didn't land.
     const stillPlaying: Applies = (x) => x.status === "playing"
+    // The review sheet and wallet can sit open a while: the action must still apply on a read taken just before signing.
+    const stillApplies = async () => {
+        const game = (await getGame(id).catch(() => null))?.game
+        if (!game) throw new Error("Couldn't check the game before signing. Nothing was sent.")
+        if (!failed.current.applies(game, failed.current.sent)) throw new Error("The game moved on before you signed. Nothing was sent.")
+    }
     const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k, plain), () => reveal(me, g.id, k, wallet), canReveal) : Promise.resolve(false))
 
     useEffect(() => {

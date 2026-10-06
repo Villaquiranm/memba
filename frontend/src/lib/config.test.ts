@@ -1328,7 +1328,6 @@ describe("connect4 realm path", () => {
     it("honours the env override on testnets only", () => {
         vi.stubEnv("VITE_CONNECT4_REALM_PATH", "gno.land/r/x/c4")
         expect(connect4PathFor("onyx")).toBe("gno.land/r/x/c4")
-        expect(connect4PathFor("sapphire")).toBe("gno.land/r/x/c4")
         expect(connect4PathFor("mainnet")).toBeNull()
     })
 

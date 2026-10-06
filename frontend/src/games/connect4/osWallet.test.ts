@@ -53,6 +53,14 @@ describe("osBroadcast", () => {
         req!.onDismissed!()
         await expect(q).rejects.toThrow("Cancelled. Nothing was sent.")
     })
+    it("reports the sheet's verified cancellation as nothing sent", async () => {
+        grc.doContractBroadcast.mockRejectedValue(new Error("rejected by user"))
+        const p = osBroadcast(signer())([msg], "m")
+        await vi.waitFor(() => expect(req).not.toBeNull())
+        await expect(sign()).rejects.toThrow()
+        req!.onSettled!("cancelled", undefined)
+        await expect(p).rejects.toMatchObject({ name: "NothingSentError", message: "rejected by user" })
+    })
     it("reports an unknown outcome under the name the game reconciles", async () => {
         const p = osBroadcast(signer())([msg], "m")
         await vi.waitFor(() => expect(req).not.toBeNull())

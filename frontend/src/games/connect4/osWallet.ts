@@ -5,7 +5,7 @@
  */
 import { useContext, useMemo } from "react"
 import { GNO_CHAIN_ID } from "../../lib/config"
-import { doContractBroadcast, feeForGasWanted, networkGasPrice, type AminoMsg } from "../../lib/grc20"
+import { NothingSentError, doContractBroadcast, feeForGasWanted, networkGasPrice, type AminoMsg } from "../../lib/grc20"
 import { formatSend } from "../../os/sign/decode"
 import type { SignRequest } from "../../os/sign/signer"
 import { SignerContext, type SignerApi } from "../../os/sign/signerContext"
@@ -54,7 +54,7 @@ export function osBroadcast(signer: SignerApi): Broadcast {
         return new Promise((resolve, reject) => {
             let sent: Awaited<ReturnType<Broadcast>> | null = null
             let failure: unknown = null
-            const nothingSent = () => failure ?? new Error("Cancelled. Nothing was sent.")
+            const cancelled = () => new NothingSentError(failure instanceof Error ? failure.message : "Cancelled. Nothing was sent.")
             const req: SignRequest = {
                 title: "Connect 4",
                 summary: memo,
@@ -69,9 +69,11 @@ export function osBroadcast(signer: SignerApi): Broadcast {
                 },
                 onSettled: (outcome) => {
                     if ((outcome === "confirmed" || outcome === "submitted") && sent) resolve(sent)
-                    else reject(outcome === "unknown" ? new OsOutcomeUnknownError() : nothingSent())
+                    // "cancelled" is the sheet's verified one: the account was unchanged three blocks later.
+                    else reject(outcome === "unknown" ? new OsOutcomeUnknownError() : outcome === "cancelled" ? cancelled() : failure ?? cancelled())
                 },
-                onDismissed: () => reject(nothingSent()),
+                // The sheet stays open only while nothing was sent, so a dismissal never needs reconciling.
+                onDismissed: () => reject(cancelled()),
             }
             if (!signer.sign(req)) reject(new Error("Couldn't open the signing review. Finish the one that's open, then try again."))
         })

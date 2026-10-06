@@ -5,7 +5,8 @@
  * never come here. See docs/superpowers/specs/2026-10-02-connect4-quickplay-design.md.
  */
 import { ACTIVE_NETWORK_KEY, GNO_CHAIN_ID, GNO_RPC_URL, connect4PathFor } from "./config"
-import { ChainRejectedError, WalletRefusedError, doContractBroadcast, feeForGasWanted, networkGasPrice, walletActionTicket } from "./grc20"
+import { accountMark, accountMarkAfterBlocks } from "../os/sign/accountMark"
+import { ChainRejectedError, NothingSentError, WalletRefusedError, doContractBroadcast, feeForGasWanted, networkGasPrice, walletActionTicket } from "./grc20"
 import { keyFromPriv, newSessionKey, pubKeyAnyBytes, signSessionTx, type SessionKey } from "./sessionTx"
 import { broadcastSignedTx, CheckTxError, RealmError } from "./signedTxBroadcast"
 
@@ -29,6 +30,7 @@ interface Stored { priv: string; sessionAddr: string; allowPath: string; chainId
 const PENDING_GRACE_MS = 120_000
 const CONFIRM_TRIES = 8
 const CONFIRM_DELAY_MS = 1_500
+const MARK_READ_MS = 3_000
 const young = (s: Stored) => typeof s.sentAt === "number" && Date.now() - s.sentAt < PENDING_GRACE_MS
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const storageKey = (master: string) => `memba.quickplay.${ACTIVE_NETWORK_KEY}.${master}`
@@ -125,6 +127,8 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
     starting.add(master)
     // Set right before the wallet request: from then on a failure may still have landed.
     let sent = false
+    // The account before the wallet opens, to tell a real "rejected" from one Adena gives after Confirm.
+    let before: string | null = null
     try {
         const slots = await sessionSlots(master, path)
         if (slots && slots.total - slots.stale.length >= MAX_SESSIONS) throw new Error("This account already has 16 sessions. Revoke some in your wallet, then try again.")
@@ -133,10 +137,15 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
-        } }], "Start Quick play", { beforeSign: () => () => { sent = true; return true } })
+        } }], "Start Quick play", { beforeSign: async () => {
+            before = await Promise.race([accountMark(master).catch(() => null), sleep(MARK_READ_MS).then(() => null)])
+            return () => { sent = true; return true }
+        } })
         markSent(master, entry)
     } catch (e) {
-        if (!sent || e instanceof ChainRejectedError || e instanceof WalletRefusedError) { remove(master); throw e }
+        if (!sent || e instanceof ChainRejectedError || e instanceof NothingSentError) { remove(master); throw e }
+        // "Rejected" after the wallet opened counts only when the account is unchanged a few blocks later.
+        if (e instanceof WalletRefusedError && before !== null && await accountMarkAfterBlocks(master).catch(() => null) === before) { remove(master); throw e }
         // The wallet may have sent it: keep the key as pending; the status read settles it by session address.
         markSent(master, entry)
         throw new Error("Your wallet didn't say whether Quick play started — Memba keeps checking for it.")

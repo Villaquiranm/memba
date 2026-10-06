@@ -275,8 +275,10 @@ export function walletActionTicket(): () => void {
     }
 }
 
-/** The wallet answered with a failure (rejected in Adena, or refused): it is not an unknown outcome. */
-export class WalletRefusedError extends Error {}
+/** The wallet answered with a failure. Adena also answers "rejected" when its window closes after Confirm, so this alone is no proof nothing was sent. */
+export class WalletRefusedError extends Error { override name = "WalletRefusedError" }
+/** Nothing was sent: the review was dismissed, or the account was seen unchanged after a "rejected" reply. */
+export class NothingSentError extends Error { override name = "NothingSentError" }
 
 function assertWalletActionAllowed(allowOsActivation = false): void {
     if (_walletActionGuard && !_walletActionGuard() && !allowOsActivation) throw new WalletActionBlockedError()

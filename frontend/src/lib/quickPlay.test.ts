@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const grc = vi.hoisted(() => ({
     doContractBroadcast: vi.fn(), feeForGasWanted: vi.fn(() => 24_000), networkGasPrice: vi.fn(async () => ({ gas: 1000, ugnot: 1 })),
     walletActionTicket: vi.fn(() => () => {}),
-    ChainRejectedError: class ChainRejectedError extends Error {}, WalletRefusedError: class WalletRefusedError extends Error {},
+    ChainRejectedError: class ChainRejectedError extends Error {}, WalletRefusedError: class WalletRefusedError extends Error {}, NothingSentError: class NothingSentError extends Error {},
 }))
+const marks = vi.hoisted(() => ({ accountMark: vi.fn(async () => "seq:5"), accountMarkAfterBlocks: vi.fn(async () => "seq:5") }))
+vi.mock("../os/sign/accountMark", () => marks)
 vi.mock("./grc20", () => grc)
 const bc = vi.hoisted(() => ({ broadcastSignedTx: vi.fn() }))
 vi.mock("./signedTxBroadcast", async (orig) => ({ ...(await orig<typeof import("./signedTxBroadcast")>()), ...bc }))
@@ -47,13 +49,28 @@ describe("startQuickPlay", () => {
         await expect(startQuickPlay(M, 3600)).rejects.toThrow("rejected")
         expect(hasLocalSession(M)).toBe(false)
     })
-    it("drops the key when the wallet answers with a refusal after opening", async () => {
-        grc.doContractBroadcast.mockImplementationOnce(async (_m: unknown, _memo: string, o: { beforeSign: () => () => boolean }) => { o.beforeSign()(); throw new grc.WalletRefusedError("rejected by user") })
+    const refuseAfterOpening = (e: Error) => grc.doContractBroadcast.mockImplementationOnce(async (_m: unknown, _memo: string, o: { beforeSign: () => Promise<() => boolean> }) => { (await o.beforeSign())(); throw e })
+    it("drops the key on a refusal after opening once the account is unchanged a few blocks later", async () => {
+        refuseAfterOpening(new grc.WalletRefusedError("rejected by user"))
         await expect(startQuickPlay(M, 3600)).rejects.toThrow("rejected by user")
+        expect(marks.accountMarkAfterBlocks).toHaveBeenCalledWith(M)
+        expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).toBeNull()
+    })
+    it("keeps the key as pending when Adena says rejected but the account changed (it landed after Confirm)", async () => {
+        marks.accountMarkAfterBlocks.mockResolvedValueOnce("seq:6")
+        refuseAfterOpening(new grc.WalletRefusedError("rejected by user"))
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow(/keeps checking/)
+        expect(await quickPlayStatus(M)).toBe("pending")
+    })
+    it("drops the key at once when the OS sheet already saw nothing was sent", async () => {
+        refuseAfterOpening(new grc.NothingSentError("Cancelled in Adena."))
+        await expect(startQuickPlay(M, 3600)).rejects.toThrow("Cancelled in Adena.")
+        expect(marks.accountMarkAfterBlocks).not.toHaveBeenCalled()
         expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).toBeNull()
     })
     it("keeps the key as pending when the wallet opened and the outcome is unknown", async () => {
-        grc.doContractBroadcast.mockImplementationOnce(async (_m: unknown, _memo: string, o: { beforeSign: () => () => boolean }) => { o.beforeSign()(); throw new Error("Adena returned an indeterminate transaction status.") })
+        refuseAfterOpening(new Error("Adena returned an indeterminate transaction status."))
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(query(null)))
         await expect(startQuickPlay(M, 3600)).rejects.toThrow(/keeps checking/)
         expect(await quickPlayStatus(M)).toBe("pending")

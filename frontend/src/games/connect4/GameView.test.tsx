@@ -104,14 +104,14 @@ describe("GameView", () => {
         view("g1alice", g)
         fireEvent.click(await screen.findByRole("button", { name: /^Drop in column 5:/ }))
         fireEvent.click(await screen.findByRole("button", { name: "Use wallet instead" }))
-        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, expect.objectContaining({ viaWallet: true })))
     })
 
     it("goes straight to the wallet when a Quick play move fails with under 15s left", async () => {
         lib.play.mockRejectedValueOnce(new Error("rpc down")).mockResolvedValueOnce({})
         view("g1alice", { ...g, deadline: 1_010 })
         fireEvent.click(await screen.findByRole("button", { name: /^Drop in column 5:/ }))
-        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, expect.objectContaining({ viaWallet: true })))
     })
 
     it("after an unknown outcome, offers the wallet only if it's still our turn", async () => {
@@ -132,7 +132,7 @@ describe("GameView", () => {
         lib.play.mockRejectedValueOnce(unknownErr()).mockResolvedValueOnce({})
         view("g1alice", { ...g, deadline: 1_010 })
         fireEvent.click(await screen.findByRole("button", { name: /^Drop in column 5:/ }))
-        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, expect.objectContaining({ viaWallet: true })))
     })
 
     it("does not open the wallet after an unknown outcome when the re-read shows the move landed", async () => {
@@ -148,7 +148,7 @@ describe("GameView", () => {
         lib.play.mockRejectedValueOnce(unknownErr()).mockResolvedValue({})
         view("g1alice", { ...g, deadline: 1_010 })
         fireEvent.click(await screen.findByRole("button", { name: /^Drop in column 5:/ }))
-        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, expect.objectContaining({ viaWallet: true })))
         expect(lib.getGame.mock.calls.length).toBeGreaterThan(1) // the guard re-read
     })
 
@@ -192,7 +192,7 @@ describe("GameView", () => {
         await screen.findByRole("button", { name: "Use wallet instead" })
         qp.hasLocalSession.mockReturnValue(false)
         fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }).then(() => screen.getByRole("button", { name: "Use wallet instead" })))
-        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, { viaWallet: true }))
+        await waitFor(() => expect(lib.play).toHaveBeenLastCalledWith("g1alice", 4, 5, expect.objectContaining({ viaWallet: true })))
     })
 
     it("does not auto-route a RealmError with under 15s left, but offers the button", async () => {
@@ -249,7 +249,20 @@ describe("GameView", () => {
             expect(screen.queryByRole("button", { name: "Reveal" })).toBeNull()
             await vi.advanceTimersByTimeAsync(10_500)
             fireEvent.click(await screen.findByRole("button", { name: "Sign this move with your wallet" }))
-            await waitFor(() => expect(lib.reveal).toHaveBeenLastCalledWith("g1alice", 4, "pass", { viaWallet: true }))
+            await waitFor(() => expect(lib.reveal).toHaveBeenLastCalledWith("g1alice", 4, "pass", expect.objectContaining({ viaWallet: true })))
         } finally { vi.useRealTimers() }
+    })
+    it("re-checks the game right before the wallet signs a re-sent move", async () => {
+        lib.play.mockRejectedValueOnce(new Error("rpc down")).mockResolvedValue({})
+        view("g1alice", g)
+        fireEvent.click(await screen.findByRole("button", { name: /^Drop in column 5:/ }))
+        fireEvent.click(await screen.findByRole("button", { name: "Use wallet instead" }))
+        await waitFor(() => expect(lib.play).toHaveBeenCalledTimes(2))
+        const { beforeSign } = lib.play.mock.calls[1][3] as { beforeSign: () => Promise<void> }
+        await expect(beforeSign()).resolves.toBeUndefined()
+        lib.getGame.mockResolvedValue({ now: 1_000, game: { ...g, moves: 1, turn: 2, turnPlayer: "g1bob" } })
+        await expect(beforeSign()).rejects.toThrow(/moved on before you signed/)
+        lib.getGame.mockRejectedValue(new Error("down"))
+        await expect(beforeSign()).rejects.toThrow(/Couldn't check the game/)
     })
 })

@@ -25,6 +25,15 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet; the creator's first-mover reveal is sent automatically from this browser.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### Retired network: Betanet (2026-10-06)
+- Old Betanet links now open the same page on mainnet; the retired Betanet is gone from Memba's network list
+
+### Retired testnets: Topaz and Sapphire (2026-10-06)
+- Old Topaz and Sapphire testnet links now open the same page on mainnet; the two retired testnets are gone from Memba's network list
+
+### Memba OS: execute GovDAO proposals (2026-10-06)
+- Memba OS: a GovDAO proposal that reaches GovDAO's supermajority can now be executed (or, when No reaches it, closed as rejected) from its proposal window by any connected account, with a review of what it does and a check of the outcome on chain; GovDAO proposal windows show GovDAO's own voting-power shares. GovDAO votes and executions from Memba now carry a measured gas limit and a 1 GNOT storage-deposit cap, so votes no longer run out of gas and an execution can't charge its caller more than the review states
+
 ### Memba OS Tokens: open a fair sale (2026-10-06)
 - Memba OS Tokens: open a fair sale for a new token (lots, a fixed or falling price, soft cap and window), checked against the Launchpad's rules and live terms before signing, with what a fair sale does and does not do stated before you sign (hidden until the Launchpad is published)
 

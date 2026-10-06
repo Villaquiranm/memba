@@ -41,25 +41,18 @@ describe("getGnowebUrl", () => {
         expect(getGnowebUrl("test13")).toBe("https://test13.testnets.gno.land")
     })
 
-    it("returns betanet's own gnoweb for gnoland1 — NOT mainnet", () => {
-        // Was "https://gno.land": mainnet. It answers 200 for shared paths like
-        // /u/<name>, so a betanet link silently rendered another chain's data.
-        // betanet.testnets.gno.land serves <meta name="chainid" content="gnoland1">.
-        expect(getGnowebUrl("gnoland1")).toBe("https://betanet.testnets.gno.land")
-        expect(getGnowebUrl("gnoland1")).not.toBe("https://gno.land")
-    })
-
     it("returns undefined for removed networks", () => {
         expect(getGnowebUrl("test12")).toBeUndefined()
         expect(getGnowebUrl("portal-loop")).toBeUndefined()
         expect(getGnowebUrl("staging")).toBeUndefined()
+        expect(getGnowebUrl("gnoland1")).toBeUndefined()
     })
 
     it("returns undefined for unknown chain", () => {
         expect(getGnowebUrl("unknown-chain")).toBeUndefined()
     })
 
-    // ── Regression: the topaz cutover reintroduced the exact bug the test13
+    // ── Regression: a later cutover reintroduced the exact bug the test13
     // entry above was added to prevent, and nothing here caught it because the
     // suite only ever tested the two networks that already worked.
     it("resolves the ACTIVE default network — not just the legacy ones", () => {
@@ -76,11 +69,11 @@ describe("getGnowebUrl", () => {
         expect(missing, `networks with no gnoweb URL: ${missing.join(", ")}`).toEqual([])
     })
 
-    it("is keyed by network KEY, not chain id — the distinction that broke topaz", () => {
-        // "topaz" is the key; "topaz-1" is the chain id. Passing the chain id
+    it("is keyed by network KEY, not chain id", () => {
+        // "onyx" is the key; "onyx-1" is the chain id. Passing the chain id
         // must NOT resolve, or callers can be wrong and still look right.
-        expect(getGnowebUrl("topaz")).toBe("https://topaz.testnets.gno.land")
-        expect(getGnowebUrl("topaz-1")).toBeUndefined()
+        expect(getGnowebUrl("onyx")).toBe("https://onyx.testnets.gno.land")
+        expect(getGnowebUrl("onyx-1")).toBeUndefined()
     })
 
     it("agrees with getExplorerBaseUrlFor — one source of truth, not two maps", () => {

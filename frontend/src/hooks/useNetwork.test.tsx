@@ -38,7 +38,7 @@ import { completeQuest, getQuestWalletAddress } from "../lib/quests"
 import { trackNetworkVisit } from "../lib/questVerifier"
 
 const wrapper = ({ children }: { children: ReactNode }) => (
-    <MemoryRouter initialEntries={["/topaz/settings"]}>
+    <MemoryRouter initialEntries={["/onyx/settings"]}>
         <Routes>
             <Route path="/:network/*" element={children} />
         </Routes>
@@ -48,7 +48,7 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 describe("useNetwork.switchNetwork — quest credit is awarded from EVERY surface", () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        vi.stubGlobal("location", { pathname: "/topaz/settings", href: "" })
+        vi.stubGlobal("location", { pathname: "/onyx/settings", href: "" })
     })
     afterEach(() => {
         vi.unstubAllGlobals()
@@ -86,7 +86,7 @@ describe("useNetwork.switchNetwork — quest credit is awarded from EVERY surfac
     })
 
     it("preserves Directory tab, search and selected path on a classic network switch", () => {
-        vi.stubGlobal("location", { pathname: "/topaz/directory", search: "?tab=realms&q=boards&realm=r%2Fgov%2Fdao", href: "" })
+        vi.stubGlobal("location", { pathname: "/onyx/directory", search: "?tab=realms&q=boards&realm=r%2Fgov%2Fdao", href: "" })
         const { result } = renderHook(() => useNetwork(), { wrapper })
         result.current.switchNetwork("test13")
         expect(window.location.href).toBe("/test13/directory?tab=realms&q=boards&realm=r%2Fgov%2Fdao")
@@ -97,8 +97,8 @@ describe("useNetwork.switchNetwork — quest credit is awarded from EVERY surfac
         // URL. The guard lives here rather than at the five call sites, which
         // enforced it five different ways and already disagreed with each other.
         const { result } = renderHook(() => useNetwork(), { wrapper })
-        expect(result.current.networkKey).toBe("topaz")
-        result.current.switchNetwork("topaz")
+        expect(result.current.networkKey).toBe("onyx")
+        result.current.switchNetwork("onyx")
         expect(completeQuest).not.toHaveBeenCalled()
         expect(trackNetworkVisit).not.toHaveBeenCalled()
         expect(window.location.href).toBe("")
@@ -109,7 +109,7 @@ describe("useNetwork.switchNetwork — quest credit is awarded from EVERY surfac
 describe("useNetwork.switchNetwork — an explicit choice is recorded apart from the URL echo", () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        vi.stubGlobal("location", { pathname: "/topaz/settings", href: "" })
+        vi.stubGlobal("location", { pathname: "/onyx/settings", href: "" })
     })
     afterEach(() => {
         vi.unstubAllGlobals()
@@ -119,14 +119,14 @@ describe("useNetwork.switchNetwork — an explicit choice is recorded apart from
 
     it("records the switch as the user's preference, and keeps the echo in step", () => {
         const { result } = renderHook(() => useNetwork(), { wrapper })
-        result.current.switchNetwork("gnoland1")
-        expect(localStorage.getItem("memba_network_pref")).toBe("gnoland1")
-        expect(localStorage.getItem("memba_network")).toBe("gnoland1")
+        result.current.switchNetwork("test13")
+        expect(localStorage.getItem("memba_network_pref")).toBe("test13")
+        expect(localStorage.getItem("memba_network")).toBe("test13")
     })
 
     it("records no preference when 'switching' to the network already active", () => {
         const { result } = renderHook(() => useNetwork(), { wrapper })
-        result.current.switchNetwork("topaz")
+        result.current.switchNetwork("onyx")
         expect(localStorage.getItem("memba_network_pref")).toBeNull()
     })
 })

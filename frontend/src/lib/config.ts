@@ -78,10 +78,9 @@ interface NetworkConfig {
      *  un-versioned registry on gnomonitoring's own VPS, not something Memba
      *  controls or can assume is stable.
      *
-     *  ⚠️ This value is NOT settled fact — it has flipped for topaz twice within
-     *  24h of each other (2026-07-22: gnomonitoring registered `topaz-1` as
-     *  `topaz`, needing an override here; 2026-07-23: it flipped back, so the
-     *  override became wrong and was removed). Before trusting or changing a
+     *  ⚠️ This value is NOT settled fact — the registry has renamed a chain and
+     *  renamed it back within 24h (2026-07-22/23), making an override here
+     *  necessary one day and wrong the next. Before trusting or changing a
      *  `monitoringChain` value, re-verify live:
      *    GET https://gnomonitoring.samourai.live/uptime?chain=<candidate>
      *  (use `/uptime`, not `/Participation` — the latter 400s with "Missing
@@ -108,10 +107,9 @@ interface NetworkConfig {
      *
      *  Declared per network rather than derived. It used to be built as
      *  `https://${chainId}.testnets.gno.land`, which is only correct where the
-     *  network KEY and the chain id coincide. On topaz (key `topaz`, chain id
-     *  `topaz-1`) that produced `https://topaz-1.testnets.gno.land` — a host
-     *  that does not resolve — silently breaking every explorer link in the app
-     *  from the cutover until 2026-07-31. Verify a candidate against one of our
+     *  network KEY and the chain id coincide. Where they differ it can name a
+     *  host that does not resolve, which once silently broke every explorer
+     *  link in the app for days. Verify a candidate against one of our
      *  OWN realms (`/r/samcrew/memba_dao`), not just `/`: mainnet `gno.land`
      *  answers 200 at the root and 404s our realms, so a root check passes on
      *  exactly the wrong host. */
@@ -121,10 +119,8 @@ interface NetworkConfig {
     /** True for experimental test chains. Drives disclosures that only make sense
      *  off a production chain — e.g. Team Hub's "Data: mainnet" note, which says
      *  the gnolove roster comes from a mainnet-backed source rather than the chain
-     *  you are on. Betanet is deliberately NOT a testnet here: `gnolove-team-hub`
-     *  e2e encodes "gnoland1 = real chain → no chip", and that product decision is
-     *  preserved. This replaces a `networkKey === "test13"` literal that silently
-     *  dropped the disclosure on topaz at the cutover. */
+     *  you are on. This replaces a `networkKey === "test13"` literal that silently
+     *  dropped the disclosure on every other testnet. */
     isTestnet?: boolean
     /** When false, Memba's realms are NOT deployed on this network — the app shows
      *  a notice instead of letting DAO/channel features fail with 404s. Omitted
@@ -184,125 +180,6 @@ export const NETWORKS: Record<string, NetworkConfig> = {
         // old deep link renders a dead link rather than a wrong one pointing at
         // another chain. Env override retained.
         explorerUrl: import.meta.env.VITE_TEST13_EXPLORER_URL || "https://test13.testnets.gno.land",
-    },
-    // ── Topaz (topaz-1) ──────────────────────────────────────────────────
-    // RETIRED (2026-08-12): the chain was decommissioned — both public RPCs
-    // (official + onbloc) stopped answering — after Adena v1.20.3 had already
-    // dropped topaz-1 and migrated wallet state to sapphire-1. Memba's realm
-    // set (32 artifacts incl. the 2026-07-21 and 2026-07-31 ceremonies) remains
-    // published on the dead chain; realm-versions.json keeps the chain-verified
-    // record. Kept in NETWORKS (hidden) for the same reason as test13: deep
-    // links and stored selections must resolve to the honest degraded view and
-    // the switcher escape, not crash-loop the /:network redirects. Remove the
-    // entry once nothing references it.
-    topaz: {
-        chainId: "topaz-1",
-        userDaos: { create: false, channelsCompanion: false },
-        hidden: true,
-        isTestnet: true,
-        // No monitoringChain override: gnomonitoring's registry currently
-        // resolves "topaz-1" directly (verified live 2026-07-23). It briefly
-        // needed an override to "topaz" (#988, 2026-07-22) — that flipped back
-        // within 24h. See the monitoringChain doc-comment above before
-        // re-adding one; re-verify live first, don't restore #988's value from
-        // memory.
-        rpcUrl: import.meta.env.VITE_TOPAZ_RPC_URL || "https://rpc.topaz.testnets.gno.land:443",
-        // Our own sentry (rpc.topaz.samourai.live) was retired 2026-08-10 — the
-        // host was repurposed to sapphire-1, the DNS record deleted, and it now
-        // serves a cert for rpc.sapphire.samourai.live. Replaced with onbloc's
-        // topaz-1 node (verified live 2026-08-10: network topaz-1, catching_up
-        // false, serves abci_query, archive depth reaches height 100000) so
-        // topaz keeps a second node instead of going single-homed.
-        fallbackRpcUrls: [
-            "https://topaz.rpc.onbloc.xyz:443",
-        ],
-        // No full-topology telemetry node identified yet for topaz-1;
-        // Validators view will show partial data. Revisit when gno core
-        // or our infra team stands up a full-topology sentry.
-        telemetryRpcUrls: [],
-        // Official topaz tx-indexer (live-verified 2026-07-26, GraphQL POST 200).
-        // Env-overridable like the other networks.
-        indexerUrl: import.meta.env.VITE_TOPAZ_INDEXER_URL || "https://indexer.topaz.testnets.gno.land/graphql/query",
-        label: "Topaz",
-        userRegistryPath: "gno.land/r/sys/users",
-        faucetUrl: "https://faucet.gno.land",
-        // Live-verified 2026-07-31: 200 on `/`, `/r/sys/users` AND
-        // `/r/samcrew/memba_dao` (our own realm — the check that actually
-        // proves it is the right chain's gnoweb). NOT `topaz-1.…`, which is
-        // what the old chainId-derived construction produced and does not exist.
-        explorerUrl: import.meta.env.VITE_TOPAZ_EXPLORER_URL || "https://topaz.testnets.gno.land",
-    },
-    // ── Sapphire (sapphire-1) ────────────────────────────────────────────
-    // DEFAULT until 2026-08-27 (Pearl took over); stays SELECTABLE with live
-    // realms through the chain's announced 2026-09-09 sunset (owner directive:
-    // keep it for testing until then; retire the entry to hidden after).
-    // ⚠️ rpc.sapphire.samourai.live died 2026-08-27 ~16:20 (its host now
-    // serves pearl) — the primary below is the official node, so the app is
-    // unaffected; the backend walks its own fallbacks.
-    //
-    // Memba's LIVE default network since the cutover release. The move was
-    // forced, not chosen: Adena v1.20.3 (Chrome Web Store, 2026-08-10) dropped
-    // `topaz-1` and its v024 storage migration wiped topaz-scoped wallet state,
-    // and topaz-1 itself was decommissioned on 2026-08-12 — so the wallet, the
-    // chain, and this app all had to land on sapphire-1 together.
-    //
-    // The entry shipped DARK first (#1063: hidden, realmsDeployed:false, empty
-    // allowlist) so this cutover could be a small reviewable flag flip instead
-    // of a big-bang PR. The flip pairs with three backend moves that MUST land
-    // in the same window (see docs/OPS_RUNBOOK.md): the Fly chain/RPC secrets,
-    // FEED_START_BLOCK (a sapphire height — topaz heights are meaningless
-    // here), and the mandatory feed-state reset (the DB cursor beats the env
-    // floor; stale topaz rows silently poison it).
-    //
-    // Live-verified before the flip: both RPCs report `sapphire-1`,
-    // catching_up false, matching heights; indexer latestBlockHeight tracks;
-    // faucet answers the standard gno JSON-RPC 2.0 shape.
-    sapphire: {
-        chainId: "sapphire-1",
-        userDaos: { create: false, channelsCompanion: false },
-        // Retired to hidden per the 2026-09-09 sunset (owner directive recorded
-        // above): the chain is being decommissioned; a hidden entry keeps
-        // stored-network users resolvable (they fall back to the default
-        // network) without offering a dead chain in the selector.
-        hidden: true,
-        // Flipped to true by the cutover PR AFTER the phase-1 ceremony
-        // published the realm set (deps + gnodaokit + 11 funds-free Memba
-        // realms) — per-artifact vm/qfile records live in realm-versions.json's
-        // `sapphire` section. While this was false it bought the honest
-        // RealmsNotDeployedBanner instead of a silently-empty app (the F-28
-        // failure shape); topaz/test13 now rely on the chain-health degraded
-        // view instead, since their realms ARE deployed — the chains are gone.
-        realmsDeployed: true,
-        isTestnet: true,
-        // No monitoringChain override: gnomonitoring resolves `sapphire-1`
-        // directly (live-verified 2026-08-11, GET /uptime?chain=sapphire-1 →
-        // 200). Per the monitoringChain doc-comment above, re-verify live before
-        // ever adding one — do not restore a value from memory.
-        rpcUrl: import.meta.env.VITE_SAPPHIRE_RPC_URL || "https://rpc.sapphire.testnets.gno.land:443",
-        // Onbloc's sapphire node — this is also the RPC Adena itself ships for
-        // sapphire-1 (chains.json), so it is the path of least surprise.
-        fallbackRpcUrls: [
-            "https://sapphire.rpc.onbloc.xyz:443",
-        ],
-        // No full-topology telemetry node identified for sapphire-1 yet, same as
-        // topaz. Validators view will show partial data until one exists.
-        telemetryRpcUrls: [],
-        indexerUrl: import.meta.env.VITE_SAPPHIRE_INDEXER_URL || "https://indexer.sapphire.testnets.gno.land/graphql/query",
-        label: "Sapphire",
-        userRegistryPath: "gno.land/r/sys/users",
-        // The chain-specific faucet subdomain is an API-only endpoint — a
-        // browser GET answers 405 (owner-observed 2026-08-16, mid-activation).
-        // Send people to the faucet HUB like every other network entry does;
-        // its "Sapphire Faucet" card is the actual web UI.
-        faucetUrl: "https://faucet.gno.land",
-        // Live-verified 2026-08-11 with a WORKING NEGATIVE CONTROL, which is the
-        // part that makes this trustworthy: 200 on `/` and on `/r/sys/users`
-        // (so it really is a gno chain's gnoweb), 404 on
-        // `/r/samcrew/memba_dao` — while the SAME path on topaz's gnoweb returns
-        // 200. The 404 is therefore genuine absence, not a broken probe: we have
-        // deployed nothing to sapphire yet (see W3-3b — `p/samcrew/avl` is also
-        // absent here and must lead the publish order).
-        explorerUrl: import.meta.env.VITE_SAPPHIRE_EXPLORER_URL || "https://sapphire.testnets.gno.land",
     },
     pearl: {
         // Pearl — the next testnet, released as an RC, launching
@@ -372,81 +249,14 @@ export const NETWORKS: Record<string, NetworkConfig> = {
         faucetUrl: "https://faucet.gno.land",
         explorerUrl: import.meta.env.VITE_PEARL_EXPLORER_URL || "https://pearl.testnets.gno.land",
     },
-    gnoland1: {
-        chainId: "gnoland1",
-        userDaos: { create: false, channelsCompanion: false },
-        rpcUrl: "https://rpc.gnoland1.samourai.live:443",
-        fallbackRpcUrls: [
-            "https://rpc.gnoland1.moul.p2p.team",
-            "https://rpc.gnoland1.aeddi.org",
-            "https://rpc.betanet.testnets.gno.land",
-        ],
-        label: "Betanet (gnoland1)",
-        userRegistryPath: "gno.land/r/sys/users",
-        faucetUrl: "",
-        // ⛔ RETIRED to HIDDEN (2026-09-17): every PUBLIC Betanet endpoint in
-        // this entry is dead. Measured the same day, all four:
-        //     rpc.gnoland1.samourai.live      → connection refused
-        //     rpc.gnoland1.aeddi.org          → empty response
-        //     rpc.betanet.testnets.gno.land   → connection refused
-        //     betanet.testnets.gno.land       → connection refused (explorer)
-        // Only `rpc.gnoland1.moul.p2p.team` still answers (node_info.network
-        // "gnoland1", height 3796411, catching_up false) — one community node
-        // is not an offer this app should make in the selector, and the
-        // PRIMARY being dead means a Betanet visitor lands on a failover, not
-        // on the endpoint the app advertises. Same treatment as test13 /
-        // topaz / sapphire: the entry STAYS in NETWORKS so deep links and
-        // stored selections resolve instead of crash-looping the /:network
-        // redirects, and `selectableNetworksFor` keeps the escape hatch.
-        // Re-verify with `node_info.network == "gnoland1"` before un-hiding;
-        // DNS and a 200 prove nothing (the pearl/rpc.gno.land lesson).
-        //
-        // SELECTABLE 2026-08-27 → 2026-09-17 (owner directive: keep Betanet
-        // offered alongside Pearl).
-        //
-        // ⛔ RETRACTED 2026-09-10 — the original directive called gnoland1 "the
-        // future-mainnet track — testnet upgrades merge here progressively".
-        // That premise is FALSE. gnolang/gno#6154 builds mainnet as a FRESH
-        // chain with a different chain id (`gnoland-1`, HYPHEN — see the
-        // `mainnet` entry below) whose balances come from the audited
-        // gnolang/independence-day allocation. Betanet is not becoming
-        // mainnet and is not a staging ground for it.
-        //
-        // The two hazards that had this chain hidden are both closed and
-        // test-pinned:
-        // - F-28: `realmsDeployed: false` + the explicit empty REALM_ALLOWLIST
-        //   entry below give the honest RealmsNotDeployedBanner instead of the
-        //   fake-live marketplace this chain once rendered. (This note used to
-        //   say isRealmValidOn "fails OPEN on a MISSING entry"; it no longer
-        //   does — F-28's fix made it fail CLOSED, so an unlisted network
-        //   gates everything. Keep the explicit entry anyway: it states the
-        //   intent rather than relying on the default.)
-        // - F-29: the 401-no-self-heal loop is fixed (api.ts drops
-        //   server-rejected tokens; authSession is the durable half). Until
-        //   the owner adds "gnoland1" to MEMBA_ACCEPTED_CHAIN_IDS, a login
-        //   attempt here gets a clean surfaced refusal, not a dead session.
-        // Memba still deploys NOTHING to Betanet; realm-dependent surfaces stay
-        // honestly gated.
-        hidden: true,
-        realmsDeployed: false,
-        // Live-verified 2026-07-31: serves `<meta name="chainid" content="gnoland1">`,
-        // i.e. this really is Betanet's gnoweb. Both previous values were wrong in
-        // different directions — `getExplorerBaseUrl` returned `betanet.gno.land`
-        // (does not resolve) and `lib/gnoweb` returned `gno.land` (which answers
-        // 200 for shared paths like `/u/<name>` and would show a different
-        // chain's data with no visible failure). ⚠️ That note called `gno.land`
-        // "MAINNET"; measured 2026-09-10 it serves `chainid` "gnoland1" — it is
-        // a BETANET host that #6154 repoints to mainnet at the 09-11 launch, so
-        // what it shows depends on when you ask. Identity-check, never assume.
-        explorerUrl: "https://betanet.testnets.gno.land",
-    },
     // gno.land MAINNET — chain id `gnoland-1` (HYPHEN). Live since 2026-09-12;
     // the DEFAULT network since 2026-09-17 (netlify.toml VITE_GNO_CHAIN_ID +
     // the `resolveDefaultNetwork` hard fallback), and the only visible network
     // since pearl's retirement on 2026-09-23 (/pearl/ links redirect here).
     //
-    // ⚠️ `gnoland-1` IS NOT `gnoland1`. The entry above (`gnoland1`, no hyphen)
-    // is BETANET — a different chain, one hyphen apart. Mainnet was built as a
+    // ⚠️ `gnoland-1` IS NOT `gnoland1`. `gnoland1` (no hyphen) was BETANET — a
+    // different chain, one hyphen apart, retired 2026-10-06 (its old links
+    // redirect here; its last node stopped at height 3,796,411). Mainnet was built as a
     // FRESH chain (gnolang/gno#6154) whose balances come from the audited
     // independence-day allocation; Betanet did not become mainnet.
     //
@@ -597,7 +407,7 @@ export function selectableNetworksFor(activeKey: string): Record<string, Network
  * e2e servers work: root `.env.e2e` sets `VITE_GNO_CHAIN_ID=test13`, and
  * `marketplace-gating.spec.ts` (:5174) depends on landing there, because its
  * live-vs-gated lane expectations are built on test13's REALM_ALLOWLIST — on
- * topaz neither `memba_nft_market_v3_2` nor `escrow_v3` is allowlisted, so both
+ * mainnet neither `memba_nft_market_v3_2` nor `escrow_v3` is allowlisted, so both
  * "live" lanes would gate and the spec's default landing lane would vanish.
  *
  * Consequence, stated plainly: in such a build DEFAULT_NETWORK is hidden, so
@@ -610,10 +420,10 @@ export function selectableNetworksFor(activeKey: string): Record<string, Network
 export function resolveDefaultNetwork(envKey: string | undefined): string {
     // The hard fallback tracks the CURRENT default chain (mainnet since
     // 2026-09-17; pearl 08-27 → 09-17) — falling back to a sunsetting chain
-    // would strand a misconfigured build on a network scheduled to die
-    // (sapphire: 09-09), and every testnet this app has defaulted to so far
-    // has eventually been one. `gnoland-1` is the production chain: it is the
-    // one entry here with no announced end of life.
+    // would strand a misconfigured build on a network scheduled to die, and
+    // every testnet this app has defaulted to so far has eventually been one.
+    // `gnoland-1` is the production chain: it is the one entry here with no
+    // announced end of life.
     return isNetworkKey(envKey) ? envKey : "mainnet"
 }
 
@@ -642,6 +452,9 @@ export const NETWORK_ECHO_STORAGE_KEY = "memba_network"
  */
 export const RETIRED_NETWORKS: Readonly<Record<string, { to: string; name: string }>> = Object.freeze({
     pearl: { to: "mainnet", name: "Pearl testnet" },
+    topaz: { to: "mainnet", name: "Topaz testnet" },
+    sapphire: { to: "mainnet", name: "Sapphire testnet" },
+    gnoland1: { to: "mainnet", name: "Betanet" },
 })
 
 /** The successor of a RETIRED network, or null when `key` is not retired.
@@ -773,8 +586,7 @@ export function getUsernameRegistrarPath(): string | null {
  * decides whether to show "realms not deployed here", and defaulting it closed
  * would put that banner on every network we forgot to enumerate. The per-realm
  * predicate is the one that gates fund-custody UI, and that is the one that must
- * fail closed. Betanet is covered by BOTH (`realmsDeployed: false` + an explicit
- * empty allowlist) — it does not rely on either default.
+ * fail closed.
  */
 export function networkHasRealms(networkKey: string): boolean {
     return NETWORKS[networkKey]?.realmsDeployed !== false
@@ -798,14 +610,13 @@ export function areRealmsDeployed(): boolean {
  * the only gate most of them have. This is not bookkeeping: only add a path once
  * the realm is verified live on the chain.
  *
- * HELD BACK from every live network (this governed topaz until its 2026-08-12
- * retirement and governs sapphire identically — see #1039/#1040, closed as
- * superseded with this substance preserved):
+ * HELD BACK from every live network (see #1039/#1040, closed as superseded
+ * with this substance preserved):
  *   - escrow_v3, memba_token_otc_v2 — CUSTODY FUNDS (`OriginSend` in,
  *     `SendCoins` out). Their listing was blocked on an unverified ceremony
  *     precondition ("old realms paused + reconciliation-drained") that the
  *     deployer never checked; that check must become a deployer preflight gate
- *     before the sapphire commerce ceremony lists them.
+ *     before a ceremony lists them on a live network.
  *   - memba_nft_v2, memba_collections, memba_nft_market_v2,
  *     memba_nft_market_v3_1, memba_nft_market_v3_2 — the NFT stack CUSTODIES
  *     FUNDS and moves as ONE unit (partial listing gives inconsistent
@@ -821,10 +632,6 @@ export function areRealmsDeployed(): boolean {
  *     custodial).
  */
 const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
-    // Betanet: Memba deploys nothing here. An EXPLICIT empty list, not an
-    // absent key — absent means "no allowlist", which isRealmValidOn used to
-    // read as "everything is valid" (F-28).
-    gnoland1: [],
     // Mainnet (`gnoland-1`): wave 1 was published 2026-09-23 by the samcrew
     // namespace multisig (realm-versions.json `mainnet`). Only realms whose
     // Memba surface is safe to expose are listed: escrow_v3 (custodies funds;
@@ -867,7 +674,7 @@ const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
     // 2026-08-27 against the live chain): default lane (9) + gnobuilders/
     // feedback (commerce head) + the NFT stack as one unit + the p0-guards
     // pair. p/ packages (grc721, memba_market_core_v2) are deploy artifacts,
-    // not frontend targets — never allowlisted (same as test13/topaz). The
+    // not frontend targets — never allowlisted (same as test13). The
     // legacy NFT v2 pair and v3_1 are NOT deployed on pearl, so never listed.
     // Every entry must be backed by a realm-versions.json `pearl` record
     // (merge-blocking rule above) — the record set lands with the ceremony,
@@ -928,7 +735,7 @@ const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
         // v3.1 stays allowlisted through the wind-down: it is PAUSED (no new trades)
         // but 2 open offers hold escrow — value-exits (CancelOffer/ClaimExpiredOffer)
         // must remain callable. Remove once its escrow drains to zero.
-        // ⚠️ When you do: `config.test.ts`'s held-back block anchors the topaz
+        // ⚠️ When you do: `config.test.ts`'s held-back block anchors its
         // gating assertions on "this path is valid on test13", so dropping this
         // entry reds that test with a message about a typo. Remove the path from
         // that test's anchor loop in the same commit — do not delete the anchor.
@@ -941,75 +748,6 @@ const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
         // v1's unguarded OriginSend Fill was never deployed and is mainnet-blocked
         // by the deployer fund-safety gate, so the lane targets the guarded realm.
         "gno.land/r/samcrew/memba_token_otc_v2",
-    ],
-    // Topaz (topaz-1) — ceremony scope (2026-07-21): 9 Memba realms. Chain
-    // RETIRED 2026-08-12; the list stays truthful about what is published on
-    // the (dead) chain for as long as the hidden entry resolves.
-    topaz: [
-        "gno.land/r/samcrew/memba_dao",
-        "gno.land/r/samcrew/memba_dao_candidature_v3",
-        "gno.land/r/samcrew/memba_dao_channels_v2",
-        "gno.land/r/samcrew/agent_registry_v2",
-        "gno.land/r/samcrew/memba_reviews_v1",
-        "gno.land/r/samcrew/memba_quest_attestation_v1",
-        "gno.land/r/samcrew/memba_feed_v1",
-        "gno.land/r/samcrew/memba_appstore_v1",
-        "gno.land/r/samcrew/memba_appstore_v2",
-        // ── commerce-v2 ceremony (2026-07-31), FUNDS-FREE realms only ─────────
-        // 13 artifacts went live on topaz-1 in that ceremony; only these three are
-        // listed here. Each was verified funds-free on BOTH sides before listing:
-        // the realm source contains no `banker.NewBanker`, no `unsafe.OriginSend()`
-        // and no `SendCoins`, and the frontend client attaches no coins
-        // (`grc20.ts` sends ""). The remaining commerce realms — the NFT stack,
-        // escrow_v3 and memba_token_otc_v2 — DO custody funds and are deliberately
-        // held back to separate PRs; see the note above this map.
-        "gno.land/r/samcrew/tokenfactory_v2",   // de-gates isTokenFactoryValid
-        "gno.land/r/samcrew/memba_feedback_v2", // de-gates isFeedbackValid
-        // INERT — listed defensively, changes no behaviour today. The badges
-        // reader (lib/badges.ts) uses its own BADGE_REALM_PATH constant and is
-        // guarded by NO isRealmValid predicate, so it already queried this realm on
-        // topaz. Listed so the allowlist stays a truthful record of what is
-        // deployed, and so adding a guard later cannot silently gate it off.
-        "gno.land/r/samcrew/gnobuilders_badges_v2",
-    ],
-    // Sapphire (sapphire-1) — phase-1 cutover scope: the FUNDS-FREE set only,
-    // published by the multisig ceremony that precedes this PR's merge.
-    // Per-artifact chain proof (vm/qfile fileCount, height, tx) lives in
-    // realm-versions.json's `sapphire` section; every entry below must have a
-    // record there BEFORE this list merges — an entry here without one is a
-    // merge-blocking review finding, not a nit.
-    //
-    // Funds-free discipline (same three-sided check the topaz block above
-    // records): realm source has no `banker.NewBanker`, no
-    // `unsafe.OriginSend()`, no `SendCoins`; the frontend client attaches no
-    // coins; the artifact is chain-verified at the listed path.
-    //
-    // DELIBERATE EXCLUSIONS:
-    //   - tokenfactory_v2 — deployable but NOT deployed in phase 1 (owner
-    //     decision D3(b), 2026-08-15): its applyFee mints 2.5% of every Mint()
-    //     to a hardcoded recipient with no setter, and redeploying bakes that
-    //     into an immutable path. isTokenFactoryValid therefore stays false on
-    //     sapphire — token creation is gated dark until the fee config is
-    //     ruled on.
-    //   - the fund-custody set (NFT stack, escrow_v3, memba_token_otc_v2,
-    //     memba_market_config) — sapphire commerce ceremony, see the map
-    //     header.
-    sapphire: [
-        "gno.land/r/samcrew/memba_dao",
-        "gno.land/r/samcrew/memba_dao_candidature_v3",
-        "gno.land/r/samcrew/memba_dao_channels_v2",
-        "gno.land/r/samcrew/agent_registry_v2",
-        "gno.land/r/samcrew/memba_reviews_v1",
-        "gno.land/r/samcrew/memba_quest_attestation_v1",
-        "gno.land/r/samcrew/memba_feed_v1",
-        "gno.land/r/samcrew/memba_appstore_v1",
-        "gno.land/r/samcrew/memba_appstore_v2",
-        "gno.land/r/samcrew/memba_feedback_v2", // de-gates isFeedbackValid
-        // INERT defensively-listed badges realm — same rationale as the topaz
-        // entry: the badges reader keys off BADGE_REALM_PATH with no
-        // isRealmValid predicate, so listing keeps the record truthful and
-        // future-proofs a guard.
-        "gno.land/r/samcrew/gnobuilders_badges_v2",
     ],
 }
 
@@ -1038,7 +776,7 @@ export function isRealmValidOn(networkKey: string, realmPath: string): boolean {
 /** Whether Memba has at least one realm allowlisted (verified live) on a
  *  network. Finer than `networkHasRealms` for a partially-deployed chain —
  *  mainnet wave 1 keeps `realmsDeployed: false` while its REALM_ALLOWLIST is
- *  non-empty. An explicit empty list (gnoland1) or an absent key is false. */
+ *  non-empty. An explicit empty list or an absent key is false. */
 export function networkHasAllowlistedRealms(networkKey: string): boolean {
     return (realmAllowlist(networkKey)?.length ?? 0) > 0
 }
@@ -1054,17 +792,17 @@ export function isRealmValid(realmPath: string): boolean {
 
 
 /** Gno chain ID for all RPC calls.
- *  Derived, never literal: this fallback read `"topaz-1"` — a chain
- *  decommissioned 2026-08-12 — for a month after that retirement. It is
- *  unreachable in practice (`_activeNetwork` always resolves to a NETWORKS
- *  key), but an unreachable literal is still a literal that goes stale, and
- *  this one would have signed transactions for a dead chain if it ever ran.
+ *  Derived, never literal: this fallback once kept naming a chain for a month
+ *  after it was decommissioned. It is unreachable in practice
+ *  (`_activeNetwork` always resolves to a NETWORKS key), but an unreachable
+ *  literal is still a literal that goes stale, and that one would have signed
+ *  transactions for a dead chain if it ever ran.
  *  `DEFAULT_NETWORK` is guaranteed valid by `resolveDefaultNetwork`. */
 export const GNO_CHAIN_ID = NETWORKS[_activeNetwork]?.chainId || NETWORKS[DEFAULT_NETWORK].chainId
 
 /** The key gnomonitoring knows the active network by — NOT the on-chain chain id.
- *  Defaults to chainId, which is right wherever the two coincide (test-13,
- *  gnoland1). Use this for gnomonitoring API calls ONLY; anything that reaches
+ *  Defaults to chainId, which is right wherever the two coincide (test-13).
+ *  Use this for gnomonitoring API calls ONLY; anything that reaches
  *  the chain or the wallet must keep using GNO_CHAIN_ID. */
 export const GNO_MONITORING_CHAIN =
     NETWORKS[_activeNetwork]?.monitoringChain || GNO_CHAIN_ID
@@ -1092,7 +830,7 @@ export const GNO_FALLBACK_RPC_URLS: string[] = NETWORKS[_activeNetwork]?.fallbac
 /**
  * Samourai Sentry RPC URL (Dual-RPC Strategy).
  * Used optionally by Hacker Mode for direct, high-frequency, uncached consensus telemetry
- * (e.g. /net_info, /dump_consensus_state) when available on gnoland1.
+ * (e.g. /net_info, /dump_consensus_state) when one is configured.
  */
 export const SAMOURAI_SENTRY_RPC_URL = import.meta.env.VITE_SAMOURAI_SENTRY_RPC_URL || ""
 
@@ -1330,16 +1068,11 @@ export const TRUSTED_RPC_DOMAINS = [
     "gno.land",
     "testnets.gno.land", // covers rpc.test13.testnets.gno.land (official test13) + others
     "rpc.gno.land",
-    "gnoland.network", // test-13 indexer/gnoweb + gnoland1 fallbacks, suffix-matched
+    "gnoland.network", // test-13 indexer/gnoweb, suffix-matched
     "onbloc.xyz",      // test-13 canonical RPC (test13.rpc.onbloc.xyz) — Adena moved here in v1.19.5 (#856)
     // Samourai Coop sentry/validator nodes — trusted for Hacker View dual-RPC strategy.
-    // Convention: https://rpc.{chain}.samourai.live
-    //   - gnoland1:  https://rpc.gnoland1.samourai.live  (live)
-    //   - testnet13: https://rpc.testnet13.samourai.live (live)
+    // Convention: https://rpc.{chain}.samourai.live (e.g. rpc.mainnet.samourai.live)
     "samourai.live",
-    "p2p.team",       // moul's infra + team nodes (gnoland1.moul.p2p.team etc.)
-    "aeddi.org",      // aeddi's gnoland1 validator node
-    "gnoland1.io",    // gnoland1 betanet official
     "163.172.33.181", // gno core team bare-metal node
     "localhost",      // local devnet
 ]
@@ -1475,11 +1208,10 @@ export const FEEDBACK_REALM_PATH = "gno.land/r/samcrew/memba_feedback_v2"
  *
  * PINNED and must move in lockstep with the backend's `homeSnapshotRPCURL`
  * (HOME_SNAPSHOT_RPC_URL → NFT_RPC_URL fallback), or the frontend asks for a
- * snapshot of a chain the backend isn't reading. History: held at "test13"
- * until #1009 moved the backend to topaz; moved to "sapphire" in the cutover
- * release together with the backend RPC secret flip. Between any two halves of
- * that window the hook self-disables (safe degradation: home renders without
- * the snapshot enrichment).
+ * snapshot of a chain the backend isn't reading. It has moved at every chain
+ * cutover, in the same release as the backend RPC secret flip. Between the two
+ * halves of such a window the hook self-disables (safe degradation: home
+ * renders without the snapshot enrichment).
  *
  * Pearl cutover: flipped to "pearl" in the §6 completion release together with
  * the backend snapshot/NFT RPC secret window.
@@ -1500,24 +1232,21 @@ export const SNAPSHOT_NETWORK = "mainnet"
  * visible anywhere. `isFeedWritable()` exists to make that unrepresentable.
  *
  * ⚠️ MUST match the chain behind the backend's `FEED_RPC_URL`. If that env moves
- * (e.g. a Topaz cutover), change this in the SAME release or the feed silently
+ * (a chain cutover), change this in the SAME release or the feed silently
  * gates off — or, worse, gates ON for a chain the indexer isn't watching.
  * The durable fix is per-chain indexing (chain-scoped indexer state), after
  * which this constant goes away.
  *
- * Topaz cutover (2026-07-26): flipped to "topaz" in the SAME release that flips
- * VITE_GNO_CHAIN_ID and the backend FEED_RPC_URL/FEED_START_BLOCK envs.
+ * A cutover is three moves in ONE release: this constant, the backend
+ * FEED_RPC_URL + FEED_START_BLOCK secret flip, AND the mandatory feed-state
+ * reset (`/app/memba feed-reset`). The reset is load-bearing, not hygiene:
+ * `loadFeedCursor` reads the DB cursor first and the env value is only a floor
+ * for missing rows, so a stale row from the previous chain silently pins the
+ * tailer to a block the new chain won't reach for weeks (and the realm-scoped
+ * post ids would collide across chains).
  *
- * Sapphire cutover: flipped to "sapphire" in the SAME release as the backend
- * FEED_RPC_URL + FEED_START_BLOCK secret flip AND the mandatory feed-state
- * reset. The reset is load-bearing, not hygiene: `loadFeedCursor` reads the DB
- * cursor first and the env value is only a floor for missing rows, so a stale
- * topaz-height row silently pins the tailer to a block the new chain won't
- * reach for weeks (and the realm-scoped post ids would collide across chains).
- *
- * Pearl cutover: flipped to "pearl" in the §6 completion release — same rule
- * as sapphire: SAME release as the backend FEED_RPC_URL + FEED_START_BLOCK
- * secret flip AND the mandatory feed-state reset (`/app/memba feed-reset`).
+ * Pearl cutover: flipped to "pearl" in the §6 completion release, under that
+ * rule.
  *
  * Mainnet cutover (2026-09-23): flipped to "mainnet" after the backend moved
  * FEED_RPC_URL to the Samourai gnoland-1 node, FEED_START_BLOCK to 265728 (the

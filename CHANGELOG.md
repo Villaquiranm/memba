@@ -25,6 +25,10 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet; the creator's first-mover reveal is sent automatically from this browser.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### Dependencies (2026-10-08)
+- Security: the HTML sanitiser (`dompurify`) is raised past its latest advisory (GHSA-p98j-92pf-mc4p, GHSA-6688-9rhm-gjv2)
+- React 19.3, react-router 7.18.4, TanStack Query 5.104, Sentry 10.76, protobuf 2.16, zod 4.6 and the backend's SQLite driver 1.60.1 are current
+
 ### Alerts in Settings, Notifications (2026-10-08)
 - Memba OS: validator and GovDAO alerts now live in Settings, Notifications. The Validators app's Alerts button and old Alerts links open them there, with your webhooks, contacts and daily report unchanged
 

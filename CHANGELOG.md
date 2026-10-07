@@ -25,6 +25,9 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet; the creator's first-mover reveal is sent automatically from this browser.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### Signing: "nothing was sent" (2026-10-08)
+- Memba OS: when a signature stops before the wallet (a failed read, a risen fee, a refusal), the sheet now says nothing was sent
+- Memba OS: a signature whose wallet session ended or switched account while it was pending now settles, so nothing waits on it forever
 
 ### DAO analyst MCP server removed (2026-10-07)
 - Removed the DAO analyst MCP server, whose analysis tools called a backend endpoint that does not exist

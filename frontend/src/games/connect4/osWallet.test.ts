@@ -39,6 +39,14 @@ describe("osBroadcast", () => {
         expect(await sign()).toEqual({ hash: "stopped" })
         expect(mine).not.toHaveBeenCalled()
     })
+    it("runs the caller's check before the sheet's, so a stop there is nothing sent", async () => {
+        const order: string[] = []
+        grc.doContractBroadcast.mockImplementation(async (_m, _memo, o) => { await o.beforeSign(); return { hash: "x" } })
+        void osBroadcast(signer())([msg], "m", { beforeSign: async () => { order.push("caller"); throw new Error("The game moved on before you signed. Nothing was sent.") } })
+        await vi.waitFor(() => expect(req).not.toBeNull())
+        await expect(req!.send(undefined, async () => { order.push("sheet"); return osGuard })).rejects.toThrow(/game moved on/)
+        expect(order).toEqual(["caller"])
+    })
     it("rejects with the wallet's own error when refused, and as cancelled when the review is dismissed", async () => {
         const refused = new Error("refused by node")
         grc.doContractBroadcast.mockRejectedValue(refused)

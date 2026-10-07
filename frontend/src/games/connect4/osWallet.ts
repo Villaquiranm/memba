@@ -20,10 +20,12 @@ export class OsOutcomeUnknownError extends Error {
     constructor() { super("Outcome unknown. Check the transaction in the notifications before trying again.") }
 }
 
-const both = (a: BeforeSign, b?: BeforeSign): BeforeSign => async () => {
-    const first = await a()
-    const second = await b?.()
-    return () => (!first || first()) && (!second || second())
+// The caller's check runs before the sheet's: the sheet marks the wallet as
+// opening, so a check that stops after it would read as an unknown outcome.
+const both = (os: BeforeSign, caller?: BeforeSign): BeforeSign => async () => {
+    const mine = await caller?.()
+    const sheet = await os()
+    return () => (!sheet || sheet()) && (!mine || mine())
 }
 
 function describe(msgs: AminoMsg[], feeUgnot: number | undefined): [string, string][] {

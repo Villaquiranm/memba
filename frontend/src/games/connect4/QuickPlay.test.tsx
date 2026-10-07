@@ -33,7 +33,10 @@ describe("QuickPlay", () => {
         expect(screen.getByText(/0\.97 GNOT/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole("button", { name: "End session" }))
         await waitFor(() => expect(qp.endQuickPlay).toHaveBeenCalledWith("g1me", undefined))
-        fireEvent.click(screen.getByRole("button", { name: "Forget on this device" }))
+        // Forget stays disabled until End has settled.
+        const forget = screen.getByRole("button", { name: "Forget on this device" })
+        await waitFor(() => expect(forget).toBeEnabled())
+        fireEvent.click(forget)
         expect(qp.forgetQuickPlay).toHaveBeenCalledWith("g1me")
     })
     it("shows a confirming pill (not the start button) while a just-sent session isn't on chain yet", async () => {

@@ -76,91 +76,16 @@ describe('config constants', () => {
     })
 
     // Pearl was LIVE 2026-08-27 → 2026-09-23 (default until the 09-17 mainnet
-    // flip), with realmsDeployed flipped by the §6 completion PR together with
-    // the ceremony's realm-versions `pearl` records. RETIRED 2026-09-23 (chain
-    // shut down): hidden, but the entry, realmsDeployed and the record-backed
-    // allowlist stay so old /pearl/ deep links resolve and the allowlist
-    // stays truthful about what was published there.
-    it('pearl is RETIRED — hidden, but keeps its realms and record-backed allowlist', () => {
-        expect(NETWORKS.pearl).toBeDefined()
-        expect(NETWORKS.pearl.hidden).toBe(true)
+    // flip). RETIRED 2026-09-23 (chain shut down): no entry, its links redirect.
+    it('pearl is RETIRED — no entry, its links resolve to mainnet, and its realms are gated', () => {
+        expect(NETWORKS.pearl).toBeUndefined()
         expect(Object.keys(VISIBLE_NETWORKS)).not.toContain('pearl')
-        expect(NETWORKS.pearl.realmsDeployed).toBe(true)
-        expect(NETWORKS.pearl.isTestnet).toBe(true)
-        expect(NETWORKS.pearl.chainId).toBe('pearl-1')
-        // Hub faucet, never the API-only per-chain subdomain (the sapphire
-        // 405 lesson).
-        expect(NETWORKS.pearl.faucetUrl).toBe('https://faucet.gno.land')
-        // The combined-ceremony set is allowlisted (F-28 discipline intact:
-        // the list is explicit, and every entry needs a realm-versions record).
-        for (const path of [
-            'gno.land/r/samcrew/memba_dao',
-            'gno.land/r/samcrew/memba_feed_v1',
-            'gno.land/r/samcrew/tokenfactory_v2',
-            'gno.land/r/samcrew/escrow_v3',
-            NFT_MARKETPLACE_V3_PATH,
-        ]) {
-            expect(isRealmValidOn('pearl', path)).toBe(true)
-        }
-        // The realms NOT deployed on pearl stay fail-closed — the legacy NFT
-        // v2 pair and v3_1 never shipped there.
-        for (const path of [
-            NFT_MARKETPLACE_PATH,
-            'gno.land/r/samcrew/memba_nft_market_v3_1',
-            'gno.land/r/samcrew/escrow_v2',
-        ]) {
+        expect(RETIRED_NETWORKS.pearl).toEqual({ to: 'mainnet', name: 'Pearl testnet' })
+        expect(retiredNetworkSuccessor('pearl')).toBe('mainnet')
+        expect(resolveNetworkKey({ pathname: '/pearl/dao' })).toBe('mainnet')
+        // A key with no entry gates every realm (F-28: fail closed).
+        for (const path of ['gno.land/r/samcrew/memba_dao', 'gno.land/r/samcrew/escrow_v3', NFT_MARKETPLACE_V3_PATH]) {
             expect(isRealmValidOn('pearl', path)).toBe(false)
-        }
-    })
-
-    // The merge blocker, made REAL: the rule "every allowlist entry must be
-    // backed by a realm-versions.json record" lived only in config.ts's
-    // comment until this PR — review discipline with no teeth. This test is
-    // the teeth, scoped to pearl (test13 carries documented pre-rule gaps,
-    // and retrofitting history is not this PR's job). It stays RED until the
-    // combined ceremony lands its `pearl` section, which is exactly the
-    // one-piece coupling the cutover plan demands.
-    it('every allowlisted pearl realm is backed by a realm-versions.json pearl record', async () => {
-        const { readFileSync, existsSync } = await import('node:fs')
-        const { resolve, dirname } = await import('node:path')
-        // Resolve by walking up from cwd, NOT via `new URL(..., import.meta.url)`.
-        // Under the vite/jsdom test environment `import.meta.url` is not a file:
-        // URL, so that form throws `TypeError: The URL must be of scheme file`
-        // BEFORE any assertion runs. This test was written to be red until the
-        // ceremony recorded its artifacts — but it was red for that TypeError
-        // instead, on every run since it was added, and would have stayed red
-        // after a perfect ceremony while appearing to enforce a coupling it had
-        // never once evaluated. A gate that cannot pass is not a gate.
-        let dir = process.cwd()
-        let file = ''
-        for (let i = 0; i < 6 && !file; i++) {
-            const candidate = resolve(dir, 'realm-versions.json')
-            if (existsSync(candidate)) file = candidate
-            else dir = dirname(dir)
-        }
-        expect(file, 'realm-versions.json not found walking up from cwd — the ceremony record set must be readable for this gate to mean anything').not.toBe('')
-        const rv = JSON.parse(
-            readFileSync(file, 'utf8'),
-        ) as Record<string, Record<string, unknown> | string | undefined>
-        const records = rv.pearl
-        expect(records, 'realm-versions.json has no `pearl` section — the ceremony record set is the merge precondition').toBeTypeOf('object')
-        // The combined-ceremony allowlist, asserted path-by-path (the list is
-        // module-private; this mirrors the contract test above).
-        const allowlisted = [
-            'memba_dao', 'memba_dao_candidature_v3', 'memba_dao_channels_v2',
-            'agent_registry_v2', 'memba_reviews_v1', 'memba_quest_attestation_v1',
-            'memba_feed_v1', 'memba_appstore_v1', 'memba_appstore_v2',
-            'gnobuilders_badges_v2', 'memba_feedback_v2',
-            'tokenfactory_v2', 'memba_collections', 'memba_market_config',
-            'memba_nft_market_v3_2', 'escrow_v3', 'memba_token_otc_v2',
-        ]
-        for (const base of allowlisted) {
-            // Two-way coupling: the path must be allowlisted (typo guard for
-            // THIS list) and the ceremony must have recorded it.
-            expect(isRealmValidOn('pearl', `gno.land/r/samcrew/${base}`),
-                `${base} is in this test's mirror but not allowlisted — fix whichever list has the typo`).toBe(true)
-            expect((records as Record<string, unknown>)?.[base],
-                `allowlisted pearl realm '${base}' has no realm-versions.json pearl record — record the ceremony before merging`).toBeDefined()
         }
     })
 
@@ -206,9 +131,9 @@ describe('config constants', () => {
 
     it('chooses the reviews realm per network and gates review surfaces on it', () => {
         expect(reviewsPathFor('mainnet')).toBe('gno.land/r/samcrew/memba_reviews_v2')
-        expect(reviewsPathFor('pearl')).toBe('gno.land/r/samcrew/memba_reviews_v1')
+        expect(reviewsPathFor('test13')).toBe('gno.land/r/samcrew/memba_reviews_v1')
         expect(isRealmValidOn('mainnet', reviewsPathFor('mainnet'))).toBe(true)
-        expect(isRealmValidOn('pearl', reviewsPathFor('pearl'))).toBe(true)
+        expect(isRealmValidOn('test13', reviewsPathFor('test13'))).toBe(true)
         vi.stubEnv('VITE_ENABLE_REVIEWS', 'false')
         expect(isReviewsAvailable()).toBe(false)
         vi.stubEnv('VITE_ENABLE_REVIEWS', 'true')
@@ -235,8 +160,9 @@ describe('config constants', () => {
         // no end of life.
         expect(resolveDefaultNetwork('mainnet')).toBe('mainnet')
         expect(resolveDefaultNetwork(undefined)).toBe('mainnet')
-        // pearl stays a perfectly valid pin — it is just no longer the default.
-        expect(resolveDefaultNetwork('pearl')).toBe('pearl')
+        // A hidden entry stays a valid pin; a retired key (pearl) falls back.
+        expect(resolveDefaultNetwork('test13')).toBe('test13')
+        expect(resolveDefaultNetwork('pearl')).toBe('mainnet')
     })
 
     it('test13 points at the official testnets.gno.land RPC', () => {
@@ -390,15 +316,12 @@ describe('NFT v3 market gating (gate the page on the engine it trades)', () => {
         expect(isRealmValidOn('test13', NFT_MARKETPLACE_PATH)).toBe(true)
     })
 
-    it('the v3.2 market is live on pearl and gated on the mainnet default', () => {
-        // Was 'true on the default network'. The 2026-09-17 mainnet flip broke
-        // that phrasing's hidden assumption — "default network" and "the chain
-        // our realms are on" stopped being the same thing. Pinned to the KEY
-        // now, which is what the claim was always about: the pearl combined
-        // ceremony deploys + registers memba_nft_market_v3_2 with a
-        // realm-versions-backed allowlist entry. The trade surface still ALSO
-        // requires VITE_ENABLE_NFT, so prod visibility is a second gate.
-        expect(isRealmValidOn('pearl', NFT_MARKETPLACE_V3_PATH)).toBe(true)
+    it('the v3.2 market is allowlisted on test13 and gated on the mainnet default', () => {
+        // Pinned to network KEYS: "default network" and "a chain our realms are
+        // on" are not the same thing. test13 (the e2e fixture) lists
+        // memba_nft_market_v3_2. The trade surface ALSO requires
+        // VITE_ENABLE_NFT, so prod visibility is a second gate.
+        expect(isRealmValidOn('test13', NFT_MARKETPLACE_V3_PATH)).toBe(true)
         // …and gated on mainnet, where nothing of ours is deployed. The
         // env-dependent predicate follows whichever network the build pins.
         expect(isRealmValidOn('mainnet', NFT_MARKETPLACE_V3_PATH)).toBe(false)
@@ -406,14 +329,12 @@ describe('NFT v3 market gating (gate the page on the engine it trades)', () => {
     })
 
     it('v2 and v3 are distinct predicates (the bug was gating v3 trading on the v2 predicate)', () => {
-        // The distinctness assertion is LIVE, not vacuous: on pearl v3.2 is
-        // deployed and v2 is not, so the two genuinely diverge — exactly the
-        // situation the original bug (gating v3 trading on the v2 predicate)
-        // would have broken. Asserted on the pearl KEY rather than through the
-        // env-dependent predicates, which now follow a realm-free default.
-        // Both remain allowlisted on retired test13.
-        expect(isRealmValidOn('pearl', NFT_MARKETPLACE_PATH)).toBe(false)
-        expect(isRealmValidOn('pearl', NFT_MARKETPLACE_V3_PATH)).toBe(true)
+        // The two predicates read different realms. No network left lists v3.2
+        // without v2 (Pearl, which did, is retired), so the divergence is pinned
+        // on the paths themselves: both on the test13 fixture, neither on mainnet.
+        expect(NFT_MARKETPLACE_PATH).not.toBe(NFT_MARKETPLACE_V3_PATH)
+        expect(isRealmValidOn('mainnet', NFT_MARKETPLACE_PATH)).toBe(false)
+        expect(isRealmValidOn('mainnet', NFT_MARKETPLACE_V3_PATH)).toBe(false)
         expect(isNftMarketValid()).toBe(false)
         expect(isRealmValidOn('test13', NFT_MARKETPLACE_PATH)).toBe(true)
         expect(isRealmValidOn('test13', NFT_MARKETPLACE_V3_PATH)).toBe(true)
@@ -448,29 +369,15 @@ describe('isTrustedRpcDomain', () => {
         expect(isTrustedRpcDomain('https://samourai.live.evil.com')).toBe(false)
     })
 
-    it('trusts gnoland.network subdomains (test-13 indexer/gnoweb + gnoland1 fallbacks)', () => {
-        expect(isTrustedRpcDomain('https://rpc.test-13-aeddi-1.gnoland.network')).toBe(true)
-        expect(isTrustedRpcDomain('https://gnoland.network')).toBe(true)
-    })
-
-    it('rejects gnoland.network lookalikes', () => {
-        expect(isTrustedRpcDomain('https://fakegnoland.network')).toBe(false)
-        expect(isTrustedRpcDomain('https://gnoland.network.evil.com')).toBe(false)
-    })
-
-    it('trusts onbloc.xyz subdomains (test-13 canonical RPC — Adena v1.19.5 #856)', () => {
-        expect(isTrustedRpcDomain('https://test13.rpc.onbloc.xyz:443')).toBe(true)
-        expect(isTrustedRpcDomain('https://onbloc.xyz')).toBe(true)
-    })
-
-    it('rejects onbloc.xyz lookalikes', () => {
-        expect(isTrustedRpcDomain('https://fakeonbloc.xyz')).toBe(false)
-        expect(isTrustedRpcDomain('https://onbloc.xyz.evil.com')).toBe(false)
+    it('no longer trusts the hosts only the retired test13 fixture used', () => {
+        for (const url of ['https://rpc.test-13-aeddi-1.gnoland.network', 'https://gnoland.network', 'https://test13.rpc.onbloc.xyz:443', 'https://onbloc.xyz']) {
+            expect(isTrustedRpcDomain(url), url).toBe(false)
+        }
     })
 
     // D8.a-lite: every configured NETWORKS RPC + fallback URL must be trusted, so the
     // wallet-RPC trust gate never blocks a network we ship. Catches the exact drift
-    // that broke test-13 when Adena moved its RPC to onbloc.xyz (#856).
+    // that once broke test-13 when Adena moved its RPC to another host (#856).
     it('trusts every configured NETWORKS rpcUrl and fallbackRpcUrls', () => {
         for (const [key, net] of Object.entries(NETWORKS)) {
             expect(isTrustedRpcDomain(net.rpcUrl), `${key} rpcUrl ${net.rpcUrl} must be trusted`).toBe(true)
@@ -531,14 +438,9 @@ describe('isTrustedRpcDomain', () => {
 })
 
 describe('getTelemetryRpcUrl', () => {
-    it('returns the network telemetry node when no sentry is configured', () => {
-        // No VITE_SAMOURAI_SENTRY_RPC_URL in tests. The default network (test13)
-        // defines telemetryRpcUrls, so getTelemetryRpcUrl() returns the first one
-        // (networks without telemetryRpcUrls fall back to GNO_RPC_URL instead).
-        const url = getTelemetryRpcUrl()
-        expect(url).toBe(getTelemetryRpcUrls()[0])
-        expect(url).toBeTruthy()
-        expect(isTrustedRpcDomain(url)).toBe(true)
+    it('returns the primary RPC when no sentry is configured', () => {
+        // No VITE_SAMOURAI_SENTRY_RPC_URL in tests.
+        expect(getTelemetryRpcUrl()).toBe(GNO_RPC_URL)
     })
 
     it('GNO_RPC_URL is always a trusted domain', () => {
@@ -567,26 +469,17 @@ describe('getTelemetryRpcUrls', () => {
     it('getTelemetryRpcUrl() returns the first telemetry node', () => {
         expect(getTelemetryRpcUrl()).toBe(getTelemetryRpcUrls()[0])
     })
-
-    it('test13 config declares well-connected telemetry nodes covering aeddi-1', () => {
-        // The fix: test13's primary RPC sits behind sentries and sees a partial
-        // peer set; aeddi-1 (gno-core) sees the full topology. It must be in the
-        // declared telemetry set so getAggregatedNetPeers can reach it.
-        const t13 = NETWORKS.test13.telemetryRpcUrls || []
-        expect(t13.some((u) => u.includes('aeddi-1'))).toBe(true)
-        for (const u of t13) expect(isTrustedRpcDomain(u)).toBe(true)
-    })
 })
 
-describe('network reduction — test13 + pearl + mainnet + onyx only', () => {
-    it('exposes only test13, pearl, mainnet and onyx', () => {
+describe('network reduction — test13 + mainnet + onyx only', () => {
+    it('exposes only test13, mainnet and onyx', () => {
         const keys = Object.keys(NETWORKS).sort()
         // mainnet (`gnoland-1`) is the default and only visible network since
         // 2026-09-23. onyx (`onyx-1`) is the testnet, hidden until Memba
-        // publishes there. pearl (retired that day, see RETIRED_NETWORKS) and
-        // test13 stay as hidden entries so old links and stored keys resolve;
-        // Betanet (`gnoland1`) has no entry: it is retired to mainnet.
-        expect(keys).toEqual(['mainnet', 'onyx', 'pearl', 'test13'])
+        // publishes there. test13 stays as a hidden entry (the e2e fixture);
+        // Pearl, Sapphire, Topaz and Betanet have no entry: their links
+        // redirect to mainnet (RETIRED_NETWORKS).
+        expect(keys).toEqual(['mainnet', 'onyx', 'test13'])
     })
 
     it('topaz and sapphire have no registry entry: their old links resolve to mainnet', () => {
@@ -671,22 +564,23 @@ describe('network reduction — test13 + pearl + mainnet + onyx only', () => {
         // ANTI-VACUITY: isRealmValidOn returns false for any unlisted string,
         // so asserting `false` on a typo'd path passes for the wrong reason
         // (the test-guard-vacuity class). Every path below is therefore
-        // ANCHORED on pearl first — the `true` assertion proves the path is a
-        // real, currently-allowlisted realm, which is what makes the `false`
-        // on mainnet mean "gated" rather than "unknown string".
+        // ANCHORED first — allowlisted on the test13 fixture, or the app's own
+        // constant — which is what makes the `false` on mainnet mean "gated"
+        // rather than "unknown string".
         //
         // The three custody realms are included deliberately: funds-custody
         // lanes must stay gated until they are deployed and reviewed.
-        const realPearlRealms = [
+        const realRealms = [
             'gno.land/r/samcrew/memba_dao',
             'gno.land/r/samcrew/escrow_v3',
-            'gno.land/r/samcrew/memba_token_otc_v2',
             'gno.land/r/samcrew/memba_nft_market_v3_2',
         ]
-        for (const realmPath of realPearlRealms) {
-            expect(isRealmValidOn('pearl', realmPath), `${realmPath} must be live on pearl for this guard to be non-vacuous`).toBe(true)
+        for (const realmPath of realRealms) {
+            expect(isRealmValidOn('test13', realmPath), `${realmPath} must be allowlisted on test13 for this guard to be non-vacuous`).toBe(true)
             expect(isRealmValidOn('mainnet', realmPath)).toBe(false)
         }
+        expect(MEMBA_DAO.tokenOtcPath).toBe('gno.land/r/samcrew/memba_token_otc_v2')
+        expect(isRealmValidOn('mainnet', MEMBA_DAO.tokenOtcPath)).toBe(false)
         // …while wave 1 itself is callable, so the gate is per realm, not
         // network-wide.
         expect(isRealmValidOn('mainnet', 'gno.land/r/samcrew/memba_feed_v1')).toBe(true)
@@ -747,21 +641,6 @@ describe('hidden networks stay DARK but resolvable (test13 2026-07-26, gnoland1 
         // gone) — the dead chain presents through the chain-health degraded
         // view, not RealmsNotDeployedBanner, which would be a lie here.
         expect(networkHasRealms('test13')).toBe(true)
-    })
-
-    it('pearl is hidden after its 2026-09-23 retirement, never the default, but resolves and remains escapable', () => {
-        expect(NETWORKS.pearl.hidden).toBe(true)
-        expect(Object.keys(VISIBLE_NETWORKS)).not.toContain('pearl')
-        expect(resolveDefaultNetwork(undefined)).toBe('mainnet')
-        // Still a valid explicit pin (deep links, env pins) — NETWORKS
-        // membership is the only requirement.
-        expect(resolveDefaultNetwork('pearl')).toBe('pearl')
-        const selectable = Object.keys(selectableNetworksFor('pearl'))
-        expect(selectable).toContain('pearl')
-        expect(selectable).toContain('mainnet')
-        // Its realms are truthfully still "deployed" — the dead chain presents
-        // through the chain-health degraded view, not RealmsNotDeployedBanner.
-        expect(networkHasRealms('pearl')).toBe(true)
     })
 
     it('Betanet (gnoland1) is retired: its links resolve to mainnet', () => {
@@ -1286,7 +1165,7 @@ describe('resolveStoredNetworkKey — hiding a network must not strand anyone', 
 describe('selectableNetworksFor — the switcher escape hatch', () => {
     it('offers the ACTIVE network even when it is hidden', async () => {
         const { selectableNetworksFor } = await import('./config')
-        for (const hidden of ['test13', 'onyx', 'pearl']) {
+        for (const hidden of ['test13', 'onyx']) {
             const offered = selectableNetworksFor(hidden)
             expect(offered[hidden], `${hidden} must stay selectable while active`).toBeDefined()
             // A one-option <select> cannot fire onChange — there must be somewhere to go.

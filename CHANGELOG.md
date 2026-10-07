@@ -25,6 +25,27 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet; the creator's first-mover reveal is sent automatically from this browser.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### DAO analyst MCP server removed (2026-10-07)
+- Removed the DAO analyst MCP server, whose analysis tools called a backend endpoint that does not exist
+
+### Narrower content security policy (2026-10-07)
+- Security: the content-security policy and the trusted RPC list no longer allow the third-party hosts only the retired test13 network used
+
+### Memba OS: link GitHub from your Profile (2026-10-07)
+- Memba OS: link or unlink your GitHub account from your own Profile window
+
+### Launchpad fee keeper (2026-10-07)
+- A fee keeper command sweeps the Launchpad sales fees to the treasury daily (or at 10 GNOT) through a gnokey key referenced by name, and pages when the sweep differs from what was owed
+
+### Launchpad solvency watcher (2026-10-07)
+- A solvency watcher in the backend reads the Launchpad sales and market books every minute and pages the pauser on a deficit, a fallen surplus or an unexpected view (off unless LAUNCHPAD_WATCH_ENABLED=1)
+
+### Retired chains cleanup (2026-10-07)
+- The analyst accepts only mainnet, Onyx and the test fixture network; the template compile gate runs on mainnet and onyx-1 (Pearl lane removed); the docs describe mainnet and Onyx as the chains in use
+
+### Retired network: Pearl (2026-10-07)
+- Pearl's network entry is gone from Memba; old Pearl links still open the same page on mainnet
+
 ### Retired network: Betanet (2026-10-06)
 - Old Betanet links now open the same page on mainnet; the retired Betanet is gone from Memba's network list
 

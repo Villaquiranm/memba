@@ -61,12 +61,6 @@ interface NetworkConfig {
     chainId: string
     rpcUrl: string
     fallbackRpcUrls: string[]
-    /** Well-connected nodes to poll for network telemetry (peer topology via
-     *  /net_info, consensus state). `/net_info` is node-local, so the primary
-     *  RPC — often behind sentries — sees only a partial peer set; these nodes
-     *  see more and are unioned by getAggregatedNetPeers. Must be trusted
-     *  domains. Optional; falls back to rpcUrl + fallbackRpcUrls. */
-    telemetryRpcUrls?: string[]
     /** Official tx-indexer GraphQL endpoint for recent on-chain activity. Optional —
      *  when absent (e.g. networks without a public indexer) the activity feed hides. */
     indexerUrl?: string
@@ -131,123 +125,24 @@ interface NetworkConfig {
 
 /** Available Gno networks for the chain selector. */
 export const NETWORKS: Record<string, NetworkConfig> = {
-    // Testnet 13 — the official Gno testnet (gno v0.9 / pre-interrealm-v2).
-    // On-wire chainId is "test-13" (HYPHEN) — it is embedded in the ADR-036 sign
-    // doc, so it MUST match the chain exactly or every login fails "invalid user
-    // signature". The map KEY ("test13") stays identifier-safe.
-    //
-    // Canonical RPC is gno-core's official node (rpc.test13.testnets.gno.land,
-    // verified live). Kept env-overridable (VITE_TEST13_RPC_URL); onbloc's node
-    // (Adena's GetNetwork() default since v1.19.5 #856) remains the fallback — both
-    // CSP- and TRUSTED_RPC_DOMAINS-covered. (aeddi's rpc.test-13-aeddi-1 node is on
-    // the deprecating *.test-13.gnoland.network family per gno core (2026-06-24) —
-    // dropped as a generic fallback; kept below only as a telemetry full-topology
-    // source until gno core names a replacement.)
-    //
-    // RETIRED (2026-07-26): test13 was wound down by gno core — its RPCs and
-    // indexer refuse connections. Kept in NETWORKS (hidden) so deep links and
-    // stored selections resolve instead of crash-looping the /:network
-    // redirects; remove the entry once nothing references it.
+    // Testnet 13 (chain id "test-13", HYPHEN) — RETIRED 2026-07-26: gno core wound
+    // it down and none of the hosts below answer. E2E AND UNIT-TEST FIXTURE: the
+    // entry stays, hidden, because tests and the e2e builds pin `/test13/` as a
+    // network that resolves by URL with a full realm allowlist (a hidden network is
+    // never restored from storage). Its fields are asserted by tests; it is not a
+    // network anyone can use.
     test13: {
         chainId: "test-13",
         userDaos: { create: false, channelsCompanion: false },
         hidden: true,
         isTestnet: true,
-        rpcUrl: import.meta.env.VITE_TEST13_RPC_URL || "https://rpc.test13.testnets.gno.land:443",
-        fallbackRpcUrls: [
-            "https://test13.rpc.onbloc.xyz:443",
-        ],
-        // Telemetry sources for the Validators monitoring view. The canonical RPC
-        // and onbloc sit behind sentries and each see only ~5 /net_info peers
-        // (not even the validator nodes). aeddi-1 (gno-core, what gnockpit uses)
-        // sees the full ~13-node topology; samourai-dev-sentry-1 is our own
-        // well-connected node. Unioned by getAggregatedNetPeers so the peer list
-        // matches the real network. Both are TRUSTED_RPC_DOMAINS-covered.
-        // NOTE: aeddi-1 is on the deprecating *.test-13.gnoland.network family
-        // (gno core, 2026-06-24) with no official full-topology replacement yet, so
-        // it is kept here (it degrades gracefully when retired — getAggregatedNetPeers
-        // simply unions whatever responds). Revisit when gno core names the successor.
-        telemetryRpcUrls: [
-            "https://rpc.test-13-aeddi-1.gnoland.network:443",
-            "https://rpc.testnet13.samourai.live:443",
-        ],
-        // Official test13 tx-indexer (gno-core, 2026-06-24). Env-overridable.
-        indexerUrl: import.meta.env.VITE_TEST13_INDEXER_URL || "https://indexer.test13.testnets.gno.land/graphql/query",
+        rpcUrl: "https://rpc.test13.testnets.gno.land:443",
+        fallbackRpcUrls: [],
+        indexerUrl: "https://indexer.test13.testnets.gno.land/graphql/query",
         label: "Testnet 13",
         userRegistryPath: "gno.land/r/sys/users",
         faucetUrl: "https://faucet.gno.land",
-        // Retired with the rest of test13 (host no longer resolves). Kept so an
-        // old deep link renders a dead link rather than a wrong one pointing at
-        // another chain. Env override retained.
-        explorerUrl: import.meta.env.VITE_TEST13_EXPLORER_URL || "https://test13.testnets.gno.land",
-    },
-    pearl: {
-        // Pearl — the next testnet, released as an RC, launching
-        // 2026-08-26 14:00 UTC; it SUPERSEDES sapphire-1. Pre-registered
-        // 2026-08-23 so the cutover is a flag flip, not a new block: see
-        // docs/PEARL_CUTOVER_PLAN.md.
-        //
-        // chainId is CONFIRMED, not conventional: pearl's genesis is generated
-        // with CHAIN_ID=pearl-1 (gnolang/gno branch chain/pearl,
-        // misc/deployments/pearl.gno.land/gen-genesis.sh:52, corroborated by
-        // that directory's VALIDATOR.md and govdao-exec.sh). Re-asserted at
-        // the UN-HIDE flip (owner directive 2026-08-27): both the official
-        // node and rpc.pearl.samourai.live report node_info.network ==
-        // "pearl-1" with heights advancing, and the tx-indexer's height
-        // matches the RPC (it served the frozen sapphire height for ~4h after
-        // launch — identity-check indexers like RPCs).
-        //
-        // Visible 2026-08-27 → 2026-09-23, and the DEFAULT network 2026-08-27 →
-        // 2026-09-17 (mainnet took over — see the `mainnet` entry).
-        // RETIRED 2026-09-23. Hidden, and listed in RETIRED_NETWORKS (owner
-        // ruling): an old /pearl/… link redirects to the same route under
-        // /mainnet/ with a one-time notice, and a stored pearl choice resolves
-        // to the default. The entry, realmsDeployed and its REALM_ALLOWLIST
-        // stay in code — a mainnet-state testnet is expected to follow and
-        // may reuse them. SNAPSHOT_NETWORK, INDEXER_PROXIED_NETWORK,
-        // SITEMAP_NETWORK and FEED_INDEXED_NETWORK all moved to mainnet the
-        // same day. Historical note from the launch window: realm-dependent
-        // surfaces stay behind `realmsDeployed: false` (honest
-        // RealmsNotDeployedBanner) until the combined ceremony. Auth is
-        // fail-closed regardless: a pearl-1 token is refused until the owner
-        // adds pearl-1 to the backend's MEMBA_ACCEPTED_CHAIN_IDS
-        // (AUTH-CHAINID-MISMATCH-01), never a wrong-chain tx.
-        chainId: "pearl-1",
-        userDaos: { create: true, channelsCompanion: true },
-        // Retired 2026-09-23 — see the header above.
-        hidden: true,
-        // Flipped by the §6 completion PR: the combined Pearl ceremony (core
-        // set + commerce set) records per-artifact vm/qfile evidence in
-        // realm-versions.json's `pearl` section — same rule as sapphire's
-        // flip. The allowlist merge-blocker below enforces the backing.
-        realmsDeployed: true,
-        isTestnet: true,
-        // ⚠️ Liveness lesson from the launch window: from 2026-08-24 until the
-        // 2026-08-27 genesis this hostname resolved, answered 200, and served
-        // a FROZEN sapphire-1 (pre-provisioned infra waiting for pearl) — so
-        // DNS resolution and an HTTP 200 are BOTH false positives for
-        // "Pearl is up"; the only valid liveness test is
-        // node_info.network == "pearl-1" (passing here since the 08-27 launch).
-        // Env overrides exist so a preview can point at whatever the launch
-        // actually exposes without a code change.
-        rpcUrl: import.meta.env.VITE_PEARL_RPC_URL || "https://rpc.pearl.testnets.gno.land:443",
-        // rpc.pearl.samourai.live provisioned 2026-08-27 ~16:20 UTC and
-        // IDENTITY-VERIFIED the same hour (pearl-1, heights advancing, own
-        // cert). pearl.rpc.onbloc.xyz is still NXDOMAIN — add it when it
-        // exists. The backend two-node rule (feed tailer must not share the
-        // app's endpoint) is satisfied by these two.
-        fallbackRpcUrls: [
-            "https://rpc.pearl.samourai.live:443",
-        ],
-        telemetryRpcUrls: [],
-        indexerUrl: import.meta.env.VITE_PEARL_INDEXER_URL || "https://indexer.pearl.testnets.gno.land/graphql/query",
-        label: "Pearl",
-        userRegistryPath: "gno.land/r/sys/users",
-        // Hub, not the per-chain subdomain (API-only — browser GET → 405, the
-        // sapphire lesson): activation needs gas, so verify Pearl is listed on
-        // the hub before the flag flip.
-        faucetUrl: "https://faucet.gno.land",
-        explorerUrl: import.meta.env.VITE_PEARL_EXPLORER_URL || "https://pearl.testnets.gno.land",
+        explorerUrl: "https://test13.testnets.gno.land",
     },
     // gno.land MAINNET — chain id `gnoland-1` (HYPHEN). Live since 2026-09-12;
     // the DEFAULT network since 2026-09-17 (netlify.toml VITE_GNO_CHAIN_ID +
@@ -303,7 +198,6 @@ export const NETWORKS: Record<string, NetworkConfig> = {
         fallbackRpcUrls: [
             "https://rpc.mainnet.samourai.live:443",
         ],
-        telemetryRpcUrls: [],
         // gno.land mainnet tx-indexer (verified 2026-09-23: it serves
         // gnoland-1, latestBlockHeight tracking the RPC). The browser never
         // calls it directly — getIndexerUrl() returns the backend proxy
@@ -349,7 +243,6 @@ export const NETWORKS: Record<string, NetworkConfig> = {
         rpcUrl: "https://rpc.onyx.testnets.gno.land:443",
         // No second node verified: onbloc and Samourai serve none yet.
         fallbackRpcUrls: [],
-        telemetryRpcUrls: [],
         indexerUrl: "https://indexer.onyx.testnets.gno.land/graphql/query",
         label: "Onyx",
         userRegistryPath: "gno.land/r/sys/users",
@@ -487,8 +380,8 @@ export function retiredNetworkSuccessor(key: string | null | undefined): string 
  * Why stored keys must be visible: a hidden network has no option in the
  * switcher, and when only one network is visible a single-option <select> cannot
  * fire `onChange` at all — a restored hidden key would pin the user to it on
- * every visit. A stored retired key (pearl) is hidden, so it resolves to the
- * default. That does NOT guarantee a visible result: DEFAULT_NETWORK is visible
+ * every visit. A stored retired key (pearl) is not a network any more, so it
+ * resolves to the default. That does NOT guarantee a visible result: DEFAULT_NETWORK is visible
  * in every shipped build but deliberately hidden on the pinned-flag e2e servers
  * (`.env.e2e` sets test13; see `resolveDefaultNetwork`). Nobody is stranded
  * because `selectableNetworksFor` always offers the active network.
@@ -561,8 +454,8 @@ const _activeNetwork = getActiveNetworkKey()
 export const ACTIVE_NETWORK_KEY = _activeNetwork
 
 /**
- * Returns the user registry realm path for the active network.
- * On test13/betanet this is `gno.land/r/sys/users` (upstream migration).
+ * Returns the user registry realm path for the active network
+ * (`gno.land/r/sys/users` unless the network names another).
  */
 export function getUserRegistryPath(): string {
     return NETWORKS[_activeNetwork]?.userRegistryPath || "gno.land/r/sys/users"
@@ -650,7 +543,7 @@ const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
     // same key, bound to gnoland-1 (docs/QUEST_ATTESTATION_RUNBOOK.md). Every
     // entry needs a realm-versions.json `mainnet` record (keyed by NETWORK
     // KEY, not chain id).
-    // Onyx: nothing of Memba's is published there yet. Explicit, like Betanet.
+    // Onyx: nothing of Memba's is published there yet. An explicit empty list states that.
     onyx: [],
     mainnet: [
         "gno.land/r/samcrew/memba_appstore_v3",
@@ -667,42 +560,6 @@ const REALM_ALLOWLIST: Record<string, readonly string[] | undefined> = {
         // owner-controlled), and the hire dialog refuses to sign while
         // GetPauseStateJSON reports paused. Canary: docs/ESCROW_MAINNET_CANARY.md.
         "gno.land/r/samcrew/escrow_v4",
-    ],
-    // Pearl — the combined-ceremony set (§4 of docs/PEARL_CUTOVER_PLAN.md):
-    // the default core lane + the commerce set in one window. Entry list =
-    // exactly the deployer's dry-run walk on the [pearl] lane (verified
-    // 2026-08-27 against the live chain): default lane (9) + gnobuilders/
-    // feedback (commerce head) + the NFT stack as one unit + the p0-guards
-    // pair. p/ packages (grc721, memba_market_core_v2) are deploy artifacts,
-    // not frontend targets — never allowlisted (same as test13). The
-    // legacy NFT v2 pair and v3_1 are NOT deployed on pearl, so never listed.
-    // Every entry must be backed by a realm-versions.json `pearl` record
-    // (merge-blocking rule above) — the record set lands with the ceremony,
-    // and this PR stays red until it does. Chain RETIRED 2026-09-23; the list
-    // stays truthful about what is published on the (dead) chain for as long
-    // as the hidden entry resolves.
-    pearl: [
-        "gno.land/r/samcrew/memba_dao",
-        "gno.land/r/samcrew/memba_dao_candidature_v3",
-        "gno.land/r/samcrew/memba_dao_channels_v2",
-        "gno.land/r/samcrew/agent_registry_v2",
-        "gno.land/r/samcrew/memba_reviews_v1",
-        "gno.land/r/samcrew/memba_quest_attestation_v1",
-        "gno.land/r/samcrew/memba_feed_v1",
-        "gno.land/r/samcrew/memba_appstore_v1",
-        "gno.land/r/samcrew/memba_appstore_v2",
-        "gno.land/r/samcrew/gnobuilders_badges_v2",
-        "gno.land/r/samcrew/memba_feedback_v2",
-        // Commerce set — funds-custody realms included: on pearl the whole
-        // stack ships in the ONE combined ceremony (decision 2026-08-23),
-        // unlike topaz's funds-free-only staging.
-        "gno.land/r/samcrew/tokenfactory_v2",
-        "gno.land/r/samcrew/memba_collections",
-        "gno.land/r/samcrew/memba_market_config",
-        "gno.land/r/samcrew/memba_nft_market_v3_2",
-        // p0-guards pair (separate later invocation per §4.3 — same window).
-        "gno.land/r/samcrew/escrow_v3",
-        "gno.land/r/samcrew/memba_token_otc_v2",
     ],
     test13: [
         "gno.land/r/samcrew/memba_dao",
@@ -854,27 +711,22 @@ export function getTelemetryRpcUrl(): string {
             "Falling back to GNO_RPC_URL. Add the domain to TRUSTED_RPC_DOMAINS in config.ts if intentional."
         )
     }
-    // Prefer the best-connected telemetry node (fresher consensus state) over the
-    // sentry-fronted primary; falls back to GNO_RPC_URL if none configured.
-    return getTelemetryRpcUrls()[0] || GNO_RPC_URL
+    return GNO_RPC_URL
 }
 
 /**
  * Ordered, deduped list of TRUSTED RPC nodes to poll for network telemetry.
  *
  * `/net_info` is node-local, so a single RPC gives a partial peer view. This
- * unions the env sentry override, the network's dedicated telemetry nodes, the
- * primary RPC, and the fallbacks — letting getAggregatedNetPeers reconstruct the
- * full topology. Untrusted entries are dropped (the env override warns).
+ * unions the env sentry override, the primary RPC and the fallbacks — letting
+ * getAggregatedNetPeers reconstruct more of the topology. Untrusted entries are
+ * dropped (the env override warns).
  *
- * Priority: VITE_SAMOURAI_SENTRY_RPC_URL → network.telemetryRpcUrls →
- *           GNO_RPC_URL → GNO_FALLBACK_RPC_URLS
+ * Priority: VITE_SAMOURAI_SENTRY_RPC_URL → GNO_RPC_URL → GNO_FALLBACK_RPC_URLS
  */
 export function getTelemetryRpcUrls(): string[] {
-    const net = NETWORKS[_activeNetwork]
     const candidates = [
         SAMOURAI_SENTRY_RPC_URL,
-        ...(net?.telemetryRpcUrls || []),
         GNO_RPC_URL,
         ...GNO_FALLBACK_RPC_URLS,
     ]
@@ -1068,8 +920,6 @@ export const TRUSTED_RPC_DOMAINS = [
     "gno.land",
     "testnets.gno.land", // covers rpc.test13.testnets.gno.land (official test13) + others
     "rpc.gno.land",
-    "gnoland.network", // test-13 indexer/gnoweb, suffix-matched
-    "onbloc.xyz",      // test-13 canonical RPC (test13.rpc.onbloc.xyz) — Adena moved here in v1.19.5 (#856)
     // Samourai Coop sentry/validator nodes — trusted for Hacker View dual-RPC strategy.
     // Convention: https://rpc.{chain}.samourai.live (e.g. rpc.mainnet.samourai.live)
     "samourai.live",
@@ -1125,7 +975,7 @@ export const MEMBA_TOKEN_DEV = {
     factoryPath: GRC20_FACTORY_PATH,
 } as const
 
-/** Memba token config for production (betanet/mainnet). */
+/** Memba token config for production (mainnet). */
 export const MEMBA_TOKEN_PROD = {
     symbol: "MEMBA",
     name: "Memba Governance Token",
@@ -1141,7 +991,7 @@ export const MEMBA_TOKEN = import.meta.env.PROD
 
 /**
  * Realm generations differ per network: mainnet ships memba_reviews_v2 (same public API as v1)
- * and only the v3 App Store, while pearl and older testnets carry reviews v1 and App Store v2.
+ * and only the v3 App Store, while older testnets (test13) carry reviews v1 and App Store v2.
  * An env override wins everywhere (deploy previews). Callers that know the URL network (route
  * gates) pass it explicitly; MEMBA_DAO resolves them for the active network.
  */

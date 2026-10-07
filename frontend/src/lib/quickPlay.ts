@@ -16,7 +16,7 @@ const SPEND_LIMIT_UGNOT = 1_000_000
 const SPEND_PERIOD = 86_400
 const GAS_WANTED = 20_000_000
 const MAX_DEPOSIT = "2000000ugnot"
-const FUNCS = new Set(["Reveal", "Play", "Resign", "ClaimTimeout"])
+const FUNCS = new Set(["Reveal", "Play", "ClaimTimeout"])
 
 export interface QuickPlayStatus { expiresAt: number; spendUsedUgnot: number; spendLimitUgnot: number }
 export class QuickPlayUnavailable extends Error {
@@ -173,7 +173,7 @@ export async function quickPlayStatus(master: string): Promise<QuickPlayStatus |
     return s.status
 }
 
-export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "Resign" | "ClaimTimeout", args: string[]): Promise<{ hash: string }> {
+export async function quickPlayCall(master: string, func: "Reveal" | "Play" | "ClaimTimeout", args: string[]): Promise<{ hash: string }> {
     checkMaster(master)
     if (!FUNCS.has(func)) throw new Error(`Quick play can't sign ${func}`)
     // Signed without the wallet, so the OS session that started the move is checked here instead.

@@ -110,7 +110,7 @@ function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: 
 }
 
 export const QUICKPLAY_FALLBACK_EVENT = "memba:quickplay-fallback"
-type MoveFunc = "Reveal" | "Play" | "Resign" | "ClaimTimeout"
+type MoveFunc = "Reveal" | "Play" | "ClaimTimeout"
 /** `beforeSign` runs right before the wallet opens and throws to stop (nothing is sent). */
 export interface MoveOptions { viaWallet?: boolean; broadcast?: Broadcast; beforeSign?: () => Promise<void> }
 
@@ -185,12 +185,15 @@ export async function reveal(caller: string, id: number, passphrase: string, opt
     return move("Reveal", [String(id), passphrase], caller, opts)
 }
 
-export async function play(caller: string, id: number, column: number, opts?: MoveOptions) {
+/** `moves` is the game's move count when the player chose: the realm refuses the move once the game is past it. */
+export async function play(caller: string, id: number, column: number, moves: number, opts?: MoveOptions) {
     assertIndex(id)
+    assertIndex(moves)
     if (!Number.isInteger(column) || column < 1 || column > 7) throw new Error("Column must be 1-7")
-    return move("Play", [String(id), String(column)], caller, opts)
+    return move("Play", [String(id), String(column), String(moves)], caller, opts)
 }
 
 export async function claimTimeout(caller: string, id: number, opts?: MoveOptions) { assertIndex(id); return move("ClaimTimeout", [String(id)], caller, opts) }
-export async function resign(caller: string, id: number, opts?: MoveOptions) { assertIndex(id); return move("Resign", [String(id)], caller, opts) }
+// The realm refuses Resign from a Quick play session (a stolen key must not throw games), so it always asks the wallet.
+export async function resign(caller: string, id: number, broadcast?: Broadcast) { assertIndex(id); return submit("Resign", [String(id)], caller, undefined, broadcast) }
 export async function cancel(caller: string, id: number, broadcast?: Broadcast) { assertIndex(id); return submit("Cancel", [String(id)], caller, undefined, broadcast) }

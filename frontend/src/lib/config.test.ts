@@ -1198,7 +1198,7 @@ describe("connect4 realm path", () => {
     afterEach(() => vi.unstubAllEnvs())
 
     it("is set on onyx only, never on mainnet", () => {
-        expect(connect4PathFor("onyx")).toBe("gno.land/r/nym-mikecito001/connect4_v2")
+        expect(connect4PathFor("onyx")).toBe("gno.land/r/nym-mikecito001/connect4_v3")
         expect(connect4PathFor("mainnet")).toBeNull()
         expect(connect4PathFor("gnoland1")).toBeNull()
         expect(connect4PathFor("nope")).toBeNull()

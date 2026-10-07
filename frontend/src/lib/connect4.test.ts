@@ -13,7 +13,7 @@ vi.mock("./config", async (orig) => ({
 }))
 
 import { QuickPlayUnavailable } from "./quickPlay"
-import { accept, buildCall, cancel, getActive, getGame, isGame, offer, play, revealKey, sha256Hex, type Game } from "./connect4"
+import { accept, buildCall, cancel, getActive, getGame, isGame, offer, play, resign, revealKey, sha256Hex, type Game } from "./connect4"
 
 export const sample: Game = {
     id: 3, creator: "g1creator", opponent: "", acceptor: "g1acceptor", stake: 2_000_000, fee: 100_000,
@@ -79,14 +79,14 @@ describe("writes", () => {
         expect(buildCall("Accept", ["3"], "g1me", 2_000_000).value.send).toBe("2000000ugnot")
         await accept("g1me", sample)
         expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Accept", args: ["3"], send: "2000000ugnot", pkg_path: "gno.land/r/test/c4", caller: "g1me" })
-        await play("g1me", 3, 4)
-        expect(broadcast.mock.calls[1][0][0].value).toMatchObject({ func: "Play", args: ["3", "4"], send: "" })
+        await play("g1me", 3, 4, 0)
+        expect(broadcast.mock.calls[1][0][0].value).toMatchObject({ func: "Play", args: ["3", "4", "0"], send: "" })
         expect(broadcast.mock.calls[1][2]).toEqual({ gasWanted: 20_000_000 })
     })
 
     it("rejects out-of-range columns before signing", async () => {
-        await expect(play("g1me", 3, 0)).rejects.toThrow()
-        await expect(play("g1me", 3, 8)).rejects.toThrow()
+        await expect(play("g1me", 3, 0, 0)).rejects.toThrow()
+        await expect(play("g1me", 3, 8, 0)).rejects.toThrow()
         expect(broadcast).not.toHaveBeenCalled()
     })
 
@@ -127,17 +127,18 @@ describe("Quick play routing", () => {
     it("sends coin-free moves through Quick play when active, Adena otherwise", async () => {
         qp.hasLocalSession.mockReturnValue(true)
         qp.quickPlayCall.mockResolvedValue({ hash: "H" })
-        await play("g1me", 3, 4)
-        expect(qp.quickPlayCall).toHaveBeenCalledWith("g1me", "Play", ["3", "4"])
+        await play("g1me", 3, 4, 0)
+        expect(qp.quickPlayCall).toHaveBeenCalledWith("g1me", "Play", ["3", "4", "0"])
         expect(broadcast).not.toHaveBeenCalled()
         qp.hasLocalSession.mockReturnValue(false)
-        await play("g1me", 3, 5)
+        await play("g1me", 3, 5, 0)
         expect(broadcast).toHaveBeenCalledTimes(1)
     })
-    it("never routes stakes or Cancel through Quick play", async () => {
+    it("never routes stakes, Cancel or Resign through Quick play", async () => {
         qp.hasLocalSession.mockReturnValue(true)
         await accept("g1me", sample)
         await cancel("g1me", 3)
+        await resign("g1me", 3)
         expect(qp.quickPlayCall).not.toHaveBeenCalled()
     })
     it("falls back to Adena at once when the session is unavailable", async () => {
@@ -146,7 +147,7 @@ describe("Quick play routing", () => {
         const seen: string[] = []
         const on = (e: Event) => seen.push((e as CustomEvent<string>).detail)
         window.addEventListener("memba:quickplay-fallback", on)
-        await play("g1me", 3, 4)
+        await play("g1me", 3, 4, 0)
         window.removeEventListener("memba:quickplay-fallback", on)
         expect(broadcast).toHaveBeenCalledTimes(1)
         expect(seen).toEqual(["x"])
@@ -154,12 +155,12 @@ describe("Quick play routing", () => {
     it("propagates other errors", async () => {
         qp.hasLocalSession.mockReturnValue(true)
         qp.quickPlayCall.mockRejectedValue(new Error("not your turn"))
-        await expect(play("g1me", 3, 4)).rejects.toThrow("not your turn")
+        await expect(play("g1me", 3, 4, 0)).rejects.toThrow("not your turn")
         expect(broadcast).not.toHaveBeenCalled()
     })
     it("viaWallet forces Adena", async () => {
         qp.hasLocalSession.mockReturnValue(true)
-        await play("g1me", 3, 4, { viaWallet: true })
+        await play("g1me", 3, 4, 0, { viaWallet: true })
         expect(qp.quickPlayCall).not.toHaveBeenCalled()
         expect(broadcast).toHaveBeenCalledTimes(1)
     })

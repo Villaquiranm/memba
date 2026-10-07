@@ -6,6 +6,8 @@ import { useTabListKeyboard } from "../hooks/useTabListKeyboard"
 import { api } from "../lib/api"
 import { isNativeMultisig } from "../lib/nativeMultisig"
 import { useBalance } from "../hooks/useBalance"
+import { useJoinMultisig } from "../hooks/useJoinMultisig"
+import { multisigLabel, namedByText } from "../lib/multisigName"
 import { CopyableAddress } from "../components/ui/CopyableAddress"
 import { StatusBadge } from "../components/ui/StatusBadge"
 import { getMultisigStatus } from "../components/ui/txStatus"
@@ -14,7 +16,6 @@ import { ErrorToast } from "../components/ui/ErrorToast"
 import type { Transaction } from "../gen/memba/v1/memba_pb"
 import { ExecutionState } from "../gen/memba/v1/memba_pb"
 import { ENABLE_NATIVE_GNO_MULTISIG, GNO_CHAIN_ID, GNO_BECH32_PREFIX } from "../lib/config"
-import { revealInvisibleFormatting } from "../lib/dao/v2Text"
 import type { LayoutContext } from "../types/layout"
 import "./multisigview.css"
 
@@ -65,6 +66,8 @@ export function MultisigView() {
         queryFn: async () => (await api.transactions({ authToken: token!, multisigAddress: address!, chainId: GNO_CHAIN_ID, executionState: ExecutionState.EXECUTED, limit: TX_PAGE_LIMIT })).transactions,
     })
     const multisig = infoQuery.data ?? null
+    const adding = useJoinMultisig(token)
+    const title = multisig ? multisigLabel(multisig, multisig.joined ? "Multisig Wallet" : "Multisig shared with you", true) : null
     const pendingTxs = pendingQuery.data ?? []
     const executedTxs = executedQuery.data ?? []
     const nativeEnabled = !!multisig && ENABLE_NATIVE_GNO_MULTISIG && isNativeMultisig(multisig.pubkeyJson)
@@ -153,7 +156,8 @@ export function MultisigView() {
                             </div>
                         ) : (
                             <div className="k-msview__title-row">
-                                <h2 className="k-msview__title">{revealInvisibleFormatting(multisig.name || "Multisig Wallet")}</h2>
+                                <h2 className="k-msview__title">{title?.name}</h2>
+                                {title?.namedBy && <span className="k-msview__named-by">{namedByText(title.namedBy)}</span>}
                                 <button type="button" className="k-msview__title-edit" aria-label="Rename multisig" onClick={() => { setEditName(multisig.name || ""); setEditing(true) }}>Rename</button>
                             </div>
                         )}
@@ -277,6 +281,16 @@ export function MultisigView() {
                     )}
                 </div>
             </div>
+
+            {/* A member another member registered reads and signs without joining;
+                joining only keeps the account in their list. */}
+            {!multisig.joined && (
+                <div className="k-card k-msview__empty" role="status">
+                    <p>Shared with you: your key is a member, so you can see and sign its transactions.</p>
+                    <button type="button" className="k-btn-secondary" disabled={adding.joining !== null || !multisig.pubkeyJson} onClick={() => { void adding.join(multisig) }}>{adding.joining ? "Joining…" : "Join to keep it in your accounts"}</button>
+                    {adding.error && <p role="alert">{adding.error}</p>}
+                </div>
+            )}
 
             {/* Transactions — Tabbed */}
             <div>

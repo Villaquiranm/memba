@@ -25,6 +25,36 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet; the creator's first-mover reveal is sent automatically from this browser.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### Alerts in Settings, Notifications (2026-10-08)
+- Memba OS: validator and GovDAO alerts now live in Settings, Notifications. The Validators app's Alerts button and old Alerts links open them there, with your webhooks, contacts and daily report unchanged
+
+### Sign-in loads only when you sign in (2026-10-08)
+- Sign-in (Alerts, admin link) loads Clerk only when you sign in or are already signed in on this device, not for every visitor; if Clerk cannot load, Alerts says sign-in is unavailable and the rest of Memba keeps working
+
+### NFT collections: network fee sized to the terms (2026-10-08)
+- Creating an NFT collection asks a network fee sized to its terms, so collections with long links, symbols or many royalty receivers no longer fail for lack of gas
+
+### Escrow: who decides disputes (2026-10-08)
+- Once Memba DAO is escrow's admin, a contract's page states how members decide a dispute: within about 14 days, either a full refund to the client or payment to the freelancer minus the platform fee, otherwise the 31-day default applies
+- A member voting on a dispute they are party to sees a warning
+
+### Propose on Memba DAO's new governance (2026-10-08)
+- Members file roster changes and app actions from the OS, reviewed decoded before signing; Memba refuses at review what the contract would refuse
+
+### Vote, execute, join and pause on Memba DAO's new governance (2026-10-08)
+- Once memba_gov and its bridge are published, members vote, execute an approved action, accept their seat invitation and pause an app for up to seven days from the OS
+- An action Memba cannot read is shown raw, with no one-click YES; an app action runs only while the app still matches what was voted
+
+### Memba DAO's new governance, read-only (2026-10-08)
+- The Memba DAO window shows memba_gov, the contract that replaces the current DAO: its members, pending invitations, the voting rules read from the contract, and each proposal, decoded where Memba knows the action and shown raw otherwise, with its target contract flagged
+- It turns on in a network once memba_gov is published there; until then the window says the contract is not published on that network
+
+### Multisig: shared names (2026-10-08)
+- A member who has not named a multisig sees the name given by the member who named it first, marked with who that is; their own name still wins, and an account they have not joined keeps a neutral label outside its own page
+
+### Multisig: sign without joining (2026-10-08)
+- Memba OS and Home: a member another member registered sees that account's proposals and can sign them at once; joining only keeps the account in their list (renaming also joins)
+- The Multisig app, the Memba OS bell and Home count the proposals waiting for your signature; for an account you have not joined, they show only the count, and its proposals are read on the account's page
 
 ### Moderation and curation actions use current values (2026-10-08)
 - Feed moderation and App Store curation: an action clicked right after the page changed now sends the values on screen, never the previous ones

@@ -1,58 +1,53 @@
 /**
- * AlertsPage — Professional alerting configuration for GovDAO & Validators.
+ * AlertsPanel — validator and GovDAO alerting (gnomonitoring): Telegram bots,
+ * webhooks, alert contacts and the daily report. Memba OS shows it in
+ * Settings → Notifications; builds without Memba OS (and hidden networks)
+ * serve it as the classic /alerts page.
  *
- * Architecture:
- * - ClerkProvider is loaded via React.lazy() — ~45KB bundle isolated from main chunk (F1)
- * - AlertErrorBoundary wraps everything for crash isolation (F4)
- * - 3-section accordion layout matching Settings.tsx pattern (F8, F9)
- * - Uses export default for lazy import consistency (F13)
+ * - The account (Clerk) comes from AccountProvider; Clerk loads only when someone signs in
+ * - AlertErrorBoundary wraps everything for crash isolation
+ * - Default export, for lazy import
  *
- * @module pages/AlertsPage
+ * @module components/alerts/AlertsPanel
  */
 
-import { lazy, Suspense, useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Bell } from "@phosphor-icons/react"
-import { ConnectingLoader } from "../components/ui/ConnectingLoader"
-import { AlertErrorBoundary } from "../components/alerts/AlertErrorBoundary"
+import { ConnectingLoader } from "../ui/ConnectingLoader"
+import { AlertErrorBoundary } from "./AlertErrorBoundary"
 import "./alerts.css"
-
-// ── Lazy-load Clerk bundle (F1 — zero main bundle impact) ────
-const ClerkAuthProvider = lazy(() => import("../components/auth/ClerkProvider"))
 
 /** Route-level loader matching App.tsx pattern */
 function PageLoader() {
     return <ConnectingLoader message="Loading alerts..." minHeight="30vh" />
 }
 
-// ── AlertsPage shell — error boundary + lazy Clerk ───────────
-export default function AlertsPage() {
+/**
+ * `embedded`: inside Memba OS Settings, whose card gives the title; it also tells
+ * a returning user that their alerts moved there unchanged.
+ */
+export default function AlertsPanel({ embedded = false }: { embedded?: boolean }) {
     return (
         <AlertErrorBoundary>
-            <Suspense fallback={<PageLoader />}>
-                <ClerkAuthProvider fallback={<SignInUnavailable />}>
-                    <AlertsContent />
-                </ClerkAuthProvider>
-            </Suspense>
+            <AlertsContent embedded={embedded} />
         </AlertErrorBoundary>
     )
 }
 
 // ── Internal: auth-gated content ─────────────────────────────
-// These imports are inside the lazy boundary (loaded with Clerk)
-import { useClerkAuth } from "../hooks/useClerkAuth"
-import { SignInButton } from "@clerk/clerk-react"
-import { WebhookCard } from "../components/alerts/WebhookCard"
-import { WebhookForm } from "../components/alerts/WebhookForm"
-import { AlertContactForm } from "../components/alerts/AlertContactForm"
-import { ReportScheduleForm } from "../components/alerts/ReportScheduleForm"
-import { TelegramBotCards } from "../components/alerts/TelegramBotCards"
-import * as api from "../lib/monitoringAuth"
+import { useAccount } from "../../account/accountContext"
+import { WebhookCard } from "./WebhookCard"
+import { WebhookForm } from "./WebhookForm"
+import { AlertContactForm } from "./AlertContactForm"
+import { ReportScheduleForm } from "./ReportScheduleForm"
+import { TelegramBotCards } from "./TelegramBotCards"
+import * as api from "../../lib/monitoringAuth"
 import type {
     MonitoringWebhook,
     MutationResult,
     WebhookInput,
     WebhookKind,
-} from "../lib/monitoringAuth"
+} from "../../lib/monitoringAuth"
 
 // ── Reusable section accordion (matches Settings.tsx) ────────
 function Section({ title, icon, defaultOpen = false, children }: {
@@ -292,19 +287,19 @@ function AlertsGate({ children }: { children: React.ReactNode }) {
     )
 }
 
-/** This build has no Clerk key: nobody can sign in, so alerts can't be set up here. */
-function SignInUnavailable() {
+/** Nobody can sign in: this build has no Clerk key, or Clerk did not load. */
+function SignInUnavailable({ text }: { text: string }) {
     return (
         <AlertsGate>
             <p role="status" style={{ fontSize: "var(--pro-small, 12px)", color: "var(--color-text)", fontWeight: 600, margin: 0 }}>
-                Sign-in for alerts isn't available on this site yet, so alerts can't be set up here.
+                {text}
             </p>
         </AlertsGate>
     )
 }
 
-function AlertsContent() {
-    const auth = useClerkAuth()
+function AlertsContent({ embedded }: { embedded: boolean }) {
+    const auth = useAccount()
     const [contacts, setContacts] = useState<api.AlertContact[]>([])
     // Validator-only, deliberately. The server resolves a contact's id_webhook
     // against WebhookValidator alone, and only validator alerts ever fire a
@@ -314,35 +309,42 @@ function AlertsContent() {
     const [validatorWebhooks, setValidatorWebhooks] = useState<MonitoringWebhook[]>([])
     const [schedule, setSchedule] = useState<api.ReportSchedule | null>(null)
     const [loadingContacts, setLoadingContacts] = useState(false)
+    // Only for the "moved here" note in Memba OS: whether the user had GovDAO webhooks.
+    const [hasGovdaoWebhooks, setHasGovdaoWebhooks] = useState(false)
 
-    // Fetch contacts + schedule on auth
+    // Provision the gnomonitoring user, then fetch contacts + schedule, once signed in.
+    const userId = auth.user?.id
     useEffect(() => {
-        if (!auth.isSignedIn) return
+        if (!userId) return
         const load = async () => {
             const t = await auth.getToken()
             if (!t) return
             setLoadingContacts(true)
-            const [c, s, wVal] = await Promise.all([
+            await api.ensureMonitoringUser(t, auth.user?.fullName || "", auth.user?.email || "")
+            const [c, s, wVal, wGov] = await Promise.all([
                 api.listAlertContacts(t),
                 api.getReportSchedule(t),
                 api.listWebhooks(t, "validator"),
+                embedded ? api.listWebhooks(t, "govdao") : Promise.resolve([]),
             ])
             setContacts(c)
             setSchedule(s)
             setValidatorWebhooks(wVal)
+            setHasGovdaoWebhooks(wGov.length > 0)
             setLoadingContacts(false)
         }
         load()
-    }, [auth.isSignedIn]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Not signed in → Auth Gate ────────────────────────────
-    if (!auth.isLoaded) return <PageLoader />
+    if (!auth.available) return <SignInUnavailable text="Sign-in for alerts isn't available on this site yet, so alerts can't be set up here." />
+    if (auth.status === "failed") return <SignInUnavailable text="Sign-in is unavailable right now. Try again later." />
+    if (auth.status === "loading") return <PageLoader />
 
-    if (!auth.isSignedIn) {
+    if (!auth.user) {
         return (
             <AlertsGate>
-                <SignInButton mode="modal">
-                    <button style={{
+                    <button type="button" onClick={auth.openSignIn} style={{
                         display: "inline-flex", alignItems: "center", justifyContent: "center",
                         height: 40, padding: "0 24px", borderRadius: 8,
                         background: "var(--color-brand)", color: "var(--color-text-contrast)", fontSize: "var(--pro-small, 13px)",
@@ -352,7 +354,6 @@ function AlertsContent() {
                     }}>
                         Sign in to configure alerts
                     </button>
-                </SignInButton>
                 <p style={{ fontSize: "var(--pro-caption, 10px)", color: "var(--color-text-muted)", marginTop: 12 }}>
                     ℹ️ Alerting auth is independent from your Gno wallet
                 </p>
@@ -375,10 +376,11 @@ function AlertsContent() {
     return (
         <div className="alerts-page">
             {/* Header */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--color-text)", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: embedded ? "flex-end" : "space-between" }}>
+                {/* In Memba OS Settings the card carries the title. */}
+                {!embedded && <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--color-text)", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
                     <Bell size={22} /> Alerts
-                </h2>
+                </h2>}
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {auth.user && (
                         <span style={{ fontSize: "var(--pro-caption, 11px)", color: "var(--color-text-secondary)", fontFamily: "var(--font-ui, JetBrains Mono, monospace)" }}>
@@ -398,6 +400,10 @@ function AlertsContent() {
                     </button>
                 </div>
             </div>
+
+            {embedded && (validatorWebhooks.length > 0 || contacts.length > 0 || hasGovdaoWebhooks) && (
+                <p role="status" className="alerts-moved">Alerts moved here from the Validators app. Your webhooks, contacts and daily report are unchanged: nothing to redo.</p>
+            )}
 
             {/* Section A: Telegram (easiest/instant setup — shown first) */}
             <Section title="Telegram Bots" icon={<span>✈️</span>} defaultOpen>

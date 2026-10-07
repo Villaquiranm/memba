@@ -91,7 +91,7 @@ describe("MultisigHub", () => {
         expect(api.multisigs).toHaveBeenCalledTimes(2)
     })
 
-    it("provides a keyboard accessible account action and accurately names the add flow", async () => {
+    it("provides a keyboard accessible account action and accurately names the join flow", async () => {
         vi.mocked(api.multisigs).mockResolvedValue({ multisigs: [wallet(1), wallet(2, false)] } as never)
         vi.mocked(api.createOrJoinMultisig).mockResolvedValue({} as never)
         renderHub()
@@ -99,17 +99,29 @@ describe("MultisigHub", () => {
         const view = await screen.findByRole("button", { name: "View Treasury 1 multisig history" })
         fireEvent.click(view)
         expect(mockNavigate).toHaveBeenCalledWith(`/multisig/${wallet(1).address}`)
-        expect(screen.getByText("Accounts shared with you")).toBeInTheDocument()
-        fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+        expect(screen.getByText("Shared with you")).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Join" }))
         await waitFor(() => expect(api.createOrJoinMultisig).toHaveBeenCalled())
     })
 
-    it("disables add when the public-key configuration is missing", async () => {
+    it("disables join when the public-key configuration is missing", async () => {
         vi.mocked(api.multisigs).mockResolvedValue({ multisigs: [{ ...wallet(2, false), pubkeyJson: "" }] } as never)
         renderHub()
-        const add = await screen.findByRole("button", { name: "Add account" })
-        expect(add).toBeDisabled()
-        expect(add).toHaveAttribute("title", "Public-key configuration unavailable")
+        const join = await screen.findByRole("button", { name: "Join" })
+        expect(join).toBeDisabled()
+        expect(join).toHaveAttribute("title", "Public-key configuration unavailable")
+    })
+
+    it("names a joined account by another member's name, marked, but keeps a shared one neutral", async () => {
+        vi.mocked(api.multisigs).mockResolvedValue({ multisigs: [
+            { ...wallet(1), name: "", sharedName: "Reserve", namedBy: "g1747t5m2f08plqjlrjk2q0qld7465hxz8gkx59c" },
+            { ...wallet(2, false), name: "", sharedName: "URGENT: sign now", namedBy: "g1747t5m2f08plqjlrjk2q0qld7465hxz8gkx59c" },
+        ] } as never)
+        renderHub()
+        expect(await screen.findByRole("button", { name: "View Reserve multisig history" })).toBeInTheDocument()
+        expect(screen.getByText("named by g1747t5m…x59c")).toBeInTheDocument()
+        expect(screen.getByText("Multisig shared with you")).toBeInTheDocument()
+        expect(screen.queryByText("URGENT: sign now")).toBeNull()
     })
 
     it("reveals invisible formatting in account names", async () => {

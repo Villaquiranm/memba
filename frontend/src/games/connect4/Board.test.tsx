@@ -9,7 +9,7 @@ const put = (board: string, c: number, r: number, p: "1" | "2") => {
     const a = board.split(""); a[c * 6 + r] = p; return a.join("")
 }
 const game = (board: string, extra: Partial<Game> = {}): Game => ({
-    id: 1, creator: "g1a", opponent: "", acceptor: "g1b", stake: 1, fee: 0, expiresAt: 0, commitment: "", board,
+    id: 1, creator: "g1a", opponent: "", acceptor: "g1b", stake: 1, fee: 0, expiresAt: 0, commitment: "", seedCommitment: "", revealed: true, board,
     turn: 1, turnPlayer: "g1a", moves: 0, lastCol: 0, lastRow: 0, deadline: 0, status: "playing", winner: "", ...extra,
 })
 

@@ -11,8 +11,8 @@ import "./connect4.css"
 
 // The realm's default fee, used for the pre-sign estimate only; per-game results use g.fee.
 const FEE_UGNOT = 100_000
-// Games already auto-opened for reveal: module-level so "← Lobby" (a remount) doesn't send the creator straight back.
-const autoOpened = new Set<number>()
+// Reveal steps already auto-opened ("id:revealed"): module-level so "← Lobby" (a remount) doesn't send the player straight back.
+const autoOpened = new Set<string>()
 
 export function Lobby({ me, connected, onOpen }: { me: string; connected: boolean; onOpen: (id: number) => void }) {
     const { data, dataUpdatedAt, isLoading } = useActive()
@@ -29,12 +29,13 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
     const offers = games.filter((g) => g.status === "open")
     const live = games.filter((g) => g.status === "playing")
 
-    // A creator whose offer was accepted must reveal: open that game once, while the reveal clock still runs.
+    // A player who must reveal (the creator first, then the acceptor's seed): open that game once per step, while its clock runs.
     useEffect(() => {
         if (!connected || !data) return
         for (const g of data.games) {
-            if (g.status === "playing" && g.turn === 0 && g.creator === me && g.deadline > data.now && !autoOpened.has(g.id)) {
-                autoOpened.add(g.id)
+            const step = `${g.id}:${g.revealed}`
+            if (g.status === "playing" && g.turn === 0 && (g.revealed ? g.acceptor === me : g.creator === me) && g.deadline > data.now && !autoOpened.has(step)) {
+                autoOpened.add(step)
                 onOpen(g.id)
             }
         }
@@ -118,7 +119,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                                     <span className="c4-live-info">
                                         <b>#{g.id} {(g.creator === me || g.acceptor === me) && <Pill tone="ok">yours</Pill>}</b>
                                         <span className="os-sub">pot {formatGnot(2 * g.stake)} · {g.moves} moves</span>
-                                        {g.turn === 0 ? <Pill tone="warn">awaiting reveal</Pill> : g.turnPlayer === me ? <Pill tone="ok">your move</Pill> : <span className="os-row c4-live-turn"><span className={`c4-mini-disc ${g.turn === 1 ? "c4-red" : "c4-yellow"}`} aria-hidden="true" />{shortAddr(g.turnPlayer)} to move</span>}
+                                        {g.turn === 0 ? <Pill tone="warn">{g.revealed ? "awaiting seed" : "awaiting reveal"}</Pill> : g.turnPlayer === me ? <Pill tone="ok">your move</Pill> : <span className="os-row c4-live-turn"><span className={`c4-mini-disc ${g.turn === 1 ? "c4-red" : "c4-yellow"}`} aria-hidden="true" />{shortAddr(g.turnPlayer)} to move</span>}
                                     </span>
                                 </button>
                             </li>)}

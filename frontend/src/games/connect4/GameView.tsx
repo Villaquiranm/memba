@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { QUICKPLAY_FALLBACK_EVENT, cancel, claimTimeout, getGame, play, resign, reveal, revealKey, type Game } from "../../lib/connect4"
+import { QUICKPLAY_FALLBACK_EVENT, cancel, claimTimeout, getGame, play, resign, reveal, revealKey, revealSeed, type Game } from "../../lib/connect4"
 import { hasLocalSession, quickPlayStatus } from "../../lib/quickPlay"
 import { Empty, Loading, Pill, type PillTone } from "../../os/kit"
 import { Board } from "./Board"
@@ -10,8 +10,8 @@ import { useWalletBroadcast } from "./osWallet"
 import { fmtSeconds, formatGnot, shortAddr, useChainNow, useGame, useTx } from "./useConnect4"
 import "./connect4.css"
 
-type Snap = Pick<Game, "moves" | "turn"> | null
-const sameTurn = (g: Game, s: Snap) => !!s && g.moves === s.moves && g.turn === s.turn
+type Snap = Pick<Game, "moves" | "turn" | "revealed"> | null
+const sameTurn = (g: Game, s: Snap) => !!s && g.moves === s.moves && g.turn === s.turn && g.revealed === s.revealed
 // When a move's outcome is unknown, the wallet may re-send it only while this still holds on a fresh read.
 type Applies = (g: Game, sent: Snap) => boolean
 
@@ -34,11 +34,14 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     const plain = { broadcast }, wallet = { viaWallet: true, broadcast, beforeSign: () => stillApplies() }
     const g = data?.game ?? null
     const isCreator = connected && g?.creator === me
-    const isPlayer = connected && (g?.creator === me || g?.acceptor === me)
+    const isAcceptor = connected && g?.acceptor === me
+    const isPlayer = isCreator || isAcceptor
     const needsReveal = g?.status === "playing" && g.turn === 0
     const left = g ? g.deadline - now : 0
     const expired = g?.status === "playing" && left <= 0
-    const key = isCreator && needsReveal && !expired && g ? revealKey(me, g.commitment) : null
+    // Two reveals before the first move: the creator's passphrase, then the acceptor's seed.
+    const myReveal = !!g && needsReveal && (g.revealed ? isAcceptor : isCreator)
+    const key = myReveal && !expired && g ? revealKey(me, g.revealed ? g.seedCommitment : g.commitment) : null
     const autoRevealed = useRef(false)
     // Time left is captured when a move fails: the immediate wallet route is decided then, once.
     const leftRef = useRef(left)
@@ -61,13 +64,14 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
     }, [])
     // Quick play moves carry their wallet twin, so a failure can be re-sent via Adena.
     const run = (fn: () => Promise<unknown>, walletFn: () => Promise<unknown>, applies: Applies) => {
-        const sent: Snap = latest.current && { moves: latest.current.moves, turn: latest.current.turn }
+        const sent: Snap = latest.current && { moves: latest.current.moves, turn: latest.current.turn, revealed: latest.current.revealed }
         return tx.run(async () => {
             try { return await fn() } catch (e) { failLeft.current = leftRef.current; failed.current = { sent, applies }; throw e }
         }, quick ? walletFn : undefined)
     }
     const canPlay: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn !== 0 && x.turnPlayer === me
-    const canReveal: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn === 0 && x.creator === me
+    const canReveal: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn === 0 && !x.revealed && x.creator === me
+    const canRevealSeed: Applies = (x, sent) => x.status === "playing" && sameTurn(x, sent) && x.turn === 0 && x.revealed && x.acceptor === me
     // ClaimTimeout ends the game, so it still playing means it didn't land.
     const stillPlaying: Applies = (x) => x.status === "playing"
     // The review sheet and wallet can sit open a while: the action must still apply on a read taken just before signing.
@@ -76,7 +80,9 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
         if (!game) throw new Error("Couldn't check the game before signing. Nothing was sent.")
         if (!failed.current.applies(game, failed.current.sent)) throw new Error("The game moved on before you signed. Nothing was sent.")
     }
-    const doReveal = (k: string) => (g ? run(() => reveal(me, g.id, k, plain), () => reveal(me, g.id, k, wallet), canReveal) : Promise.resolve(false))
+    const doReveal = (k: string) => !g ? Promise.resolve(false)
+        : g.revealed ? run(() => revealSeed(me, g.id, k, plain), () => revealSeed(me, g.id, k, wallet), canRevealSeed)
+        : run(() => reveal(me, g.id, k, plain), () => reveal(me, g.id, k, wallet), canReveal)
 
     useEffect(() => {
         if (!key || !g || autoRevealed.current) return
@@ -162,8 +168,11 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
             <span>{result(g, me)}{won && <small>The pot is on its way to your wallet.</small>}</span>
         </div>}
         {g.status === "open" && <div className="os-note" role="status">Waiting for an opponent · offer {now >= g.expiresAt ? "expired" : `expires in ${fmtSeconds(g.expiresAt - now)}`}</div>}
-        {needsReveal && <div className={expired ? "os-note os-warn" : "os-note"} role="status">Waiting for the creator to reveal · {expired ? "reveal clock ran out" : `${fmtSeconds(left)} left`}</div>}
-        {isCreator && needsReveal && !expired && !key && <div className="os-note os-err" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
+        {needsReveal && <div className={expired ? "os-note os-warn" : "os-note"} role="status">
+            {g.revealed ? "Waiting for the acceptor to reveal their seed" : "Waiting for the creator to reveal"} · {expired ? "reveal clock ran out" : `${fmtSeconds(left)} left`}
+            {isAcceptor && !g.revealed && !expired && " · keep this tab open: your seed is revealed right after."}
+        </div>}
+        {myReveal && !expired && !key && <div className="os-note os-err" role="alert">Your reveal key isn't on this device; you'll forfeit when the 90s runs out.</div>}
 
         <div className="c4-arena">
             <Board game={g} piece={piece} canPlay={myTurn && !tx.pending} onPlay={(c) => void run(() => play(me, g.id, c, g.moves, plain), () => play(me, g.id, c, g.moves, wallet), canPlay)} />
@@ -177,7 +186,7 @@ export function GameView({ id, me, connected, onBack }: { id: number; me: string
                     <dt>Moves</dt><dd>{g.moves}</dd>
                 </dl>
                 <div className="os-row">
-                    {isCreator && needsReveal && key && !unknown && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void doReveal(key)}>Reveal</button>}
+                    {myReveal && key && !unknown && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void doReveal(key)}>Reveal</button>}
                     {expired && <button type="button" className="os-btn c4-cta" disabled={tx.pending} onClick={() => void run(() => claimTimeout(me, g.id, plain), () => claimTimeout(me, g.id, wallet), stillPlaying)}>Claim timeout</button>}
                     {connected && g.status === "open" && (isCreator || now >= g.expiresAt) && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => cancel(me, g.id, broadcast))}>Cancel</button>}
                     {isPlayer && g.status === "playing" && <button type="button" className="os-btn os-quiet" disabled={tx.pending} onClick={() => void tx.run(() => resign(me, g.id, broadcast))}>Resign</button>}

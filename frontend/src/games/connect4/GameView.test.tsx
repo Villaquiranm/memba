@@ -6,7 +6,7 @@ import { renderWithProviders } from "../../test/test-utils"
 import type { Game } from "../../lib/connect4"
 
 const lib = vi.hoisted(() => ({
-    getGame: vi.fn(), play: vi.fn(), reveal: vi.fn(), resign: vi.fn(), cancel: vi.fn(), claimTimeout: vi.fn(), revealKey: vi.fn(),
+    getGame: vi.fn(), play: vi.fn(), reveal: vi.fn(), resign: vi.fn(), cancel: vi.fn(), claimTimeout: vi.fn(), revealKey: vi.fn(), revealSeed: vi.fn(),
 }))
 vi.mock("../../lib/connect4", async (orig) => ({ ...(await orig<typeof import("../../lib/connect4")>()), ...lib }))
 
@@ -17,7 +17,7 @@ import { GameView } from "./GameView"
 
 const g: Game = {
     id: 4, creator: "g1alice", opponent: "", acceptor: "g1bob", stake: 2_000_000, fee: 100_000, expiresAt: 900,
-    commitment: "c".repeat(64), board: "0".repeat(42), turn: 1, turnPlayer: "g1alice", moves: 0, lastCol: 0, lastRow: 0,
+    commitment: "c".repeat(64), seedCommitment: "d".repeat(64), revealed: false, board: "0".repeat(42), turn: 1, turnPlayer: "g1alice", moves: 0, lastCol: 0, lastRow: 0,
     deadline: 1_090, status: "playing", winner: "",
 }
 const view = (me: string, game: Game, now = 1_000) => {
@@ -48,6 +48,26 @@ describe("GameView", () => {
         expect(await screen.findByRole("button", { name: "Claim timeout" })).toBeEnabled()
         expect(screen.queryByRole("button", { name: "Resign" })).toBeNull()
         expect(screen.getByRole("button", { name: /^Drop in column 1:/ })).toBeDisabled()
+    })
+
+    it("after the creator's reveal, auto-reveals the acceptor's seed by its own commitment", async () => {
+        lib.revealKey.mockImplementation((_me: string, c: string) => (c === "d".repeat(64) ? "myseed" : null))
+        lib.revealSeed.mockResolvedValue({})
+        view("g1bob", { ...g, turn: 0, turnPlayer: "", revealed: true })
+        await waitFor(() => expect(lib.revealSeed).toHaveBeenCalledWith("g1bob", 4, "myseed", {}))
+        expect(lib.reveal).not.toHaveBeenCalled()
+        expect(screen.getByText(/Waiting for the acceptor to reveal their seed/)).toBeInTheDocument()
+    })
+
+    it("tells the acceptor to keep the tab open while the creator reveals, and the creator waits for the seed", async () => {
+        lib.revealKey.mockReturnValue("x")
+        const first = view("g1bob", { ...g, turn: 0, turnPlayer: "" })
+        expect(await screen.findByText(/keep this tab open/)).toBeInTheDocument()
+        expect(lib.revealSeed).not.toHaveBeenCalled()
+        first.unmount()
+        view("g1alice", { ...g, turn: 0, turnPlayer: "", revealed: true })
+        expect(await screen.findByText(/Waiting for the acceptor/)).toBeInTheDocument()
+        expect(lib.reveal).not.toHaveBeenCalled()
     })
 
     it("auto-reveals once for the creator with a stored key", async () => {

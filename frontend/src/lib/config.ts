@@ -1009,7 +1009,7 @@ export function appStorePathFor(networkKey: string): string {
 export function connect4PathFor(networkKey: string): string | null {
     if (!NETWORKS[networkKey]?.isTestnet) return null
     return import.meta.env.VITE_CONNECT4_REALM_PATH
-        || (networkKey === "onyx" ? "gno.land/r/nym-mikecito001/connect4_v3" : null)
+        || (networkKey === "onyx" ? "gno.land/r/samcrew/connect4" : null)
 }
 export const isConnect4Live = (): boolean =>
     isConnect4Enabled() && connect4PathFor(ACTIVE_NETWORK_KEY) !== null

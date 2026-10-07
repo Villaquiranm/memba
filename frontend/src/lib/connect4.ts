@@ -22,6 +22,10 @@ export interface Game {
     fee: number
     expiresAt: number
     commitment: string
+    /** sha256 of the acceptor's seed, given with Accept; revealed after the creator's passphrase. */
+    seedCommitment: string
+    /** The creator's passphrase is out: with turn 0 the game waits for the acceptor's RevealSeed. */
+    revealed: boolean
     board: string
     turn: 0 | 1 | 2
     turnPlayer: string
@@ -40,11 +44,12 @@ export function isGame(v: unknown): v is Game {
     const o = v as Record<string, unknown> | null
     if (!o || typeof o !== "object") return false
     const nums = ["id", "stake", "fee", "expiresAt", "moves", "lastCol", "lastRow", "deadline"]
-    const strs = ["creator", "opponent", "acceptor", "commitment", "turnPlayer", "winner"]
+    const strs = ["creator", "opponent", "acceptor", "commitment", "seedCommitment", "turnPlayer", "winner"]
     return nums.every((k) => typeof o[k] === "number")
         && strs.every((k) => typeof o[k] === "string")
         && typeof o.board === "string" && BOARD_RE.test(o.board)
         && (o.turn === 0 || o.turn === 1 || o.turn === 2)
+        && typeof o.revealed === "boolean"
         && typeof o.status === "string" && STATUSES.includes(o.status)
 }
 
@@ -104,7 +109,7 @@ export async function getLeaders(): Promise<Leaders | null> {
 
 // WRITES
 
-export type Connect4Func = "Offer" | "Accept" | "Reveal" | "Play" | "ClaimTimeout" | "Resign" | "Cancel"
+export type Connect4Func = "Offer" | "Accept" | "Reveal" | "RevealSeed" | "Play" | "ClaimTimeout" | "Resign" | "Cancel"
 
 // Storage deposit cap per call. Offer on onyx-1 stored 7,589 bytes (758,900ugnot
 // at 100ugnot/byte, simulated 2026-09-30); 2x, rounded up to a whole GNOT.
@@ -130,7 +135,7 @@ function submit(func: Connect4Func, args: string[], caller: string, sendUgnot?: 
 }
 
 export const QUICKPLAY_FALLBACK_EVENT = "memba:quickplay-fallback"
-type MoveFunc = "Reveal" | "Play" | "ClaimTimeout"
+type MoveFunc = "Reveal" | "RevealSeed" | "Play" | "ClaimTimeout"
 /** `beforeSign` runs right before the wallet opens and throws to stop (nothing is sent). */
 export interface MoveOptions { viaWallet?: boolean; broadcast?: Broadcast; beforeSign?: () => Promise<void> }
 
@@ -157,8 +162,9 @@ export async function sha256Hex(s: string): Promise<string> {
     return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-// Reveal keys: commitment -> passphrase, per creator. Keyed by commitment
-// because the game id is unknown until the Offer lands.
+// Reveal keys: commitment -> secret, per address: the creator's passphrase
+// and the acceptor's seed alike. Keyed by commitment because the game id is
+// unknown until the Offer lands.
 const keyStore = (caller: string) => `memba.connect4.pass.${caller}`
 
 function readKeys(caller: string): Record<string, string> {
@@ -175,12 +181,12 @@ export function revealKey(caller: string, commitment: string): string | null {
     return typeof v === "string" ? v : null
 }
 
-/** Posts an offer and returns its commitment. The passphrase is stored before
- * signing; if it cannot be stored nothing is sent (a lost key forfeits). */
-export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string }, broadcast?: Broadcast): Promise<string> {
+/** A fresh 32-byte random secret and its commitment, stored before anything is
+ * signed: if it cannot be stored nothing is sent (a lost secret forfeits). */
+async function newSecret(caller: string): Promise<{ secret: string; commitment: string }> {
     const bytes = crypto.getRandomValues(new Uint8Array(32))
-    const passphrase = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
-    const commitment = await sha256Hex(passphrase)
+    const secret = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
+    const commitment = await sha256Hex(secret)
     let raw: string | null = null
     try { raw = localStorage.getItem(keyStore(caller)) } catch { /* unreadable: the write below reports it */ }
     if (raw !== null) {
@@ -189,20 +195,35 @@ export async function offer(caller: string, o: { stakeUgnot: number; validFor: n
         if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("Your stored reveal keys look damaged, so nothing was sent.")
     }
     try {
-        localStorage.setItem(keyStore(caller), JSON.stringify({ ...readKeys(caller), [commitment]: passphrase }))
+        localStorage.setItem(keyStore(caller), JSON.stringify({ ...readKeys(caller), [commitment]: secret }))
     } catch {
         throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
     }
-    if (revealKey(caller, commitment) !== passphrase) throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
+    if (revealKey(caller, commitment) !== secret) throw new Error("Couldn't store your reveal key on this device, so nothing was sent.")
+    return { secret, commitment }
+}
+
+/** Posts an offer and returns its commitment. */
+export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string }, broadcast?: Broadcast): Promise<string> {
+    const { commitment } = await newSecret(caller)
     await submit("Offer", [o.opponent, String(o.validFor), commitment], caller, o.stakeUgnot, broadcast)
     return commitment
 }
 
-export const accept = (caller: string, g: Game, broadcast?: Broadcast) => submit("Accept", [String(g.id)], caller, g.stake, broadcast)
+/** Accepts with the commitment of a fresh seed, revealed after the creator's passphrase (revealSeed). */
+export async function accept(caller: string, g: Game, broadcast?: Broadcast) {
+    const { commitment } = await newSecret(caller)
+    return submit("Accept", [String(g.id), commitment], caller, g.stake, broadcast)
+}
 
 export async function reveal(caller: string, id: number, passphrase: string, opts?: MoveOptions) {
     assertIndex(id)
     return move("Reveal", [String(id), passphrase], caller, opts)
+}
+
+export async function revealSeed(caller: string, id: number, seed: string, opts?: MoveOptions) {
+    assertIndex(id)
+    return move("RevealSeed", [String(id), seed], caller, opts)
 }
 
 /** `moves` is the game's move count when the player chose: the realm refuses the move once the game is past it. */

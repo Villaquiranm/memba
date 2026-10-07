@@ -11,7 +11,7 @@ import { SignerContext, type SignerApi } from "../../os/sign/signerContext"
 
 const base: Game = {
     id: 1, creator: "g1alice", opponent: "", acceptor: "", stake: 2_000_000, fee: 100_000, expiresAt: 2_000,
-    commitment: "c".repeat(64), board: "0".repeat(42), turn: 0, turnPlayer: "", moves: 0, lastCol: 0, lastRow: 0,
+    commitment: "c".repeat(64), seedCommitment: "", revealed: false, board: "0".repeat(42), turn: 0, turnPlayer: "", moves: 0, lastCol: 0, lastRow: 0,
     deadline: 0, status: "open", winner: "",
 }
 
@@ -126,6 +126,15 @@ describe("Lobby", () => {
         renderWithProviders(<SignerContext.Provider value={{ sign } as unknown as SignerApi}><Lobby me="g1alice" connected onOpen={vi.fn()} /></SignerContext.Provider>)
         fireEvent.click(await screen.findByRole("button", { name: "Post offer" }))
         await waitFor(() => expect(sign).toHaveBeenCalledWith(expect.objectContaining({ title: "Connect 4", summary: "Connect 4: Offer" })))
+    })
+
+    it("opens the game for the acceptor once the creator has revealed", async () => {
+        const g = { ...base, id: 21, status: "playing" as const, acceptor: "g1bob", turn: 0 as const, revealed: true, deadline: 1_090 }
+        lib.getActive.mockResolvedValue({ now: 1_000, games: [g] })
+        const onOpen = vi.fn()
+        renderWithProviders(<Lobby me="g1bob" connected onOpen={onOpen} />)
+        await waitFor(() => expect(onOpen).toHaveBeenCalledWith(21))
+        expect(screen.getByText("awaiting seed")).toBeInTheDocument()
     })
 
     it("filters to my games", async () => {

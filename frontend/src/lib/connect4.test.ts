@@ -61,9 +61,15 @@ describe("getGame", () => {
 
 describe("getActive", () => {
     it("filters malformed entries and clamps paging", async () => {
-        qeval.mockResolvedValue(wrap({ now: 5, games: [sample, { id: "x" }] }))
-        await expect(getActive(0, 500)).resolves.toEqual({ now: 5, games: [sample] })
+        qeval.mockResolvedValue(wrap({ now: 5, fee: 100_000, games: [sample, { id: "x" }] }))
+        await expect(getActive(0, 500)).resolves.toEqual({ now: 5, fee: 100_000, games: [sample] })
         expect(qeval).toHaveBeenCalledWith("https://rpc.test", "gno.land/r/test/c4", "ActiveJSON(0, 100)", false)
+    })
+    it("gives no fee when the realm's is missing or malformed, so no offer can name a maximum", async () => {
+        for (const fee of [undefined, -1, 1.5, "100000"]) {
+            qeval.mockResolvedValue(wrap({ now: 5, fee, games: [] }))
+            await expect(getActive(0, 10)).resolves.toEqual({ now: 5, fee: null, games: [] })
+        }
     })
     it("never queries with a non-integer offset", async () => {
         await expect(getActive(-1, 10)).resolves.toBeNull()
@@ -109,20 +115,28 @@ describe("writes", () => {
     })
 
     it("offer commits to sha256 of a stored fresh passphrase", async () => {
-        const commitment = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })
+        const commitment = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 })
         const pass = revealKey("g1me", commitment)!
         expect(pass).toMatch(/^[0-9a-f]{64}$/)
         expect(await sha256Hex(pass)).toBe(commitment)
-        expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Offer", args: ["", "10", commitment], send: "2000000ugnot" })
+        expect(broadcast.mock.calls[0][0][0].value).toMatchObject({ func: "Offer", args: ["", "10", commitment, "100000"], send: "2000000ugnot" })
         expect(broadcast.mock.calls[0][2]).toEqual({ gasWanted: 20_000_000 })
-        const second = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })
+        const second = await offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 })
         expect(second).not.toBe(commitment)
         expect(revealKey("g1other", commitment)).toBeNull()
     })
 
+    it("refuses an offer without a known maximum fee, before anything is stored or sent", async () => {
+        for (const maxFeeUgnot of [Number.NaN, -1, 0.5]) {
+            await expect(offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "", maxFeeUgnot })).rejects.toThrow(/nothing was sent/)
+        }
+        expect(broadcast).not.toHaveBeenCalled()
+        expect(localStorage.getItem("memba.connect4.pass.g1me")).toBeNull()
+    })
+
     it("refuses to sign an offer when the key cannot be stored", async () => {
         const spy = vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("quota") })
-        await expect(offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })).rejects.toThrow(/nothing was sent/)
+        await expect(offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 })).rejects.toThrow(/nothing was sent/)
         expect(broadcast).not.toHaveBeenCalled()
         spy.mockRestore()
     })
@@ -130,7 +144,7 @@ describe("writes", () => {
     it("refuses to overwrite a damaged key store", async () => {
         for (const bad of ["{oops", "[1]", "null", "7"]) {
             localStorage.setItem("memba.connect4.pass.g1me", bad)
-            await expect(offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "" })).rejects.toThrow(/look damaged/)
+            await expect(offer("g1me", { stakeUgnot: 2_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 })).rejects.toThrow(/look damaged/)
             expect(localStorage.getItem("memba.connect4.pass.g1me")).toBe(bad)
         }
         expect(broadcast).not.toHaveBeenCalled()

@@ -79,12 +79,14 @@ export async function getGame(id: number): Promise<{ now: number; game: Game | n
 }
 
 /** Open and Playing games in id order with the chain time. Null on failure. */
-export async function getActive(offset: number, limit: number): Promise<{ now: number; games: Game[] } | null> {
+/** `fee` is the house fee a new offer pays, or null when the realm didn't give a valid one (then no offer can be posted). */
+export async function getActive(offset: number, limit: number): Promise<{ now: number; fee: number | null; games: Game[] } | null> {
     if (!isIndex(offset) || !isIndex(limit)) return null
     const lim = Math.max(1, Math.min(100, limit))
     const v = await evalJSON(`ActiveJSON(${offset}, ${lim})`)
     if (!v) return null
-    return { now: v.now as number, games: Array.isArray(v.games) ? v.games.filter(isGame) : [] }
+    const fee = isIndex(v.fee as number) ? v.fee as number : null
+    return { now: v.now as number, fee, games: Array.isArray(v.games) ? v.games.filter(isGame) : [] }
 }
 
 export interface Leader { addr: string; score: number }
@@ -203,10 +205,11 @@ async function newSecret(caller: string): Promise<{ secret: string; commitment: 
     return { secret, commitment }
 }
 
-/** Posts an offer and returns its commitment. */
-export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string }, broadcast?: Broadcast): Promise<string> {
+/** Posts an offer and returns its commitment. `maxFeeUgnot` is the fee the creator was shown: the realm refuses the offer if the fee is now higher. */
+export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string; maxFeeUgnot: number }, broadcast?: Broadcast): Promise<string> {
+    if (!isIndex(o.maxFeeUgnot)) throw new Error("The house fee isn't known yet, so nothing was sent.")
     const { commitment } = await newSecret(caller)
-    await submit("Offer", [o.opponent, String(o.validFor), commitment], caller, o.stakeUgnot, broadcast)
+    await submit("Offer", [o.opponent, String(o.validFor), commitment, String(o.maxFeeUgnot)], caller, o.stakeUgnot, broadcast)
     return commitment
 }
 

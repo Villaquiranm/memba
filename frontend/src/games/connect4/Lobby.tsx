@@ -9,14 +9,14 @@ import { useWalletBroadcast } from "./osWallet"
 import { fmtSeconds, formatGnot, shortAddr, useActive, useChainNow, useTx } from "./useConnect4"
 import "./connect4.css"
 
-// The realm's default fee, used for the pre-sign estimate only; per-game results use g.fee.
-const FEE_UGNOT = 100_000
 // Reveal steps already auto-opened ("id:revealed"): module-level so "← Lobby" (a remount) doesn't send the player straight back.
 const autoOpened = new Set<string>()
 
 export function Lobby({ me, connected, onOpen }: { me: string; connected: boolean; onOpen: (id: number) => void }) {
     const { data, dataUpdatedAt, isLoading } = useActive()
     const now = useChainNow(data?.now, dataUpdatedAt)
+    // The fee a new offer pays, from the realm. It is sent as the offer's maximum, so a fee raised before the offer lands is refused.
+    const fee = data?.fee ?? null
     const tx = useTx()
     const broadcast = useWalletBroadcast()
     const alive = useRef(true)
@@ -43,12 +43,12 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
 
     const stakeUgnot = Math.round(Number(stake) * 1_000_000)
     const minutes = Number(validFor)
-    const formOk = Number.isSafeInteger(stakeUgnot) && stakeUgnot >= 1_000_000 && stakeUgnot > FEE_UGNOT
+    const formOk = fee !== null && Number.isSafeInteger(stakeUgnot) && stakeUgnot >= 1_000_000 && stakeUgnot > fee
         && Number.isInteger(minutes) && minutes >= 1 && minutes <= 60
         && (opponent === "" || /^g1[02-9ac-hj-np-z]{38}$/.test(opponent))
 
-    const post = () => tx.run(async () => {
-        const commitment = await offer(me, { stakeUgnot, validFor: minutes, opponent }, broadcast)
+    const post = (maxFeeUgnot: number) => tx.run(async () => {
+        const commitment = await offer(me, { stakeUgnot, validFor: minutes, opponent, maxFeeUgnot }, broadcast)
         // ponytail: finds the new game in the first 100 active games; page if the lobby ever grows past that.
         for (let i = 0; i < 10; i++) {
             if (!alive.current) return
@@ -69,7 +69,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
             <div className="c4-hero-discs" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
             <div className="os-grow">
                 <h2>Connect 4</h2>
-                <p>Both players stake the same GNOT; the winner takes the pot minus a {formatGnot(FEE_UGNOT)} fee. Each move has 90 seconds of chain time — run out and you forfeit.</p>
+                <p>Both players stake the same GNOT; the winner takes the pot minus {fee === null ? "a house fee" : `a ${formatGnot(fee)} fee`}. Each move has 90 seconds of chain time — run out and you forfeit.</p>
             </div>
             <div className="os-row c4-hero-controls">
                 <QuickPlay me={me} connected={connected} />
@@ -130,7 +130,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
 
             <div className="c4-aside">
                 {connected && <aside className="c4-post">
-                    <form className="c4-form" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
+                    <form className="c4-form" onSubmit={(e) => { e.preventDefault(); if (formOk && fee !== null) void post(fee) }}>
                         <h3>Post an offer</h3>
                         <div className="c4-field">
                             <label htmlFor="c4-stake">Stake (GNOT)</label>
@@ -149,7 +149,7 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                         <div className="c4-payout" aria-live="polite">
                             <span><small>You stake</small><b>{formOk ? formatGnot(stakeUgnot) : "—"}</b></span>
                             <span className="c4-payout-arrow" aria-hidden="true">→</span>
-                            <span><small>Winner gets</small><b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b></span>
+                            <span><small>Winner gets</small><b>{formOk && fee !== null ? formatGnot(2 * stakeUgnot - fee) : "—"}</b></span>
                         </div>
                         <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
                         <button type="submit" className="os-btn c4-cta c4-cta-wide" disabled={!formOk || tx.pending}>Post offer</button>

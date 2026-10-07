@@ -24,6 +24,7 @@ func DefaultConfigs() map[string]Config {
 		// "eval" removed in v6 (SEC-01) — /api/eval endpoint was removed
 		"rpc":                {MaxRequests: 60, Window: time.Minute},  // ConnectRPC (all service calls combined)
 		"tx":                 {MaxRequests: 10, Window: time.Minute},  // Sign/Complete transaction — stricter
+		"siwe":               {MaxRequests: 10, Window: time.Minute},  // Sign-In with Ethereum challenge/token — stricter, on top of "rpc"
 		"oauth":              {MaxRequests: 5, Window: time.Minute},   // OAuth flows — strict
 		"analyst":            {MaxRequests: 10, Window: time.Minute},  // DAO analyst — LLM calls are expensive
 		"upload":             {MaxRequests: 5, Window: time.Minute},   // IPFS avatar upload — strict (single downscaled avatar)
@@ -55,6 +56,9 @@ const (
 	// stops one host flooding; this per-wallet cap stops one authenticated wallet
 	// rotating IPs to burn the Lighthouse quota.
 	ImageUploadEndpoint = "image_upload"
+	// SafeRegisterEndpoint gates per-account RegisterSafe calls, each of which
+	// reads the chain to check the Safe and its owners.
+	SafeRegisterEndpoint = "safe_register"
 	// ArcadeSubmitEndpoint gates per-authenticated-address BARRICADE run submits.
 	// Layered under the per-IP `arcade_submit` bucket: per-IP stops one host
 	// flooding; this per-wallet cap stops one authenticated wallet rotating IPs to
@@ -93,6 +97,8 @@ func PerUserQuestConfigs(envInt func(name string, def int) int) map[string]Confi
 		CurationInboxEndpoint: {MaxRequests: envInt("MEMBA_CURATION_INBOX_RPM", 30), Window: time.Minute},
 		// ...and a send adds to a conversation, not a feed.
 		CurationSendEndpoint: {MaxRequests: envInt("MEMBA_CURATION_SEND_RPM", 12), Window: time.Minute},
+		// Per-account Safe registrations: each one reads the chain (code, owners).
+		SafeRegisterEndpoint: {MaxRequests: envInt("MEMBA_SAFE_REGISTER_RPM", 10), Window: time.Minute},
 		"default":            {MaxRequests: 10, Window: time.Minute},
 	}
 }

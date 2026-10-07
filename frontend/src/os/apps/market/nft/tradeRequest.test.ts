@@ -80,7 +80,7 @@ describe("buying a listing", () => {
             ["Price", "2 GNOT"], ["To the seller", "1.89 GNOT"], ["Protocol fee (0.5%)", "0.01 GNOT"], [`Royalty to ${ROYALTY}`, "0.1 GNOT"],
             ["Network fee", "0.0804 GNOT"],
             // The seller paid the listing's deposit; the chain pays it to the buyer whose call frees it.
-            ["Storage deposit", "Up to 0.8 GNOT for the token in your holdings; the listing's own deposit is paid to you"],
+            ["Storage deposit", "Up to 0.84 GNOT for the token in your holdings; the listing's own deposit is paid to you"],
         ]))
         expect(await run(request)).toEqual({ outcome: "sent", hash: HASH, result: undefined })
         expect(vi.mocked(doContractBroadcast)).toHaveBeenCalledWith(request.prepare(undefined).msgs, "Buy C1 #5", expect.objectContaining({ gasWanted: 67_000_000, gasFee: 80_400 }))
@@ -125,7 +125,7 @@ describe("cancelling a listing", () => {
         expect(request.prepare(undefined).msgs[0].value).toMatchObject({ caller: SELLER, func: "Cancel", args: ["L12"], send: "" })
         expect(await run(request)).toMatchObject({ outcome: "sent", hash: HASH })
         expect(mocks.lane).not.toHaveBeenCalled()
-        expect(vi.mocked(doContractBroadcast)).toHaveBeenCalledWith(expect.anything(), "Cancel listing L12", expect.objectContaining({ gasWanted: 26_000_000 }))
+        expect(vi.mocked(doContractBroadcast)).toHaveBeenCalledWith(expect.anything(), "Cancel listing L12", expect.objectContaining({ gasWanted: 29_000_000 }))
     })
 
     it("is the seller's alone, and stops when the listing already closed", async () => {
@@ -150,13 +150,13 @@ describe("listing a token", () => {
         expect(request.lines(undefined)).toEqual(expect.arrayContaining([
             ["Price", "2 GNOT"], ["At a sale: to the seller", "1.89 GNOT"], ["At a sale: protocol fee (0.5%)", "0.01 GNOT"],
             [`At a sale: royalty to ${ROYALTY}`, "0.1 GNOT"], ["Expires", "2100-01-01 00:00 UTC"], ["Replaces", "Listing L9, closed by this one"],
-            ["Storage deposit", "Up to 2 GNOT; the listing's part (about 0.48 to 0.78 GNOT) goes to whoever closes it"],
+            ["Storage deposit", "Up to 2.1 GNOT; the listing's part (about 0.48 to 0.78 GNOT) goes to whoever closes it"],
         ]))
         const msgs = request.prepare(undefined).msgs
         expect(msgs.map((msg) => msg.value.func)).toEqual(["Approve", "List"])
         expect(msgs[1].value.args).toEqual(["C1", "5", "2000000", "4102444800", "ugnot", "50"])
         expect(await run(request)).toMatchObject({ outcome: "sent", hash: HASH })
-        expect(vi.mocked(doContractBroadcast)).toHaveBeenCalledWith(msgs, "List C1 #5", expect.objectContaining({ gasWanted: 62_000_000 }))
+        expect(vi.mocked(doContractBroadcast)).toHaveBeenCalledWith(msgs, "List C1 #5", expect.objectContaining({ gasWanted: 67_000_000 }))
         expect(mocks.getMarketTerms).toHaveBeenCalledWith("C1", 2_000_000n)
         expect(mocks.getTokenListing).toHaveBeenCalledWith("C1", 5n)
     })

@@ -22,9 +22,10 @@ import { ADD_STAGE_GAS_WANTED, END_STAGE_GAS_WANTED } from "./studio"
  */
 const MEASURED: [string, number, number][] = [
     ["Mint", MINT_GAS_WANTED, 26.4],
-    ["Approve + List", LIST_GAS_WANTED, 12.96 + 17.54],
+    // Measured on onyx-1 at the published bytes, above the test node: a relisting after the token came back.
+    ["Approve + List", LIST_GAS_WANTED, 14.58 + 18.75],
     ["Buy", BUY_GAS_WANTED, 33.23],
-    ["Cancel", CANCEL_LISTING_GAS_WANTED, 12.52],
+    ["Cancel", CANCEL_LISTING_GAS_WANTED, 14.37], // onyx-1
     ["MakeOffer", MAKE_OFFER_GAS_WANTED, 18.14],
     ["CancelOffer", CANCEL_OFFER_GAS_WANTED, 10.49],
     ["Approve + AcceptOffer", ACCEPT_OFFER_GAS_WANTED, 12.96 + 33.05],
@@ -32,7 +33,8 @@ const MEASURED: [string, number, number][] = [
     ["Review", REVIEW_GAS_WANTED, 19],
     // Fixed, dutch and holder stages (Memba schedules no allowlist stage), the tenth of a collection the worst.
     ["AddStage", ADD_STAGE_GAS_WANTED, 14.47],
-    ["EndStage", END_STAGE_GAS_WANTED, 10.18],
+    // Measured on onyx-1 at the published bytes, above the test node's 10.18M.
+    ["EndStage", END_STAGE_GAS_WANTED, 10.78],
 ]
 
 /* A creation's gas grows with its terms; measured at the pin by direct calls. */

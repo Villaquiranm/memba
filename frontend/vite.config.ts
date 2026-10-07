@@ -181,13 +181,24 @@ function sitemapPlugin(mode: string): PluginOption {
 // dead OS chunk — so the fonts leak into a flag-off build as unreferenced
 // files. See the assetsInlineLimit override below.
 const osEnabledFor = (mode: string) => ({ ...loadEnv(mode, '..', 'VITE_'), ...process.env }).VITE_MEMBA_OS === 'true'
+const evmEnabledFor = (mode: string) => ({ ...loadEnv(mode, '..', 'VITE_'), ...process.env }).VITE_ENABLE_EVM === 'true'
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => { const evmBuild = evmEnabledFor(mode); return {
   envDir: '..', // Load .env from repo root (where all VITE_* vars live)
+  // EVM builds only: api-kit's Node-only `import("node-fetch")` resolves to the browser's fetch,
+  // so node-fetch and its Node HTTP stack never ship (lib/chain/evm/safe/nodeFetch.browser.ts).
+  resolve: evmBuild ? { alias: [{ find: /^node-fetch$/, replacement: fileURLToPath(new URL('./src/lib/chain/evm/safe/nodeFetch.browser.ts', import.meta.url)) }] } : undefined,
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  // EVM dev servers pre-bundle the adapter's libraries at start: discovered on first use
+  // instead, they make Vite reload the page mid-test (the cold-start flake of e2e/os/os-evm).
+  // They keep that pre-bundle in a cache of their own: the e2e servers run side by side, and
+  // a different pre-bundle written to the shared node_modules/.vite replaced the dependency
+  // files the flag-off servers were serving, so their pages broke mid-test.
+  optimizeDeps: evmBuild ? { include: ['viem', 'viem/chains', '@wagmi/core'] } : undefined,
+  cacheDir: evmBuild ? 'node_modules/.vite-evm' : undefined,
   build: {
     sourcemap: true, // Required for Sentry source map uploads
     assetsInlineLimit: osEnabledFor(mode) ? undefined : (filePath: string) => /manrope-latin-\d+-normal\.woff2$/.test(filePath) || undefined,
@@ -200,10 +211,21 @@ export default defineConfig(({ mode }) => ({
         // The Workbox precache-exclusion + bundle CI gate below keep it isolated
         // end-to-end. The other groups replicate the previous long-lived vendor chunks.
         manualChunks(id) {
+          // EVM builds only (VITE_ENABLE_EVM). Vite's preload helper is imported by every module
+          // with a lazy import(), viem's included, and a manual chunk takes its modules'
+          // dependencies with it: without a home of its own the helper followed viem into
+          // vendor-evm, which every eager chunk then imported. It lives with React, loaded first.
+          // A flag-off build names no EVM chunk at all (Rollup would emit it empty), so its
+          // output stays as it was.
+          if (evmBuild && id.includes('vite/preload-helper')) return 'vendor-react'
           if (!id.includes('node_modules')) return
           if (/[\\/]node_modules[\\/](three|@react-three)[\\/]/.test(id)) return 'vendor-three'
           // EVM network adapter (VITE_ENABLE_EVM): lazy-only, same firewall as three (check:bundle:evm).
-          if (/[\\/]node_modules[\\/](viem|wagmi|@wagmi|ox|abitype)[\\/]/.test(id)) return 'vendor-evm'
+          if (evmBuild && /[\\/]node_modules[\\/](viem|wagmi|@wagmi|ox|abitype|mipd|isows)[\\/]/.test(id)) return 'vendor-evm'
+          // Safe{Core} SDK (lib/chain/evm/safe/sdk.ts), loaded when a Safe screen first needs it:
+          // its own lazy chunk so connecting a wallet never downloads it (check:bundle:safe). The
+          // asn1 / @peculiar modules are protocol-kit's passkey support, used by nothing else.
+          if (evmBuild && /[\\/]node_modules[\\/](@safe-global|@peculiar|asn1js|pvtsutils|pvutils)[\\/]/.test(id)) return 'vendor-safe'
           if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|@remix-run[\\/]router|scheduler)[\\/]/.test(id)) return 'vendor-react'
           if (/[\\/]node_modules[\\/]@phosphor-icons[\\/]/.test(id)) return 'vendor-ui'
           if (/[\\/]node_modules[\\/]@sentry[\\/]/.test(id)) return 'vendor-sentry'
@@ -259,7 +281,7 @@ export default defineConfig(({ mode }) => ({
         // the 3D renderer lands and lazily imports three.
         // Review-only brand specimens should not enter the production offline precache.
         // sw-retire.js is the retired classic host's service-worker kill switch, never part of this app.
-        globIgnores: ['**/vendor-three-*.js', '**/vendor-evm-*.js', '**/brand/folded-m/**', `${SITEMAP_NETWORK}/blog/**`, 'os/news/**', 'sw-retire.js'],
+        globIgnores: ['**/vendor-three-*.js', '**/vendor-evm-*.js', '**/vendor-safe-*.js', '**/brand/folded-m/**', `${SITEMAP_NETWORK}/blog/**`, 'os/news/**', 'sw-retire.js'],
         // recharts/jspdf chunks are large; allow them into the precache.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
@@ -330,4 +352,5 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}))
+}
+})

@@ -95,6 +95,13 @@ type MultisigService struct {
 	blockPartySeedRPC     string
 	blockPartySeedChainID string
 
+	// siwe is the Sign-In with Ethereum configuration (ConfigureSiwe). The
+	// zero value is off: the SIWE RPCs answer Unimplemented and no EVM token
+	// validates.
+	siwe siweConfig
+	// Safes (EVM multisig) lists and names: off unless Safe chains are configured.
+	safes safeRegistry
+
 	// lbRebuilding guards the background user_ranks rebuild (perf W1.3): a
 	// stale-cache leaderboard read serves the current cache and triggers at
 	// most one detached recompute instead of paying the full aggregation on

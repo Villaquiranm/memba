@@ -25,6 +25,8 @@ Full changelogs are split by version range for easier navigation:
 - Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet. Who moves first is drawn from a secret each player commits to and reveals right after the game starts; both reveals are sent automatically from the player's browser, so both should keep the game open for about three minutes after an offer is accepted.
 - Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes and resigning still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
 - The transaction confirmation window stays readable in light themes and in Memba OS.
+### Guest banner wording (2026-10-08)
+- Memba OS: the guest banner says Connect to sign instead of Connect to vote, which only made sense over a DAO
 
 ### Dependencies (2026-10-08)
 - Security: the HTML sanitiser (`dompurify`) is raised past its latest advisory (GHSA-p98j-92pf-mc4p, GHSA-6688-9rhm-gjv2)

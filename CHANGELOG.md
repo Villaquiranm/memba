@@ -20,6 +20,11 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Arcade: Connect 4, staked two-player on testnet, with Quick play (2026-10-07)
+- A fourth Arcade game: staked Connect 4 against another wallet. Both players stake the same GNOT and the winner takes the pot minus a 0.1 GNOT fee; every move has 90 seconds of chain time. The lobby lists open offers and live games as cards (anyone can open one to watch), and offers are posted with stake and duration presets. The board drops discs with a bounce, shows whose turn it is with a move-clock ring, and highlights the winning line.
+- Testnet only: the game appears only where its realm is configured (Onyx today) and behind its own flag. Every move is signed in the wallet. Who moves first is drawn from a secret each player commits to and reveals right after the game starts; both reveals are sent automatically from the player's browser, so both should keep the game open for about three minutes after an offer is accepted.
+- Quick play: one wallet approval starts a session (1h, 4h or 24h) limited to Connect 4 and 1 GNOT a day of gas and storage. Moves then sign without a wallet popup, while stakes and resigning still ask the wallet. If the session can't sign a move, the move goes to the wallet at once — straight away when less than 15 seconds are left — and ending Quick play revokes the session on chain.
+- The transaction confirmation window stays readable in light themes and in Memba OS.
 ### Guest banner wording (2026-10-08)
 - Memba OS: the guest banner says Connect to sign instead of Connect to vote, which only made sense over a DAO
 

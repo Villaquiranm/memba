@@ -193,6 +193,7 @@ export function SignerProvider({ session, toast, children }: { session: OsSessio
     const cancel = useCallback(() => {
         if (review && review.stage !== "review") return // the wallet request is in flight, or its outcome is being checked
         closeReview()
+        review?.req.onDismissed?.()
     }, [review, closeReview])
 
     const api = useMemo<SignerApi>(() => ({

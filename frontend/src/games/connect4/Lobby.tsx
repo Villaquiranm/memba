@@ -4,6 +4,7 @@ import { Empty, Gate, Loading, Pill, Toggle } from "../../os/kit"
 import { COLS, ROWS, cell } from "./rules"
 import { TxError } from "./TxError"
 import { QuickPlay } from "./QuickPlay"
+import { Leaders } from "./Leaders"
 import { useWalletBroadcast } from "./osWallet"
 import { fmtSeconds, formatGnot, shortAddr, useActive, useChainNow, useTx } from "./useConnect4"
 import "./connect4.css"
@@ -126,32 +127,35 @@ export function Lobby({ me, connected, onOpen }: { me: string; connected: boolea
                 </>}
             </div>
 
-            {connected && <aside className="c4-post">
-                <form className="c4-form" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
-                    <h3>Post an offer</h3>
-                    <div className="c4-field">
-                        <label htmlFor="c4-stake">Stake (GNOT)</label>
-                        <input id="c4-stake" type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} />
-                        <QuickPicks label="Stake presets" values={["1", "2", "5", "10"]} unit="GNOT" value={stake} onPick={setStake} />
-                    </div>
-                    <div className="c4-field">
-                        <label htmlFor="c4-valid">Valid for (minutes)</label>
-                        <input id="c4-valid" type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} />
-                        <QuickPicks label="Duration presets" values={["5", "10", "30", "60"]} unit="min" value={validFor} onPick={setValidFor} />
-                    </div>
-                    <div className="c4-field">
-                        <label htmlFor="c4-opp">Opponent address (optional)</label>
-                        <input id="c4-opp" value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1… — leave empty for anyone" />
-                    </div>
-                    <div className="c4-payout" aria-live="polite">
-                        <span><small>You stake</small><b>{formOk ? formatGnot(stakeUgnot) : "—"}</b></span>
-                        <span className="c4-payout-arrow" aria-hidden="true">→</span>
-                        <span><small>Winner gets</small><b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b></span>
-                    </div>
-                    <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
-                    <button type="submit" className="os-btn c4-cta c4-cta-wide" disabled={!formOk || tx.pending}>Post offer</button>
-                </form>
-            </aside>}
+            <div className="c4-aside">
+                {connected && <aside className="c4-post">
+                    <form className="c4-form" onSubmit={(e) => { e.preventDefault(); if (formOk) void post() }}>
+                        <h3>Post an offer</h3>
+                        <div className="c4-field">
+                            <label htmlFor="c4-stake">Stake (GNOT)</label>
+                            <input id="c4-stake" type="number" min="1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} />
+                            <QuickPicks label="Stake presets" values={["1", "2", "5", "10"]} unit="GNOT" value={stake} onPick={setStake} />
+                        </div>
+                        <div className="c4-field">
+                            <label htmlFor="c4-valid">Valid for (minutes)</label>
+                            <input id="c4-valid" type="number" min="1" max="60" value={validFor} onChange={(e) => setValidFor(e.target.value)} />
+                            <QuickPicks label="Duration presets" values={["5", "10", "30", "60"]} unit="min" value={validFor} onPick={setValidFor} />
+                        </div>
+                        <div className="c4-field">
+                            <label htmlFor="c4-opp">Opponent address (optional)</label>
+                            <input id="c4-opp" value={opponent} onChange={(e) => setOpponent(e.target.value.trim())} placeholder="g1… — leave empty for anyone" />
+                        </div>
+                        <div className="c4-payout" aria-live="polite">
+                            <span><small>You stake</small><b>{formOk ? formatGnot(stakeUgnot) : "—"}</b></span>
+                            <span className="c4-payout-arrow" aria-hidden="true">→</span>
+                            <span><small>Winner gets</small><b>{formOk ? formatGnot(2 * stakeUgnot - FEE_UGNOT) : "—"}</b></span>
+                        </div>
+                        <div className="os-note os-warn">After someone accepts, you must reveal within 90 seconds — keep this tab open until the game starts. The reveal key is stored only in this browser; missing it forfeits your stake.</div>
+                        <button type="submit" className="os-btn c4-cta c4-cta-wide" disabled={!formOk || tx.pending}>Post offer</button>
+                    </form>
+                </aside>}
+                <Leaders me={connected ? me : ""} />
+            </div>
         </div>
     </div>
 }

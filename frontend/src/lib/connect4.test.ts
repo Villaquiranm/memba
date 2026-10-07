@@ -13,7 +13,7 @@ vi.mock("./config", async (orig) => ({
 }))
 
 import { QuickPlayUnavailable } from "./quickPlay"
-import { accept, buildCall, cancel, getActive, getGame, isGame, offer, play, resign, revealKey, sha256Hex, type Game } from "./connect4"
+import { accept, buildCall, cancel, getActive, getGame, isGame, getLeaders, offer, play, resign, revealKey, sha256Hex, type Game } from "./connect4"
 
 export const sample: Game = {
     id: 3, creator: "g1creator", opponent: "", acceptor: "g1acceptor", stake: 2_000_000, fee: 100_000,
@@ -68,6 +68,24 @@ describe("getActive", () => {
     it("never queries with a non-integer offset", async () => {
         await expect(getActive(-1, 10)).resolves.toBeNull()
         expect(qeval).not.toHaveBeenCalled()
+    })
+})
+
+describe("getLeaders", () => {
+    const A = "g1cvr48r7l7lkmvp77cr6zg2zhu26jgfwr0y8pew"
+    it("keeps well-formed rows, at most 10 per board", async () => {
+        const many = Array.from({ length: 12 }, (_, i) => ({ addr: A, score: 12 - i }))
+        qeval.mockResolvedValue(wrap({ wins: [{ addr: A, score: 3 }, { addr: "<script>", score: 2 }, { addr: A, score: -1 }, { addr: A, score: 1.5 }], gnot: many }))
+        const r = await getLeaders()
+        expect(qeval).toHaveBeenCalledWith("https://rpc.test", "gno.land/r/test/c4", "LeadersJSON()", false)
+        expect(r?.wins).toEqual([{ addr: A, score: 3 }])
+        expect(r?.gnot).toHaveLength(10)
+    })
+    it("is null on a malformed reply or a failed read", async () => {
+        qeval.mockResolvedValue(wrap({ wins: "nope" }))
+        await expect(getLeaders()).resolves.toBeNull()
+        qeval.mockRejectedValue(new Error("down"))
+        await expect(getLeaders()).resolves.toBeNull()
     })
 })
 

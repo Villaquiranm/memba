@@ -82,6 +82,26 @@ export async function getActive(offset: number, limit: number): Promise<{ now: n
     return { now: v.now as number, games: Array.isArray(v.games) ? v.games.filter(isGame) : [] }
 }
 
+export interface Leader { addr: string; score: number }
+/** The realm's two top-10 boards: most games won, most ugnot won. */
+export interface Leaders { wins: Leader[]; gnot: Leader[] }
+const ADDR_RE = /^g1[02-9ac-hj-np-z]{38}$/
+const isLeader = (v: unknown): v is Leader => {
+    const o = v as Record<string, unknown> | null
+    return !!o && typeof o === "object" && typeof o.addr === "string" && ADDR_RE.test(o.addr) && Number.isSafeInteger(o.score) && (o.score as number) > 0
+}
+
+/** The leaderboards, highest first, at most 10 each. Null on failure. */
+export async function getLeaders(): Promise<Leaders | null> {
+    const path = realmPath()
+    if (!path) return null
+    const raw = await queryEval(GNO_RPC_URL, path, "LeadersJSON()", false).catch(() => null)
+    if (!raw) return null
+    const v = parseQevalJSON(raw) as Record<string, unknown> | null
+    if (!v || !Array.isArray(v.wins) || !Array.isArray(v.gnot)) return null
+    return { wins: v.wins.filter(isLeader).slice(0, 10), gnot: v.gnot.filter(isLeader).slice(0, 10) }
+}
+
 // WRITES
 
 export type Connect4Func = "Offer" | "Accept" | "Reveal" | "Play" | "ClaimTimeout" | "Resign" | "Cancel"

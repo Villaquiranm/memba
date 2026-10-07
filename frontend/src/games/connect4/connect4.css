@@ -166,7 +166,7 @@
 .c4-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--os-chip, #eef2ff); color: var(--os-acc-ink, #1e40af); font-size: 11px; letter-spacing: 0; }
 .c4-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
 
-.c4-offer, .c4-live, .c4-post {
+.c4-offer, .c4-live, .c4-post, .c4-fame {
   background: var(--os-card, #fff); border: 3px solid var(--os-line, #e5e7eb); border-radius: 20px;
   box-shadow: 0 5px 0 var(--os-line, #e5e7eb);
 }
@@ -195,7 +195,8 @@
 .c4-miniboard { display: grid; grid-template-columns: repeat(7, 9px); gap: 3px; padding: 6px; border-radius: 9px; flex: none; background: linear-gradient(160deg, #3b82f6, var(--c4-board-deep)); box-shadow: 0 3px 0 var(--c4-board-deep); }
 .c4-miniboard i { width: 9px; height: 9px; border-radius: 50%; background: #172554; }
 
-.c4-post { padding: 16px; position: sticky; top: 0; }
+.c4-aside { display: grid; gap: 20px; position: sticky; top: 0; }
+.c4-post { padding: 16px; }
 .c4-form { display: grid; gap: 14px; }
 .c4-field { display: grid; gap: 6px; }
 .c4-field label { font-size: 12px; font-weight: 700; color: var(--os-mut, inherit); }
@@ -219,9 +220,36 @@
 .c4-payout-arrow { font-size: 18px; color: var(--os-mut, #6b7280); }
 .c4-cta-wide { width: 100%; justify-content: center; }
 
+/* Hall of fame: the realm's two top-10 boards behind a tab switch; the podium gets medal discs. */
+.c4-fame { padding: 16px; display: grid; gap: 12px; }
+.c4-fame-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.c4-fame-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--os-hover, #f3f4f6); }
+.c4-fame-tabs button {
+  min-height: 30px; padding: 0 10px; border: 0; border-radius: 9px; cursor: pointer; background: transparent;
+  font: 700 11.5px var(--os-font, inherit); color: var(--os-mut, inherit);
+  transition: background-color .15s ease-out, box-shadow .15s ease-out;
+}
+.c4-fame-tabs button[aria-selected="true"] { background: var(--os-card, #fff); color: var(--os-ink, inherit); box-shadow: 0 2px 0 var(--os-line, #e5e7eb); }
+.c4-fame-tabs button:focus-visible { outline: 2px solid var(--os-acc, #2563eb); outline-offset: 2px; }
+.c4-fame-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.c4-fame-row { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 12px; font-size: 13px; animation: c4-fame-in .3s var(--c4-ease-bounce) both; }
+.c4-fame-row[data-rank] { padding: 8px; background: var(--os-hover, #f3f4f6); }
+.c4-fame-row[data-me] { background: var(--os-chip, #eef2ff); box-shadow: inset 0 0 0 2px var(--os-acc, #2563eb); }
+.c4-fame-row:nth-child(2) { animation-delay: 40ms; }
+.c4-fame-row:nth-child(3) { animation-delay: 80ms; }
+.c4-medal { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 50%; font: 800 12px var(--os-font, inherit); font-variant-numeric: tabular-nums; color: var(--os-mut, inherit); }
+.c4-fame-row[data-rank] .c4-medal { color: #1a1a1a; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .22), inset 0 2px 0 rgba(255, 255, 255, .5), 0 2px 0 rgba(0, 0, 0, .12); }
+.c4-fame-row[data-rank="1"] .c4-medal { width: 32px; height: 32px; font-size: 14px; background: radial-gradient(circle at 35% 30%, #fef3c7, #fbbf24 50%, #b45309); }
+.c4-fame-row[data-rank="2"] .c4-medal { background: radial-gradient(circle at 35% 30%, #f8fafc, #cbd5e1 50%, #64748b); }
+.c4-fame-row[data-rank="3"] .c4-medal { background: radial-gradient(circle at 35% 30%, #ffedd5, #fb923c 50%, #9a3412); }
+.c4-fame-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.c4-fame-score { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.c4-fame-row[data-rank="1"] .c4-fame-score { font-size: 15px; }
+@keyframes c4-fame-in { from { opacity: 0; transform: translateY(4px); } }
+
 @container os-window (max-width: 760px) {
   .c4-lobby { grid-template-columns: 1fr; }
-  .c4-post { position: static; }
+  .c4-aside { position: static; }
 }
 @container os-window (max-width: 560px) {
   .c4-arena { flex-direction: column; }

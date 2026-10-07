@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { getActive, getGame } from "../../lib/connect4"
+import { getActive, getGame, getLeaders } from "../../lib/connect4"
 
 // Throw on a failed read so react-query keeps the last good data. Keep polling in a
 // background tab: a hidden tab that misses its reveal/move window forfeits stake.
@@ -15,6 +15,12 @@ export const useGame = (id: number) => useQuery({
     queryFn: async () => { const r = await getGame(id); if (!r) throw new Error("unavailable"); return r },
     refetchInterval: 3_000,
     refetchIntervalInBackground: true,
+})
+
+export const useLeaders = () => useQuery({
+    queryKey: ["connect4", "leaders"],
+    queryFn: async () => { const r = await getLeaders(); if (!r) throw new Error("unavailable"); return r },
+    refetchInterval: 30_000,
 })
 
 /** Chain seconds now: the last response's block time advanced by wall time since it arrived. */

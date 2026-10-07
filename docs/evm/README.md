@@ -63,4 +63,5 @@ Fork tests use `BASE_RPC_URL` / `BASE_SEPOLIA_RPC_URL` when set (an archive endp
 
 | Track | Scope | Status |
 |---|---|---|
-| M0 | Flag, bundle gate, Phase 0 fork verification | In progress |
+| M0 | Flag, bundle gate, Phase 0 fork verification | Done |
+| T1a | Frontend network seam (`frontend/src/lib/chain/`), Base Sepolia in the OS network selector, apps per network family, EVM wallet and sign-in | In progress: network selection |

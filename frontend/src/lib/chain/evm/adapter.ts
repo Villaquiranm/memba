@@ -11,10 +11,11 @@
  */
 import { createConfig, createStorage, getPublicClient, http, injected } from "@wagmi/core"
 import { base, baseSepolia, type Chain } from "viem/chains"
-import type { Read } from "../types"
+import type { Read, TxResult } from "../types"
 import { readChainStatus, type ChainStatus } from "./chainCheck"
-import { EVM_NETWORKS } from "./networks"
+import { EVM_NETWORKS, storedEvmNetworkKey } from "./networks"
 import { createEvmWallet } from "./wallet"
+import { sendEvmWriteWith, type EvmWrite } from "./send"
 
 const CHAINS: Readonly<Record<string, Chain>> = { "base-sepolia": baseSepolia, base }
 
@@ -54,4 +55,10 @@ export const evmWallet = createEvmWallet(evmConfig)
 export function readNetworkStatus(key: string): Promise<Read<ChainStatus>> {
     const chain = chainFor(key)
     return readChainStatus(chain.id, getPublicClient(evmConfig, { chainId: chain.id as typeof baseSepolia.id }))
+}
+
+/** The one send path for EVM writes (lib/chain/evm/send.ts), on Memba's wallet config. */
+export function sendEvmWrite(write: EvmWrite, opts?: { receiptTimeoutMs?: number }): Promise<TxResult> {
+    const here = storedEvmNetworkKey()
+    return sendEvmWriteWith(evmConfig, here ? EVM_NETWORKS[here].chainId : null, write, opts)
 }

@@ -11,6 +11,7 @@ import { SESSION_ACCOUNT_LOGIN_MSG } from "../../lib/loginErrors"
 import { assertLiveWalletNetwork } from "../../lib/walletNetworkGuard"
 import { ADENA_CLOSED_MESSAGE, ADENA_NO_ANSWER_MESSAGE, type PromptWatch } from "../../lib/adenaCall"
 import { startWalletFlow } from "../../lib/walletTiming"
+import { chainPublicKey } from "../../lib/account"
 
 export interface LoginWallet {
     connected: boolean
@@ -60,7 +61,10 @@ const REFUSALS: Record<Exclude<LoginRefusal, "no-key">, string> = {
  * that network can't sign (it never sent a transaction there): it asks by
  * address instead, and where signed
  * login is enforced the server answers AUTH-ACTIVATE-01, which the caller
- * turns into the activation step. No other refusal sends an unsigned request.
+ * turns into the activation step. When the wallet reported no key and the
+ * chain confirms it has none, Adena is not asked at all: its window could
+ * only fail with "Public key not found". No other refusal sends an unsigned
+ * request.
  */
 export async function signInWithWallet(wallet: LoginWallet, auth: LoginAuth, chainId: string, opts: { watch?: PromptWatch } = {}): Promise<Token> {
     if (!wallet.connected || !wallet.address) throw new Error("Connect your wallet first.")
@@ -71,6 +75,8 @@ export async function signInWithWallet(wallet: LoginWallet, auth: LoginAuth, cha
         // while the wallet is checked: a refused check drops the nonce unused (it expires).
         const challengeAsked = auth.getChallenge(wallet.pubkeyJSON || undefined, chainId)
         challengeAsked.catch(() => { /* read below, unless the check refuses first */ })
+        // Read while the wallet is checked. A failed read asks Adena, as for a key.
+        const keyless = wallet.pubkeyJSON ? Promise.resolve(false) : chainPublicKey(wallet.address, chainId).then((key) => !key, () => false)
         await assertLiveWalletNetwork(chainId, { address: wallet.address })
         flow.step("guard")
         const challenge = await challengeAsked
@@ -79,7 +85,7 @@ export async function signInWithWallet(wallet: LoginWallet, auth: LoginAuth, cha
 
         const nonceB64 = bytesToBase64(challenge.nonce)
         const watch = opts.watch
-        const signed = await wallet.signLoginChallenge(chainId, nonceB64, {
+        const signed = (await keyless) ? "no-key" as const : await wallet.signLoginChallenge(chainId, nonceB64, {
             ...watch,
             onSent: () => { flow.step("sign-sent"); watch?.onSent?.() },
             onPopupFocus: () => { flow.step("popup-focus"); watch?.onPopupFocus?.() },

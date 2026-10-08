@@ -21,12 +21,13 @@ import type { LayoutContext } from "../../types/layout"
 import { signInWithWallet } from "./walletLogin"
 import { accountMark, accountMarkAfterBlocks } from "../sign/accountMark"
 import { executeSignature } from "../sign/signer"
-import { ACTIVATION_SEND_UGNOT, activationCosts } from "../../lib/activation"
+import { ACTIVATION_NOT_SEEN, ACTIVATION_SEND_UGNOT, activationCosts, activationOnChain } from "../../lib/activation"
+import { chainPublicKey } from "../../lib/account"
 import { activationRequest } from "./activation"
 import type { EvmConnect } from "../evm/useEvmSession"
 import { ADENA_CLOSED_MESSAGE, ADENA_NO_ANSWER_MESSAGE, type PromptWatch } from "../../lib/adenaCall"
 
-export type ConnectStage = "pick" | "missing" | "waking" | "approve" | "login" | "loginwait" | "activate" | "activatewait"
+export type ConnectStage = "pick" | "missing" | "waking" | "approve" | "login" | "loginwait" | "activate" | "activatewait" | "activatesent"
 
 /** Why the last connect or sign-in failed, when the modal has more to offer than the message (a reload). */
 export type ConnectErrorKind = "no-answer" | "closed"
@@ -77,8 +78,10 @@ export function useOsSession(opts: { onSignedIn?: (address: string) => void } = 
     const member = adena.connected && auth.isAuthenticated && !!adena.address && auth.address === adena.address
     const resuming = adena.reconnecting && !resumeTimedOut
     const status: SessionStatus = member ? "member" : resuming ? "resuming" : "guest"
+    // Activated in this page: the chain shows its key, while the wallet's copy, read at connect, has none.
+    const [activatedAddress, setActivatedAddress] = useState("")
     // Untransacted wallet in an address-only session: activation isn't optional (same rule as Layout).
-    const activationForced = member && !adena.pubkeyJSON
+    const activationForced = member && !adena.pubkeyJSON && activatedAddress !== adena.address
     const { rawUgnot, loading: balanceLoading, balance, error: balanceError, refetch: refreshBalance } = useBalance(adena.connected ? adena.address : null)
     const balanceKnown = !balanceLoading && rawUgnot !== undefined
     const spendableUgnot = balanceLoading ? undefined : rawUgnot
@@ -237,27 +240,48 @@ export function useOsSession(opts: { onSignedIn?: (address: string) => void } = 
         watch.current = stop
         // Leaves the activate step at once: a second click can't send a second transaction.
         go("activatewait")
-        // 1 ugnot to the address itself: any first transaction registers the key. Signed through the OS
-        // path, so no classic confirmation opens: the step the person just read is the review.
-        const req = activationRequest(adena.address, activationPrice)
         const address = adena.address
-        const res = await executeSignature(req, undefined, req.prepare(undefined).msgs, () => {}, () => epoch.current === my, {
-            // A "rejected" reply is confirmed against the account, so a plain cancel reads as one.
-            before: () => accountMark(address),
-            after: () => accountMarkAfterBlocks(address),
-            stop: stop.signal,
-        })
+        // An address the chain already shows a key for is active, so nothing is sent: a node that lagged at
+        // sign-in, or an activation that landed after Memba stopped waiting. A failed read sends, as before.
+        const active = await chainPublicKey(address).then(Boolean, () => false)
         if (epoch.current !== my) return
-        if (res.outcome !== "sent") {
-            // The price is read again for the next attempt: it may be what refused this one.
-            setActivationPrice(null)
-            go("activate", res.error)
+        if (!active) {
+            // 1 ugnot to the address itself: any first transaction registers the key. Signed through the OS
+            // path, so no classic confirmation opens: the step the person just read is the review.
+            const req = activationRequest(address, activationPrice)
+            const res = await executeSignature(req, undefined, req.prepare(undefined).msgs, () => {}, () => epoch.current === my, {
+                // A "rejected" reply is confirmed against the account, so a plain cancel reads as one.
+                before: () => accountMark(address),
+                after: () => accountMarkAfterBlocks(address),
+                stop: stop.signal,
+            })
+            if (epoch.current !== my) return
+            if (res.outcome !== "sent") {
+                // The price is read again for the next attempt: it may be what refused this one.
+                setActivationPrice(null)
+                go("activate", res.error)
+                return
+            }
+            // Adena answered at broadcast: the login signature, and the session, need the key on chain first.
+            go("activatesent")
+            const visible = await activationOnChain(address, stop.signal)
+            if (epoch.current !== my) return
+            if (!visible) {
+                go(activationForced ? "activate" : "login", `${ACTIVATION_NOT_SEEN} ${activationForced
+                    ? "Select Activate in Adena again in a few seconds: Memba checks the network first, and sends nothing if it already shows your address as active."
+                    : "Wait a few seconds, then sign in."}`)
+                return
+            }
+        }
+        if (activationForced) {
+            setActivatedAddress(address)
+            go(null)
+            restoreConnectFocus()
             return
         }
-        if (activationForced) { window.location.reload(); return } // re-read the wallet with its key
         setNote("Your address is active. Sign the login message to finish.")
         go("login")
-    }, [adena.address, activationForced, activationPrice, go])
+    }, [adena.address, activationForced, activationPrice, go, restoreConnectFocus])
 
     const cancel = useCallback(() => {
         epoch.current++
@@ -304,7 +328,7 @@ export function useOsSession(opts: { onSignedIn?: (address: string) => void } = 
         network,
         balanceError,
         refreshBalance,
-        stage: activationForced && stage !== "activatewait" ? ("activate" as const) : stage,
+        stage: activationForced && stage !== "activatewait" && stage !== "activatesent" ? ("activate" as const) : stage,
         activationForced,
         /** What activation costs at the network's price, once read. */
         activationCost,

@@ -20,6 +20,8 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### One Adena connection per page (2026-10-08)
+- Wallet: Memba keeps one Adena connection per page instead of one per window, so opening apps no longer queues extra Adena reads, and a network switch shows the new network at once instead of waiting for Adena's event (or looking stuck).
 ### The Memba logo in Memba OS (2026-10-08)
 - Memba OS: the menu button and lock screen show the Memba folded-M logo, in the brand colour of each theme.
 ### Wallet errors say what failed (2026-10-08)

@@ -47,7 +47,7 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
     const advanced = <>
         <button type="button" ref={toggle} className="os-btn os-quiet c4-qp-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Advanced</button>
         {open && <div className="c4-qp-panel" id={panelId}>
-            <label className="os-row"><input type="checkbox" checked={signEach} onChange={(e) => onSignEach(e.target.checked)} /> Sign every transaction in my wallet (no Quick play session)</label>
+            <label className="c4-qp-check"><input type="checkbox" checked={signEach} onChange={(e) => onSignEach(e.target.checked)} /> Sign every transaction in my wallet (no Quick play session)</label>
             {!signEach && <>
                 <div className="c4-quick" role="group" aria-label="Quick play duration">
                     {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => { setDuration(d); setQuickPlayDuration(d) }}>{LABEL[d]}</button>)}

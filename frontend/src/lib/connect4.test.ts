@@ -111,9 +111,9 @@ describe("writes", () => {
     it("sends Offer and Accept through withQuickPlay with their stake", async () => {
         const mine = vi.fn(async () => ({ hash: "h" }))
         await accept("g1me", sample, mine)
-        expect(qp.withQuickPlay).toHaveBeenCalledWith("g1me", 2_000_000, mine)
-        await offer("g1me", { stakeUgnot: 3_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 }, mine)
-        expect(qp.withQuickPlay).toHaveBeenLastCalledWith("g1me", 3_000_000, mine)
+        expect(qp.withQuickPlay).toHaveBeenCalledWith("g1me", 2_000_000, mine, true)
+        await offer("g1me", { stakeUgnot: 3_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 }, mine, false)
+        expect(qp.withQuickPlay).toHaveBeenLastCalledWith("g1me", 3_000_000, mine, false)
         expect(mine).toHaveBeenCalledTimes(2)
     })
 

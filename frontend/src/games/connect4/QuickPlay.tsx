@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { QUICKPLAY_DURATIONS, endQuickPlay, forgetQuickPlay, quickPlayDuration, quickPlayStatus, setQuickPlayDuration, setSignEachMove, signEachMove, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
+import { QUICKPLAY_DURATIONS, QUICKPLAY_LABEL as LABEL, endQuickPlay, forgetQuickPlay, quickPlayDuration, quickPlayStatus, setQuickPlayDuration, setSignEachMove, signEachMove, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
 import { ACTIVE_NETWORK_KEY, connect4PathFor } from "../../lib/config"
 import { TxError } from "./TxError"
 import { useWalletBroadcast } from "./osWallet"
@@ -8,7 +8,6 @@ import { useWalletBroadcast } from "./osWallet"
 const MOVE_FEE_UGNOT = 30_000
 // Under ~10 moves of gas left: offer a fresh session (the chain can't top one up).
 const LOW_UGNOT = 10 * MOVE_FEE_UGNOT
-const LABEL: Record<QuickPlayDuration, string> = { 3600: "1h", 14400: "4h", 86400: "24h" }
 
 export function QuickPlay({ me, connected }: { me: string; connected: boolean }) {
     const client = useQueryClient()
@@ -47,13 +46,13 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
     const advanced = <>
         <button type="button" ref={toggle} className="os-btn os-quiet c4-qp-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Advanced</button>
         {open && <div className="c4-qp-panel" id={panelId}>
-            <label className="c4-qp-check"><input type="checkbox" checked={signEach} onChange={(e) => onSignEach(e.target.checked)} /> Sign every transaction in my wallet (no Quick play session)</label>
+            <label className="c4-qp-check"><input type="checkbox" checked={signEach} onChange={(e) => onSignEach(e.target.checked)} /> <span>Sign every transaction in my wallet<small className="os-sub">Pauses Quick play. A running session stays live until it ends — use End session to revoke it.</small></span></label>
             {/* Disabled, not removed, while signing each move: the popover keeps its size. */}
             <fieldset className="c4-qp-opts" disabled={signEach}>
                 <div className="c4-quick" role="group" aria-label="Quick play duration">
                     {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => { setDuration(d); setQuickPlayDuration(d) }}>{LABEL[d]}</button>)}
                 </div>
-                <p className="os-sub">Offer and Accept start it in the same approval. Moves then sign automatically; stakes still ask your wallet. Up to 5 GNOT/day of gas (your balance, if lower).</p>
+                <p className="os-sub">Offer and Accept start it in the same approval. Until it ends, its key signs moves in all your live games without a popup. Staking and resigning still ask your wallet. Up to 5 GNOT/day of gas, less if your balance after the stake is lower.</p>
             </fieldset>
         </div>}
     </>

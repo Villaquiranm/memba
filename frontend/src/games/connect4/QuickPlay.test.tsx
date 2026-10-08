@@ -40,6 +40,17 @@ describe("QuickPlay", () => {
         renderWithProviders(<QuickPlay me="g1me" connected />)
         expect(await screen.findByRole("button", { name: /Start Quick play/ })).toBeDisabled()
     })
+    it("ticking Sign every transaction during a live session keeps the pill, End and Forget", async () => {
+        qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3600, spendUsedUgnot: 0, spendLimitUgnot: 5_000_000 })
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        const pill = await screen.findByText(/GNOT budget/)
+        fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
+        fireEvent.click(screen.getByRole("checkbox", { name: /Sign every transaction/ }))
+        expect(pill).toHaveAttribute("data-tone", "paused")
+        expect(screen.getByRole("button", { name: "End session" })).toBeEnabled()
+        expect(screen.getByRole("button", { name: "Forget on this device" })).toBeEnabled()
+        expect(qp.endQuickPlay).not.toHaveBeenCalled()
+    })
     it("keeps the session controls but pauses the pill and hides Renew while signing every move", async () => {
         localStorage.setItem("memba.quickplay.signEach", "1")
         qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3600, spendUsedUgnot: 4_800_000, spendLimitUgnot: 5_000_000 })

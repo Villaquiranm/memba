@@ -13,6 +13,7 @@ import { ugnotInCoinsJson } from "./bankBalance"
 
 export const QUICKPLAY_DURATIONS = [3600, 14400, 86400] as const
 export type QuickPlayDuration = (typeof QUICKPLAY_DURATIONS)[number]
+export const QUICKPLAY_LABEL: Record<QuickPlayDuration, string> = { 3600: "1h", 14400: "4h", 86400: "24h" }
 const SPEND_LIMIT_UGNOT = 5_000_000
 const SPEND_PERIOD = 86_400
 const GAS_WANTED = 20_000_000
@@ -108,14 +109,19 @@ async function chainSession(master: string, sessionAddr: string): Promise<ChainS
     }
 }
 
-/** The daily budget: 5 GNOT, or the whole balance when it's lower. A failed read keeps 5 GNOT (it's only a cap). */
-async function spendLimit(master: string): Promise<number> {
+/** The daily budget: 5 GNOT, or what the balance holds after the stake when that's lower. */
+export function quickPlayBudget(balanceUgnot: bigint, stakeUgnot = 0): number {
+    const left = balanceUgnot - BigInt(stakeUgnot)
+    return Number(left <= 0n ? 0n : left < BigInt(SPEND_LIMIT_UGNOT) ? left : BigInt(SPEND_LIMIT_UGNOT))
+}
+/** A failed balance read keeps 5 GNOT, stake not taken off: it's only a cap. */
+async function spendLimit(master: string, stakeUgnot: number): Promise<number> {
     let balance: bigint
     try {
         const coins = await abciData(`bank/balances/${master}`)
         balance = ugnotInCoinsJson(JSON.stringify(coins))
     } catch { return SPEND_LIMIT_UGNOT }
-    return Number(balance < BigInt(SPEND_LIMIT_UGNOT) ? balance : BigInt(SPEND_LIMIT_UGNOT))
+    return quickPlayBudget(balance, stakeUgnot)
 }
 
 const sessionKeyAny = (pub33b64: string) => ({ type_url: "/tm.PubKeySecp256k1", value: b64(Uint8Array.from([0x0a, 0x21, ...Uint8Array.from(atob(pub33b64), (c) => c.charCodeAt(0))])) })
@@ -152,10 +158,11 @@ async function sendSession(master: string, duration: QuickPlayDuration, broadcas
     if (!QUICKPLAY_DURATIONS.includes(duration)) throw new SessionPrepError("Unsupported Quick play duration")
     const path = allowPath()
     if (!path) throw new SessionPrepError("Connect 4 is not available on this network.")
-    // A bundled stake leaves the session less to spend.
-    const limit = (await spendLimit(master)) - (bundle?.sendUgnot ?? 0)
+    const limit = await spendLimit(master, bundle?.sendUgnot ?? 0)
     if (limit < feeForGasWanted(GAS_WANTED, await networkGasPrice())) throw new SessionPrepError("Not enough GNOT to pay for Quick play moves, so nothing was sent.")
     const slots = await sessionSlots(master, path)
+    // Unknown count: a bundle hitting the 16-session cap would sink the stake with it.
+    if (!slots && bundle) throw new SessionPrepError("Couldn't count this account's sessions.")
     if (slots && slots.total - slots.stale.length >= MAX_SESSIONS) throw new SessionPrepError("This account already has 16 sessions. Revoke some in your wallet, then try again.")
     const key = newSessionKey()
     const expiresAt = Math.floor(Date.now() / 1000) + duration
@@ -178,7 +185,7 @@ async function sendSession(master: string, duration: QuickPlayDuration, broadcas
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
             expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${limit}ugnot`, spend_period: String(SPEND_PERIOD),
-        } }, ...(bundle?.msgs ?? [])], bundle?.memo ?? "Start Quick play", { ...bundle?.opts, beforeSign: async () => {
+        } }, ...(bundle?.msgs ?? [])], bundle?.memo ?? (old ? "Renew Quick play" : "Start Quick play"), { ...bundle?.opts, beforeSign: async () => {
             const gate = await callerBeforeSign?.()
             before = await Promise.race([accountMark(master).catch(() => null), sleep(MARK_READ_MS).then(() => null)])
             return () => { if (typeof gate === "function" && !gate()) return false; sent = true; return true }
@@ -215,12 +222,12 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
 
 /**
  * Wraps a broadcast so a staking call (Offer/Accept) also starts a Quick play session in the
- * same approval — unless the player signs every move, a session is already here, or one can't be
- * set up (then the call goes out alone).
+ * same approval when `enabled` (the player's consent at the stake) — unless the player signs every
+ * move, a session is already here, or one can't be set up (then the call goes out alone).
  */
-export function withQuickPlay(master: string, sendUgnot: number, broadcast: typeof doContractBroadcast = doContractBroadcast): typeof doContractBroadcast {
+export function withQuickPlay(master: string, sendUgnot: number, broadcast: typeof doContractBroadcast = doContractBroadcast, enabled = true): typeof doContractBroadcast {
     return async (msgs, memo, opts) => {
-        if (signEachMove() || hasLocalSession(master) || starting.has(master)) return broadcast(msgs, memo, opts)
+        if (!enabled || signEachMove() || hasLocalSession(master) || starting.has(master)) return broadcast(msgs, memo, opts)
         try { return (await sendSession(master, quickPlayDuration(), broadcast, false, { msgs, memo, opts, sendUgnot })).res }
         catch (e) { if (e instanceof SessionPrepError) return broadcast(msgs, memo, opts); throw e }
     }
@@ -242,6 +249,8 @@ export async function quickPlayCall(master: string, func: "Reveal" | "RevealSeed
     if (!FUNCS.has(func)) throw new Error(`Quick play can't sign ${func}`)
     // Signed without the wallet, so the OS session that started the move is checked here instead.
     const stillAllowed = walletActionTicket()
+    // Backstop for move(): the player chose to sign every move in the wallet.
+    if (signEachMove()) throw new QuickPlayUnavailable("rejected", "Quick play is paused — confirm in your wallet.")
     const mine = local(master)
     if (!mine) throw new QuickPlayUnavailable("ended", "Quick play isn't on for this account.")
     const fee = feeForGasWanted(GAS_WANTED, await networkGasPrice())

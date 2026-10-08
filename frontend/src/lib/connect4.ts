@@ -206,18 +206,19 @@ async function newSecret(caller: string): Promise<{ secret: string; commitment: 
 }
 
 /** Posts an offer and returns its commitment. `maxFeeUgnot` is the fee the creator was shown: the realm refuses the offer if the fee is now higher. */
-export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string; maxFeeUgnot: number }, broadcast?: Broadcast): Promise<string> {
+/** `quickPlay`: the player's consent, shown at the stake, to start Quick play in the same approval. */
+export async function offer(caller: string, o: { stakeUgnot: number; validFor: number; opponent: string; maxFeeUgnot: number }, broadcast?: Broadcast, quickPlay = true): Promise<string> {
     if (!isIndex(o.maxFeeUgnot)) throw new Error("The house fee isn't known yet, so nothing was sent.")
     const { commitment } = await newSecret(caller)
     // The same approval starts Quick play unless the player signs every move (see withQuickPlay).
-    await submit("Offer", [o.opponent, String(o.validFor), commitment, String(o.maxFeeUgnot)], caller, o.stakeUgnot, withQuickPlay(caller, o.stakeUgnot, broadcast))
+    await submit("Offer", [o.opponent, String(o.validFor), commitment, String(o.maxFeeUgnot)], caller, o.stakeUgnot, withQuickPlay(caller, o.stakeUgnot, broadcast, quickPlay))
     return commitment
 }
 
 /** Accepts with the commitment of a fresh seed, revealed after the creator's passphrase (revealSeed). */
-export async function accept(caller: string, g: Game, broadcast?: Broadcast) {
+export async function accept(caller: string, g: Game, broadcast?: Broadcast, quickPlay = true) {
     const { commitment } = await newSecret(caller)
-    return submit("Accept", [String(g.id), commitment], caller, g.stake, withQuickPlay(caller, g.stake, broadcast))
+    return submit("Accept", [String(g.id), commitment], caller, g.stake, withQuickPlay(caller, g.stake, broadcast, quickPlay))
 }
 
 export async function reveal(caller: string, id: number, passphrase: string, opts?: MoveOptions) {

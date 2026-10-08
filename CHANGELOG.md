@@ -21,7 +21,8 @@ Full changelogs are split by version range for easier navigation:
 ## [Unreleased]
 
 ### Connect 4 Quick play by default (2026-10-08)
-- Connect 4: the banner proposes Quick play straight away ("Start Quick play · 1 approval"). A closed Advanced popover holds the session length and "Sign every transaction in my wallet", which switches sessions off and is remembered on this device.
+- Connect 4: Offer and Accept start Quick play in the same wallet approval as the stake, so no separate step is needed. The banner still offers "Start Quick play" for players who haven't staked yet.
+- A closed Advanced popover holds the session length and "Sign every transaction in my wallet", which switches sessions off. Both choices are remembered on this device.
 - Quick play budget: 5 GNOT a day of gas and storage, or the account's balance when it holds less.
 - When the budget runs low, Renew replaces the session with a fresh one (full budget) in one approval, since the chain can't top up an existing session.
 

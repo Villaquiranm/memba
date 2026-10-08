@@ -10,7 +10,7 @@ const lib = vi.hoisted(() => ({
 }))
 vi.mock("../../lib/connect4", async (orig) => ({ ...(await orig<typeof import("../../lib/connect4")>()), ...lib }))
 
-const qp = vi.hoisted(() => ({ quickPlayOn: vi.fn(() => true), signEachMove: () => false }))
+const qp = vi.hoisted(() => ({ quickPlayOn: vi.fn(() => true), signEachMove: () => false, quickPlayDuration: () => 14400, setQuickPlayDuration: () => {} }))
 vi.mock("../../lib/quickPlay", () => qp)
 
 import { GameView } from "./GameView"

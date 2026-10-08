@@ -4,7 +4,7 @@ const qeval = vi.hoisted(() => vi.fn())
 const broadcast = vi.hoisted(() => vi.fn(async () => ({ hash: "h" })))
 vi.mock("./dao/shared", async (orig) => ({ ...(await orig<typeof import("./dao/shared")>()), queryEval: qeval }))
 vi.mock("./grc20", () => ({ doContractBroadcast: broadcast }))
-const qp = vi.hoisted(() => ({ quickPlayOn: vi.fn(), quickPlayCall: vi.fn() }))
+const qp = vi.hoisted(() => ({ quickPlayOn: vi.fn(), quickPlayCall: vi.fn(), withQuickPlay: vi.fn((_m: string, _s: number, b?: unknown) => b) }))
 vi.mock("./quickPlay", async (orig) => ({ ...(await orig<typeof import("./quickPlay")>()), ...qp }))
 vi.mock("./config", async (orig) => ({
     ...(await orig<typeof import("./config")>()),
@@ -106,6 +106,15 @@ describe("writes", () => {
         await play("g1me", 3, 4, 0)
         expect(broadcast.mock.calls[1][0][0].value).toMatchObject({ func: "Play", args: ["3", "4", "0"], send: "" })
         expect(broadcast.mock.calls[1][2]).toEqual({ gasWanted: 20_000_000 })
+    })
+
+    it("sends Offer and Accept through withQuickPlay with their stake", async () => {
+        const mine = vi.fn(async () => ({ hash: "h" }))
+        await accept("g1me", sample, mine)
+        expect(qp.withQuickPlay).toHaveBeenCalledWith("g1me", 2_000_000, mine)
+        await offer("g1me", { stakeUgnot: 3_000_000, validFor: 10, opponent: "", maxFeeUgnot: 100_000 }, mine)
+        expect(qp.withQuickPlay).toHaveBeenLastCalledWith("g1me", 3_000_000, mine)
+        expect(mine).toHaveBeenCalledTimes(2)
     })
 
     it("rejects out-of-range columns before signing", async () => {

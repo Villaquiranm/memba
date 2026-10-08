@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { QUICKPLAY_DURATIONS, endQuickPlay, forgetQuickPlay, quickPlayStatus, setSignEachMove, signEachMove, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
+import { QUICKPLAY_DURATIONS, endQuickPlay, forgetQuickPlay, quickPlayDuration, quickPlayStatus, setQuickPlayDuration, setSignEachMove, signEachMove, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
 import { ACTIVE_NETWORK_KEY, connect4PathFor } from "../../lib/config"
 import { TxError } from "./TxError"
 import { useWalletBroadcast } from "./osWallet"
@@ -20,7 +20,7 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
     const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
     useEffect(() => { const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000); return () => clearInterval(t) }, [])
     const [open, setOpen] = useState(false)
-    const [duration, setDuration] = useState<QuickPlayDuration>(14400)
+    const [duration, setDuration] = useState<QuickPlayDuration>(quickPlayDuration)
     const [signEach, setSignEach] = useState(signEachMove)
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -50,9 +50,9 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
             <label className="os-row"><input type="checkbox" checked={signEach} onChange={(e) => onSignEach(e.target.checked)} /> Sign every transaction in my wallet (no Quick play session)</label>
             {!signEach && <>
                 <div className="c4-quick" role="group" aria-label="Quick play duration">
-                    {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => setDuration(d)}>{LABEL[d]}</button>)}
+                    {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => { setDuration(d); setQuickPlayDuration(d) }}>{LABEL[d]}</button>)}
                 </div>
-                <p className="os-sub">Moves sign automatically. Stakes still ask your wallet. Up to 5 GNOT/day of gas (your balance, if lower).</p>
+                <p className="os-sub">Offer and Accept start it in the same approval. Moves then sign automatically; stakes still ask your wallet. Up to 5 GNOT/day of gas (your balance, if lower).</p>
             </>}
         </div>}
     </>

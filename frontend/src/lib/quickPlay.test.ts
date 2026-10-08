@@ -13,7 +13,7 @@ vi.mock("./signedTxBroadcast", async (orig) => ({ ...(await orig<typeof import("
 vi.mock("./config", async (orig) => ({ ...(await orig<typeof import("./config")>()), ACTIVE_NETWORK_KEY: "onyx", GNO_CHAIN_ID: "onyx-1", GNO_RPC_URL: "https://rpc.test", connect4PathFor: () => "gno.land/r/test/c4" }))
 
 import { CheckTxError, OutcomeUnknownError, RealmError } from "./signedTxBroadcast"
-import { endQuickPlay, forgetQuickPlay, hasLocalSession, quickPlayCall, quickPlayOn, QuickPlayUnavailable, quickPlayStatus, setSignEachMove, startQuickPlay } from "./quickPlay"
+import { endQuickPlay, forgetQuickPlay, hasLocalSession, quickPlayCall, quickPlayOn, QuickPlayUnavailable, quickPlayStatus, setQuickPlayDuration, setSignEachMove, startQuickPlay, withQuickPlay } from "./quickPlay"
 
 const M = "g1cvr48r7l7lkmvp77cr6zg2zhu26jgfwr0y8pew"
 const now = () => Math.floor(Date.now() / 1000)
@@ -363,5 +363,57 @@ describe("budget and renew", () => {
         expect(hasLocalSession(M)).toBe(true)
         setSignEachMove(false)
         expect(quickPlayOn(M)).toBe(true)
+    })
+})
+
+describe("withQuickPlay (Offer/Accept bundle)", () => {
+    const bank = (coins: string) => vi.fn(async (url: string) => (url.includes("bank/balances") ? query(coins) : url.includes("/sessions") ? query([]) : query(sessionJSON())))
+    const call = { type: "/vm.m_call", value: { func: "Accept", send: "2000000ugnot" } }
+    const send = (b = grc.doContractBroadcast) => withQuickPlay(M, 2_000_000, b)([call], "Connect 4: Accept", { gasWanted: 20_000_000 })
+    it("creates the session and sends the call in one approval, budget net of the stake", async () => {
+        grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
+        vi.stubGlobal("fetch", bank("4000000ugnot"))
+        setQuickPlayDuration(3600)
+        await expect(send()).resolves.toEqual({ hash: "h" })
+        const [msgs, memo, opts] = grc.doContractBroadcast.mock.calls[0]
+        expect(msgs.map((m: { type: string }) => m.type)).toEqual(["/auth.m_create_session", "/vm.m_call"])
+        expect(msgs[0].value.spend_limit).toBe("2000000ugnot")
+        expect(Number(msgs[0].value.expires_at) - now()).toBeLessThanOrEqual(3600)
+        expect(memo).toBe("Connect 4: Accept")
+        expect(opts.gasWanted).toBe(20_000_000)
+        expect(hasLocalSession(M)).toBe(true)
+    })
+    it("sends the call alone when the player signs every move", async () => {
+        grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
+        setSignEachMove(true)
+        await send()
+        expect(grc.doContractBroadcast.mock.calls[0][0]).toEqual([call])
+        expect(hasLocalSession(M)).toBe(false)
+    })
+    it("sends the call alone when a session is already here", async () => {
+        grc.doContractBroadcast.mockResolvedValue({ hash: "h" })
+        vi.stubGlobal("fetch", bank("90000000ugnot"))
+        await startQuickPlay(M, 3600)
+        await send()
+        expect(grc.doContractBroadcast.mock.calls[1][0]).toEqual([call])
+    })
+    it("sends the call alone when the session can't be set up (balance left after the stake too low)", async () => {
+        grc.doContractBroadcast.mockResolvedValueOnce({ hash: "h" })
+        vi.stubGlobal("fetch", bank("2010000ugnot"))
+        await send()
+        expect(grc.doContractBroadcast.mock.calls[0][0]).toEqual([call])
+        expect(hasLocalSession(M)).toBe(false)
+    })
+    it("drops the key when the wallet refuses, passing the error through", async () => {
+        grc.doContractBroadcast.mockRejectedValueOnce(new Error("rejected"))
+        vi.stubGlobal("fetch", bank("90000000ugnot"))
+        await expect(send()).rejects.toThrow("rejected")
+        expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).toBeNull()
+    })
+    it("keeps the key as pending and passes the call's own error on an unknown outcome", async () => {
+        grc.doContractBroadcast.mockImplementationOnce(async (_m: unknown, _memo: string, o: { beforeSign: () => Promise<() => boolean> }) => { (await o.beforeSign())(); throw new Error("indeterminate") })
+        vi.stubGlobal("fetch", bank("90000000ugnot"))
+        await expect(send()).rejects.toThrow("indeterminate")
+        expect(localStorage.getItem(`memba.quickplay.onyx.${M}`)).not.toBeNull()
     })
 })

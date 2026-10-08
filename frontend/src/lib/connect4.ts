@@ -9,7 +9,7 @@
 import { queryEval, parseQevalJSON } from "./dao/shared"
 import { ACTIVE_NETWORK_KEY, GNO_RPC_URL, connect4PathFor } from "./config"
 import { doContractBroadcast, type AminoMsg } from "./grc20"
-import { hasLocalSession, quickPlayCall, QuickPlayUnavailable } from "./quickPlay"
+import { quickPlayCall, quickPlayOn, QuickPlayUnavailable } from "./quickPlay"
 
 export type Status = "open" | "playing" | "won" | "draw" | "void" | "cancelled"
 
@@ -144,7 +144,7 @@ export interface MoveOptions { viaWallet?: boolean; broadcast?: Broadcast; befor
 // Coin-free moves sign through the Quick play session when one is active; if the
 // session can't be used, the same call goes to Adena at once.
 async function move(func: MoveFunc, args: string[], caller: string, opts?: MoveOptions) {
-    if (!opts?.viaWallet && hasLocalSession(caller)) {
+    if (!opts?.viaWallet && quickPlayOn(caller)) {
         try { return await quickPlayCall(caller, func, args) }
         catch (e) {
             if (!(e instanceof QuickPlayUnavailable)) throw e

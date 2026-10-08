@@ -4,7 +4,7 @@ const qeval = vi.hoisted(() => vi.fn())
 const broadcast = vi.hoisted(() => vi.fn(async () => ({ hash: "h" })))
 vi.mock("./dao/shared", async (orig) => ({ ...(await orig<typeof import("./dao/shared")>()), queryEval: qeval }))
 vi.mock("./grc20", () => ({ doContractBroadcast: broadcast }))
-const qp = vi.hoisted(() => ({ hasLocalSession: vi.fn(), quickPlayCall: vi.fn() }))
+const qp = vi.hoisted(() => ({ quickPlayOn: vi.fn(), quickPlayCall: vi.fn() }))
 vi.mock("./quickPlay", async (orig) => ({ ...(await orig<typeof import("./quickPlay")>()), ...qp }))
 vi.mock("./config", async (orig) => ({
     ...(await orig<typeof import("./config")>()),
@@ -22,7 +22,7 @@ export const sample: Game = {
 }
 const wrap = (v: unknown) => `(${JSON.stringify(JSON.stringify(v))} string)`
 
-beforeEach(() => { qeval.mockReset(); broadcast.mockClear(); qp.hasLocalSession.mockReset(); qp.quickPlayCall.mockReset() })
+beforeEach(() => { qeval.mockReset(); broadcast.mockClear(); qp.quickPlayOn.mockReset(); qp.quickPlayCall.mockReset() })
 
 describe("isGame", () => {
     it("accepts a valid game", () => expect(isGame(sample)).toBe(true))
@@ -170,30 +170,30 @@ describe("acceptor seed", () => {
 
 describe("Quick play routing", () => {
     it("sends coin-free moves through Quick play when active, Adena otherwise", async () => {
-        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayOn.mockReturnValue(true)
         qp.quickPlayCall.mockResolvedValue({ hash: "H" })
         await play("g1me", 3, 4, 0)
         expect(qp.quickPlayCall).toHaveBeenCalledWith("g1me", "Play", ["3", "4", "0"])
         expect(broadcast).not.toHaveBeenCalled()
-        qp.hasLocalSession.mockReturnValue(false)
+        qp.quickPlayOn.mockReturnValue(false)
         await play("g1me", 3, 5, 0)
         expect(broadcast).toHaveBeenCalledTimes(1)
     })
     it("sends RevealSeed through Quick play like the other moves", async () => {
-        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayOn.mockReturnValue(true)
         qp.quickPlayCall.mockResolvedValue({ hash: "H" })
         await revealSeed("g1me", 3, "s")
         expect(qp.quickPlayCall).toHaveBeenCalledWith("g1me", "RevealSeed", ["3", "s"])
     })
     it("never routes stakes, Cancel or Resign through Quick play", async () => {
-        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayOn.mockReturnValue(true)
         await accept("g1me", sample)
         await cancel("g1me", 3)
         await resign("g1me", 3)
         expect(qp.quickPlayCall).not.toHaveBeenCalled()
     })
     it("falls back to Adena at once when the session is unavailable", async () => {
-        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayOn.mockReturnValue(true)
         qp.quickPlayCall.mockRejectedValue(new QuickPlayUnavailable("ended", "x"))
         const seen: string[] = []
         const on = (e: Event) => seen.push((e as CustomEvent<string>).detail)
@@ -204,13 +204,13 @@ describe("Quick play routing", () => {
         expect(seen).toEqual(["x"])
     })
     it("propagates other errors", async () => {
-        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayOn.mockReturnValue(true)
         qp.quickPlayCall.mockRejectedValue(new Error("not your turn"))
         await expect(play("g1me", 3, 4, 0)).rejects.toThrow("not your turn")
         expect(broadcast).not.toHaveBeenCalled()
     })
     it("viaWallet forces Adena", async () => {
-        qp.hasLocalSession.mockReturnValue(true)
+        qp.quickPlayOn.mockReturnValue(true)
         await play("g1me", 3, 4, 0, { viaWallet: true })
         expect(qp.quickPlayCall).not.toHaveBeenCalled()
         expect(broadcast).toHaveBeenCalledTimes(1)

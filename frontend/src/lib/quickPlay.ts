@@ -9,10 +9,11 @@ import { accountMark, accountMarkAfterBlocks } from "../os/sign/accountMark"
 import { ChainRejectedError, NothingSentError, WalletRefusedError, doContractBroadcast, feeForGasWanted, networkGasPrice, walletActionTicket } from "./grc20"
 import { keyFromPriv, newSessionKey, pubKeyAnyBytes, signSessionTx, type SessionKey } from "./sessionTx"
 import { broadcastSignedTx, CheckTxError, RealmError } from "./signedTxBroadcast"
+import { ugnotInCoinsJson } from "./bankBalance"
 
 export const QUICKPLAY_DURATIONS = [3600, 14400, 86400] as const
 export type QuickPlayDuration = (typeof QUICKPLAY_DURATIONS)[number]
-const SPEND_LIMIT_UGNOT = 1_000_000
+const SPEND_LIMIT_UGNOT = 5_000_000
 const SPEND_PERIOD = 86_400
 const GAS_WANTED = 20_000_000
 const MAX_DEPOSIT = "2000000ugnot"
@@ -60,6 +61,12 @@ const starting = new Set<string>()
 const local = (master: string) => (starting.has(master) ? null : read(master))
 
 export function hasLocalSession(master: string): boolean { return local(master) !== null }
+// "Sign every transaction" (Advanced): moves go through the wallet even with a session key here.
+const SIGN_EACH_KEY = "memba.quickplay.signEach"
+export function signEachMove(): boolean { try { return localStorage.getItem(SIGN_EACH_KEY) === "1" } catch { return false } }
+export function setSignEachMove(on: boolean): void { try { if (on) localStorage.setItem(SIGN_EACH_KEY, "1"); else localStorage.removeItem(SIGN_EACH_KEY) } catch { /* stays as it was */ } }
+/** Moves sign with the session key: one is here and the player hasn't asked to sign each one. */
+export function quickPlayOn(master: string): boolean { return !signEachMove() && hasLocalSession(master) }
 export function forgetQuickPlay(master: string): void { remove(master) }
 
 interface ChainSession { accountNumber: string; sequence: string; status: QuickPlayStatus; allowPaths: string[] }
@@ -95,6 +102,16 @@ async function chainSession(master: string, sessionAddr: string): Promise<ChainS
     }
 }
 
+/** The daily budget: 5 GNOT, or the whole balance when it's lower. A failed read keeps 5 GNOT (it's only a cap). */
+async function spendLimit(master: string): Promise<number> {
+    let balance: bigint
+    try {
+        const coins = await abciData(`bank/balances/${master}`)
+        balance = ugnotInCoinsJson(JSON.stringify(coins))
+    } catch { return SPEND_LIMIT_UGNOT }
+    return Number(balance < BigInt(SPEND_LIMIT_UGNOT) ? balance : BigInt(SPEND_LIMIT_UGNOT))
+}
+
 const sessionKeyAny = (pub33b64: string) => ({ type_url: "/tm.PubKeySecp256k1", value: b64(Uint8Array.from([0x0a, 0x21, ...Uint8Array.from(atob(pub33b64), (c) => c.charCodeAt(0))])) })
 /** Own-path sessions already expired (never pruned by the chain) + total count; null if the list can't be read. */
 async function sessionSlots(master: string, path: string): Promise<{ total: number; stale: string[] } | null> {
@@ -112,18 +129,27 @@ async function sessionSlots(master: string, path: string): Promise<{ total: numb
     } catch { return null }
 }
 
-/** `broadcast`: who asks the wallet (Memba OS passes its review sheet's). */
-export async function startQuickPlay(master: string, duration: QuickPlayDuration, broadcast: typeof doContractBroadcast = doContractBroadcast): Promise<QuickPlayStatus> {
+/**
+ * `broadcast`: who asks the wallet (Memba OS passes its review sheet's). `renew` replaces the
+ * session here with a fresh one (full budget) in the same approval: the chain can't top one up.
+ */
+export async function startQuickPlay(master: string, duration: QuickPlayDuration, broadcast: typeof doContractBroadcast = doContractBroadcast, renew = false): Promise<QuickPlayStatus> {
     checkMaster(master)
-    if (starting.has(master) || hasLocalSession(master)) throw new Error("Quick play is already on — end it first.")
+    const old = renew ? local(master) : null
+    if (starting.has(master) || (!renew && hasLocalSession(master))) throw new Error("Quick play is already on — end it first.")
+    if (renew && !old) throw new Error("There's no Quick play session to renew.")
     if (!QUICKPLAY_DURATIONS.includes(duration)) throw new Error("Unsupported Quick play duration")
     const path = allowPath()
     if (!path) throw new Error("Connect 4 is not available on this network.")
+    const limit = await spendLimit(master)
+    if (limit < feeForGasWanted(GAS_WANTED, await networkGasPrice())) throw new Error("Not enough GNOT to pay for Quick play moves, so nothing was sent.")
     const key = newSessionKey()
     const expiresAt = Math.floor(Date.now() / 1000) + duration
     const entry: Stored = { priv: toHex(key.priv), sessionAddr: key.address, allowPath: path, chainId: GNO_CHAIN_ID }
     try { localStorage.setItem(storageKey(master), JSON.stringify(entry)) } catch { throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.") }
-    if (!read(master)) throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.")
+    // A failed renew puts the old key back: its session is still live.
+    const drop = () => { if (old) markSent(master, old); else remove(master) }
+    if (!read(master)) { drop(); throw new Error("Couldn't store the Quick play key on this device, so nothing was sent.") }
     starting.add(master)
     // Set right before the wallet request: from then on a failure may still have landed.
     let sent = false
@@ -132,20 +158,21 @@ export async function startQuickPlay(master: string, duration: QuickPlayDuration
     try {
         const slots = await sessionSlots(master, path)
         if (slots && slots.total - slots.stale.length >= MAX_SESSIONS) throw new Error("This account already has 16 sessions. Revoke some in your wallet, then try again.")
-        const revokes = (slots?.stale ?? []).map((k) => ({ type: "/auth.m_revoke_session", value: { creator: master, session_key: sessionKeyAny(k) } }))
+        const oldKey = old ? [b64(old.key.pub)] : []
+        const revokes = [...oldKey, ...(slots?.stale ?? []).filter((k) => !oldKey.includes(k))].map((k) => ({ type: "/auth.m_revoke_session", value: { creator: master, session_key: sessionKeyAny(k) } }))
         await broadcast([...revokes, { type: "/auth.m_create_session", value: {
             creator: master,
             session_key: { type_url: "/tm.PubKeySecp256k1", value: b64(pubKeyAnyBytes(key.pub).slice(-35)) },
-            expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${SPEND_LIMIT_UGNOT}ugnot`, spend_period: String(SPEND_PERIOD),
+            expires_at: String(expiresAt), allow_paths: [path], spend_limit: `${limit}ugnot`, spend_period: String(SPEND_PERIOD),
         } }], "Start Quick play", { beforeSign: async () => {
             before = await Promise.race([accountMark(master).catch(() => null), sleep(MARK_READ_MS).then(() => null)])
             return () => { sent = true; return true }
         } })
         markSent(master, entry)
     } catch (e) {
-        if (!sent || e instanceof ChainRejectedError || e instanceof NothingSentError) { remove(master); throw e }
+        if (!sent || e instanceof ChainRejectedError || e instanceof NothingSentError) { drop(); throw e }
         // "Rejected" after the wallet opened counts only when the account is unchanged a few blocks later.
-        if (e instanceof WalletRefusedError && before !== null && await accountMarkAfterBlocks(master).catch(() => null) === before) { remove(master); throw e }
+        if (e instanceof WalletRefusedError && before !== null && await accountMarkAfterBlocks(master).catch(() => null) === before) { drop(); throw e }
         // The wallet may have sent it: keep the key as pending; the status read settles it by session address.
         markSent(master, entry)
         throw new Error("Your wallet didn't say whether Quick play started — Memba keeps checking for it.")

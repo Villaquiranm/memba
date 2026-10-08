@@ -8,22 +8,35 @@ const cfg = vi.hoisted(() => ({ path: "gno.land/r/x/connect4" as string | null }
 vi.mock("../../lib/config", async (orig) => ({ ...(await orig<typeof import("../../lib/config")>()), connect4PathFor: () => cfg.path }))
 import { QuickPlay } from "./QuickPlay"
 
-beforeEach(() => { cfg.path = "gno.land/r/x/connect4"; Object.values(qp).forEach((f) => f.mockReset()) })
+beforeEach(() => { localStorage.clear(); cfg.path = "gno.land/r/x/connect4"; Object.values(qp).forEach((f) => f.mockReset()) })
 
 describe("QuickPlay", () => {
     it("is hidden without a wallet", () => {
         const { container } = renderWithProviders(<QuickPlay me="" connected={false} />)
         expect(container).toBeEmptyDOMElement()
     })
-    it("starts a 4h session by default with one approval", async () => {
+    it("proposes a 4h session by default, with the options under a closed Advanced", async () => {
         qp.quickPlayStatus.mockResolvedValue(null)
-        qp.startQuickPlay.mockResolvedValue({ expiresAt: Date.now() / 1000 + 14400, spendUsedUgnot: 0, spendLimitUgnot: 1_000_000 })
+        qp.startQuickPlay.mockResolvedValue({ expiresAt: Date.now() / 1000 + 14400, spendUsedUgnot: 0, spendLimitUgnot: 5_000_000 })
         renderWithProviders(<QuickPlay me="g1me" connected />)
-        fireEvent.click(await screen.findByRole("button", { name: /Quick play/ }))
+        const start = await screen.findByRole("button", { name: /Start Quick play · 4h · 1 approval/ })
+        expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute("aria-expanded", "false")
+        fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
         expect(screen.getByRole("button", { name: "4h" })).toHaveAttribute("aria-pressed", "true")
-        expect(screen.getByText(/Stakes still ask your wallet/)).toBeInTheDocument()
-        fireEvent.click(screen.getByRole("button", { name: /Start · 1 wallet approval/ }))
+        expect(screen.getByText(/Up to 5 GNOT\/day/)).toBeInTheDocument()
+        fireEvent.click(start)
         await waitFor(() => expect(qp.startQuickPlay).toHaveBeenCalledWith("g1me", 14400, undefined))
+    })
+    it("lets the player sign every transaction instead, and remembers it", async () => {
+        qp.quickPlayStatus.mockResolvedValue(null)
+        const { unmount } = renderWithProviders(<QuickPlay me="g1me" connected />)
+        fireEvent.click(await screen.findByRole("button", { name: "Advanced" }))
+        fireEvent.click(screen.getByRole("checkbox", { name: /Sign every transaction/ }))
+        expect(screen.queryByRole("button", { name: /Start Quick play/ })).toBeNull()
+        expect(screen.getByText("Wallet signs every move")).toBeInTheDocument()
+        unmount()
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        expect(screen.getByText("Wallet signs every move")).toBeInTheDocument()
     })
     it("shows time left and budget when on, and ends or forgets", async () => {
         qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3 * 3600 + 12 * 60, spendUsedUgnot: 30_000, spendLimitUgnot: 1_000_000 })
@@ -50,7 +63,7 @@ describe("QuickPlay", () => {
         qp.quickPlayStatus.mockRejectedValue(new Error("network"))
         renderWithProviders(<QuickPlay me="g1me" connected />)
         expect(await screen.findByText("Couldn't read Quick play status")).toBeInTheDocument()
-        expect(screen.queryByRole("button", { name: /^⚡ Quick play/ })).toBeNull()
+        expect(screen.queryByRole("button", { name: /Start Quick play/ })).toBeNull()
         // The key can still be dropped with the RPC down.
         expect(screen.getByRole("button", { name: "End session" })).toBeInTheDocument()
         fireEvent.click(screen.getByRole("button", { name: "Forget on this device" }))
@@ -64,7 +77,7 @@ describe("QuickPlay", () => {
     it("closes the panel on Escape and on an outside click, refocusing the toggle", async () => {
         qp.quickPlayStatus.mockResolvedValue(null)
         renderWithProviders(<QuickPlay me="g1me" connected />)
-        const toggle = await screen.findByRole("button", { name: /Quick play/ })
+        const toggle = await screen.findByRole("button", { name: "Advanced" })
         fireEvent.click(toggle)
         expect(toggle).toHaveAttribute("aria-controls")
         fireEvent.keyDown(document, { key: "Escape" })
@@ -73,6 +86,19 @@ describe("QuickPlay", () => {
         fireEvent.click(toggle)
         fireEvent.pointerDown(document.body)
         expect(screen.queryByText(/Stakes still ask/)).toBeNull()
+    })
+    it("offers to renew once the budget runs low", async () => {
+        qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3600, spendUsedUgnot: 4_800_000, spendLimitUgnot: 5_000_000 })
+        qp.startQuickPlay.mockResolvedValue({ expiresAt: Date.now() / 1000 + 14400, spendUsedUgnot: 0, spendLimitUgnot: 5_000_000 })
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        fireEvent.click(await screen.findByRole("button", { name: "Renew · 1 approval" }))
+        await waitFor(() => expect(qp.startQuickPlay).toHaveBeenCalledWith("g1me", 14400, undefined, true))
+    })
+    it("doesn't offer renew with plenty of budget", async () => {
+        qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3600, spendUsedUgnot: 0, spendLimitUgnot: 5_000_000 })
+        renderWithProviders(<QuickPlay me="g1me" connected />)
+        await screen.findByText(/5\.00 GNOT budget/)
+        expect(screen.queryByRole("button", { name: /Renew/ })).toBeNull()
     })
     it("turns amber when the budget is used up", async () => {
         qp.quickPlayStatus.mockResolvedValue({ expiresAt: Date.now() / 1000 + 3600, spendUsedUgnot: 990_000, spendLimitUgnot: 1_000_000 })
@@ -88,9 +114,9 @@ describe("QuickPlay", () => {
             throw new Error("insufficient funds")
         })
         renderWithProviders(<QuickPlay me="g1me" connected />)
-        fireEvent.click(await screen.findByRole("button", { name: /Quick play/ }))
-        fireEvent.click(screen.getByRole("button", { name: /Start · 1 wallet approval/ }))
+        fireEvent.click(await screen.findByRole("button", { name: "Advanced" }))
+        fireEvent.click(screen.getByRole("button", { name: /Start Quick play/ }))
         expect(await screen.findByText("insufficient funds")).toBeInTheDocument()
-        expect(screen.queryByRole("button", { name: /Start · 1 wallet approval/ })).toBeNull()
+        expect(screen.queryByRole("button", { name: "4h" })).toBeNull()
     })
 })

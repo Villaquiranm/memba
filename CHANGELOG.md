@@ -20,6 +20,11 @@ Full changelogs are split by version range for easier navigation:
 
 ## [Unreleased]
 
+### Connect 4 Quick play by default (2026-10-08)
+- Connect 4: the banner proposes Quick play straight away ("Start Quick play · 1 approval"). A closed Advanced popover holds the session length and "Sign every transaction in my wallet", which switches sessions off and is remembered on this device.
+- Quick play budget: 5 GNOT a day of gas and storage, or the account's balance when it holds less.
+- When the budget runs low, Renew replaces the session with a fresh one (full budget) in one approval, since the chain can't top up an existing session.
+
 ### The Memba logo in Memba OS (2026-10-08)
 - Memba OS: the menu button and lock screen show the Memba folded-M logo, in the brand colour of each theme.
 

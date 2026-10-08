@@ -1,11 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { QUICKPLAY_DURATIONS, endQuickPlay, forgetQuickPlay, quickPlayStatus, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
+import { QUICKPLAY_DURATIONS, endQuickPlay, forgetQuickPlay, quickPlayStatus, setSignEachMove, signEachMove, startQuickPlay, type QuickPlayDuration } from "../../lib/quickPlay"
 import { ACTIVE_NETWORK_KEY, connect4PathFor } from "../../lib/config"
 import { TxError } from "./TxError"
 import { useWalletBroadcast } from "./osWallet"
 
 const MOVE_FEE_UGNOT = 30_000
+// Under ~10 moves of gas left: offer a fresh session (the chain can't top one up).
+const LOW_UGNOT = 10 * MOVE_FEE_UGNOT
 const LABEL: Record<QuickPlayDuration, string> = { 3600: "1h", 14400: "4h", 86400: "24h" }
 
 export function QuickPlay({ me, connected }: { me: string; connected: boolean }) {
@@ -19,6 +21,7 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
     useEffect(() => { const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000); return () => clearInterval(t) }, [])
     const [open, setOpen] = useState(false)
     const [duration, setDuration] = useState<QuickPlayDuration>(14400)
+    const [signEach, setSignEach] = useState(signEachMove)
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const root = useRef<HTMLDivElement>(null)
@@ -39,8 +42,28 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
         finally { setBusy(false); await client.invalidateQueries({ queryKey: ["quickplay", me] }) }
     }
 
+    const onSignEach = (on: boolean) => { setSignEachMove(on); setSignEach(on); void client.invalidateQueries({ queryKey: ["quickplay", me] }) }
+    // Closed by default: Quick play is the default, signing every transaction is the opt-out.
+    const advanced = <>
+        <button type="button" ref={toggle} className="os-btn os-quiet c4-qp-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Advanced</button>
+        {open && <div className="c4-qp-panel" id={panelId}>
+            <label className="os-row"><input type="checkbox" checked={signEach} onChange={(e) => onSignEach(e.target.checked)} /> Sign every transaction in my wallet (no Quick play session)</label>
+            {!signEach && <>
+                <div className="c4-quick" role="group" aria-label="Quick play duration">
+                    {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => setDuration(d)}>{LABEL[d]}</button>)}
+                </div>
+                <p className="os-sub">Moves sign automatically. Stakes still ask your wallet. Up to 5 GNOT/day of gas (your balance, if lower).</p>
+            </>}
+        </div>}
+    </>
+
     const readError = isError && <span className="os-note os-warn" role="status">Couldn't read Quick play status</span>
+    if (signEach) return <div className="c4-qp" ref={root}>
+        <span className="os-sub">Wallet signs every move</span>
+        {advanced}
+    </div>
     if (status || isError) {
+        let low = false
         const pill = status === "pending"
             ? <span className="c4-qp-pill" data-tone="pending">⚡ Quick play · confirming…</span>
             : status && (() => {
@@ -48,29 +71,27 @@ export function QuickPlay({ me, connected }: { me: string; connected: boolean })
             const raw = status.spendLimitUgnot - status.spendUsedUgnot
             const remaining = Number.isFinite(raw) ? Math.max(0, raw) : 0
             const spent = remaining < MOVE_FEE_UGNOT
+            low = remaining < LOW_UGNOT
             return <span className="c4-qp-pill" data-tone={spent ? "warn" : undefined}>{spent
                 ? "⚡ Quick play · budget used up for today"
                 : `⚡ Quick play · ${Math.floor(left / 3600)}h ${Math.floor((left % 3600) / 60)}m left · ${(remaining / 1_000_000).toFixed(2)} GNOT budget`}</span>
         })()
         // With the RPC down and no stale data the key can still be dropped here.
-        return <div className="c4-qp" data-on="true">
+        return <div className="c4-qp" data-on="true" ref={root}>
             {pill}
+            {low && <button type="button" className="os-btn" disabled={busy} title="Replaces this session with a new one and a full budget." onClick={() => act(() => startQuickPlay(me, duration, broadcast, true))}>Renew · 1 approval</button>}
             <button type="button" className="os-btn os-quiet" disabled={busy} onClick={() => act(() => endQuickPlay(me, broadcast))}>End session</button>
             <button type="button" className="os-btn os-quiet c4-qp-forget" title="Deletes the key here; doesn't revoke on chain — the session runs until it expires." disabled={busy} onClick={() => { forgetQuickPlay(me); void client.invalidateQueries({ queryKey: ["quickplay", me] }) }}>Forget on this device</button>
+            {advanced}
             {readError}
             <TxError message={error} onDismiss={() => setError(null)} />
         </div>
     }
 
     return <div className="c4-qp" ref={root}>
-        <button type="button" ref={toggle} className="os-btn c4-qp-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>⚡ Quick play</button>
-        {open && <div className="c4-qp-panel" id={panelId}>
-            <div className="c4-quick" role="group" aria-label="Quick play duration">
-                {QUICKPLAY_DURATIONS.map((d) => <button key={d} type="button" aria-pressed={d === duration} onClick={() => setDuration(d)}>{LABEL[d]}</button>)}
-            </div>
-            <p className="os-sub">Moves sign automatically. Stakes still ask your wallet. Up to 1 GNOT/day of gas.</p>
-            <button type="button" className="os-btn c4-cta" disabled={busy} onClick={() => act(() => startQuickPlay(me, duration, broadcast))}>Start · 1 wallet approval</button>
-        </div>}
+        <button type="button" className="os-btn c4-cta" disabled={busy} title="Moves sign automatically for the session; stakes still ask your wallet."
+            onClick={() => act(() => startQuickPlay(me, duration, broadcast))}>⚡ Start Quick play · {LABEL[duration]} · 1 approval</button>
+        {advanced}
         {/* Outside the panel: confirming in the wallet dialog closes it before Start settles. */}
         <TxError message={error} onDismiss={() => setError(null)} />
     </div>
